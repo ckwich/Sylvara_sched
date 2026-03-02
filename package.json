@@ -1,0 +1,21 @@
+{
+  "name": "sylvara-sched",
+  "private": true,
+  "packageManager": "pnpm@10.6.3",
+  "scripts": {
+    "dev": "corepack pnpm --filter @sylvara/web dev",
+    "dev:all": "turbo run dev --parallel",
+    "lint": "corepack pnpm -r lint",
+    "format": "prettier --write .",
+    "test:api:smoke": "corepack pnpm --filter @sylvara/api test:smoke",
+    "test:e2e:smoke": "corepack pnpm --filter @sylvara/e2e test:smoke",
+    "test:smoke": "corepack pnpm test:api:smoke && corepack pnpm test:e2e:smoke"
+  },
+  "devDependencies": {
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "turbo": "^2.4.4",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.1"
+  }
+}

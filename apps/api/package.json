@@ -1,0 +1,29 @@
+{
+  "name": "@sylvara/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:smoke": "vitest run tests/smoke"
+  },
+  "dependencies": {
+    "@sylvara/db": "workspace:*",
+    "@sylvara/shared": "workspace:*",
+    "fastify": "^5.2.1",
+    "luxon": "^3.5.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/luxon": "^3.4.2",
+    "@vitest/coverage-v8": "^3.0.9",
+    "eslint": "^9.22.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.9"
+  }
+}
