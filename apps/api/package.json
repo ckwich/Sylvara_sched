@@ -11,6 +11,7 @@
     "test:smoke": "vitest run tests/smoke"
   },
   "dependencies": {
+    "@prisma/client": "^6.4.1",
     "@sylvara/db": "workspace:*",
     "@sylvara/shared": "workspace:*",
     "fastify": "^5.2.1",

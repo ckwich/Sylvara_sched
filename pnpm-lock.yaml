@@ -29,6 +29,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@prisma/client':
+        specifier: ^6.4.1
+        version: 6.19.2(prisma@6.19.2(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)
       '@sylvara/db':
         specifier: workspace:*
         version: link:../../packages/db
