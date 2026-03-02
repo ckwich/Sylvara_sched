@@ -85,18 +85,17 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 
 ---
 
-### A4 — Click-to-create rejects when gap too small
+### A4 — One-click rejects when no contiguous slot exists
 **Arrange**
-- Existing occupancy:
-  - 09:00–10:30
-  - 11:00–12:00
+- ForemanA + roster on date D
+- Occupancy from anchor to end of day so no fit remains
+- Job estimate requires a non-zero block
 
 **Act**
-- Attempt-create at 10:40 for duration 30 min
+- Call one-click schedule
 
 **Assert**
 - Reject with `NO_CONTIGUOUS_SLOT_AT_CLICK`
-- No new segments created
 
 **File:** `apps/api/tests/smoke/click_create_reject_gap_too_small.test.*`
 
@@ -117,17 +116,13 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 
 ---
 
-### A6 — Hard reject: customer availability window conflict
-**Arrange**
-- Customer availability window: 10:00–14:00 on date D
-- Attempt creates a segment outside the window (e.g., 08:00–12:00)
-
-**Act**
-- Attempt schedule
-
-**Assert**
-- Reject with `CUSTOMER_WINDOW_CONFLICT`
-- No segments created
+### A6 — Customer availability parser + conflict enforcement
+**Arrange/Act/Assert**
+- `availabilityNotes="09:00-11:00"` with attempt `10:30-12:30` → conflict
+- `availabilityNotes="9am-11am"` with attempt `10:30-12:30` → conflict
+- `availabilityNotes="9-11am"` with attempt `10:30-12:30` → conflict
+- `availabilityNotes="9 to 11am"` with attempt `10:30-12:30` → conflict
+- `availabilityNotes="mornings only"` → no parsed window (no window-based reject)
 
 **File:** `apps/api/tests/smoke/reject_customer_window.test.*`
 
