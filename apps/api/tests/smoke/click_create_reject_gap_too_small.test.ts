@@ -38,7 +38,11 @@ describe('A4 one-click rejects when no contiguous slot exists', () => {
         findMany: async () => [],
       },
       orgSettings: {
-        findFirst: async () => null,
+        findFirst: async () => ({
+          companyTimezone: 'UTC',
+          operatingStartMinute: 0,
+          operatingStartTime: null,
+        }),
       },
       segmentRosterLink: {
         create: async () => undefined,

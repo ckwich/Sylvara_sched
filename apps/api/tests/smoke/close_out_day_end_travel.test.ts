@@ -24,14 +24,37 @@ describe('A7 close out day END_OF_DAY travel', () => {
       },
       scheduleSegment: {
         findMany: async () => [
-          { endDatetime: makeDate('2026-03-02', 720) },
-          { endDatetime: makeDate('2026-03-02', 930) },
+          { id: 1, endDatetime: makeDate('2026-03-02', 720) },
+          { id: 2, endDatetime: makeDate('2026-03-02', 930) },
         ],
       },
-      orgSettings: { findFirst: async () => null },
+      orgSettings: {
+        findFirst: async () => ({
+          companyTimezone: 'America/New_York',
+          operatingStartMinute: 300,
+          operatingStartTime: null,
+        }),
+      },
       segmentRosterLink: { create: async () => undefined },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
-      $transaction: async (fn: (tx: Record<string, never>) => Promise<unknown>) => fn({}),
+      $transaction: async (
+        fn: (tx: {
+          travelSegment: { create: (args: { data: Record<string, unknown> }) => Promise<Record<string, unknown>> };
+          activityLog: { create: () => Promise<void> };
+        }) => Promise<Record<string, unknown>>,
+      ) =>
+        fn({
+          travelSegment: {
+            create: async ({ data }: { data: Record<string, unknown> }) => {
+              const row = { id: created.length + 1, ...data };
+              created.push(row);
+              return row;
+            },
+          },
+          activityLog: {
+            create: async () => undefined,
+          },
+        }),
     } as unknown as PrismaClient;
 
     const app = buildServer({ prisma: fakePrisma });

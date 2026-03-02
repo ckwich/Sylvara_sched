@@ -74,12 +74,11 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
   - Segment2: 11:00–12:00
 
 **Act**
-- Attempt-create (onsite) with clicked time 10:07 local and duration 60 min
+- One-click attempt with requested start minute equivalent to 09:19 local and duration 60 min
 
 **Assert**
-- Created segment starts at 10:00 (floored)
-- Created segment ends at 11:00
-- No overlap with Segment1 or Segment2
+- Created segment starts at 09:10 (floored)
+- Placement does not overlap existing occupancy
 
 **File:** `apps/api/tests/smoke/click_create_snap_no_overlap.test.*`
 

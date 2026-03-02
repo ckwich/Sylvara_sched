@@ -725,6 +725,8 @@ All “foreman availability” logic must be consistent across:
 
 **`sales_rep_code` normalization:** During import and on all data entry, normalize `sales_rep_code` to uppercase-trimmed (e.g., "jd", "J.D.", " JD " all become "JD"). This is required for correct group-by-sales-rep behavior in reports.
 
+**Phase 2 decision — customer availability windows (authoritative):** Until a dedicated availability model exists, customer windows are derived only from `Job.availabilityNotes` using strict pattern parsing (24h and explicit AM/PM range forms). Recognized windows are enforced as hard scheduling constraints; unrecognized/ambiguous text is treated as “window not configured” (non-blocking). UI continues to display AM/PM-friendly labels while runtime stores and compares internal minute values.
+
 **State invalidation surface:** Derived job state changes when exactly these five write events occur:
 1. A ScheduleSegment is created (for this job)
 2. A ScheduleSegment is soft-deleted (`deleted_at` set)
