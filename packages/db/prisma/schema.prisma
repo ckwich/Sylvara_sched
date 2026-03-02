@@ -1,0 +1,614 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  MANAGER
+  SCHEDULER
+  VIEWER
+}
+
+enum CustomerRiskStatus {
+  OPEN
+  MONITORING
+  RESOLVED
+}
+
+enum EquipmentType {
+  CRANE
+  BUCKET
+}
+
+enum CraneModelSuitability {
+  MODEL_1090
+  MODEL_1060
+  EITHER
+}
+
+enum RequirementStatus {
+  REQUIRED
+  REQUESTED
+  APPROVED
+  DENIED
+  NOT_REQUIRED
+}
+
+enum SegmentType {
+  PRIMARY
+  RETURN_VISIT
+}
+
+enum TravelType {
+  START_OF_DAY
+  END_OF_DAY
+  BETWEEN_JOBS
+}
+
+enum SegmentSource {
+  MANUAL
+  AUTO
+}
+
+enum ScheduleEventType {
+  RESCHEDULE_TO
+  TBS_FROM
+  DATE_SWAP
+  NOTE_PARSE_EVENT
+  MANUAL_EDIT
+}
+
+enum EventSource {
+  LEGACY_PARSE
+  USER_ACTION
+}
+
+enum VacatedSlotAction {
+  DELETED
+  MOVED
+  SHORTENED
+}
+
+enum VacatedSlotStatus {
+  OPEN
+  USED
+  DISMISSED
+}
+
+enum JobBlockerStatus {
+  ACTIVE
+  CLEARED
+}
+
+enum ResourceType {
+  EQUIPMENT
+  PERSON
+}
+
+enum RosterMemberRole {
+  CLIMBER
+  GROUND
+  OPERATOR
+  OTHER
+}
+
+enum ImportStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id     Int      @id @default(autoincrement())
+  name   String
+  email  String   @unique
+  role   UserRole
+  active Boolean  @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  customerRisksOwned        CustomerRisk[]      @relation("customer_risk_owner")
+  jobsCompleted             Job[]               @relation("job_completed_by")
+  jobsConfirmed             Job[]               @relation("job_confirmed_by")
+  jobsContactOwned          Job[]               @relation("job_contact_owner")
+  estimateHistoryChanges    EstimateHistory[]   @relation("estimate_history_changed_by")
+  scheduleSegmentsCreated   ScheduleSegment[]   @relation("schedule_segment_created_by")
+  travelSegmentsCreated     TravelSegment[]     @relation("travel_segment_created_by")
+  scheduleEventsActed       ScheduleEvent[]     @relation("schedule_event_actor")
+  vacatedSlotsDismissed     VacatedSlot[]       @relation("vacated_slot_dismissed_by")
+  jobBlockersCreated        JobBlocker[]        @relation("job_blocker_created_by")
+  jobBlockersCleared        JobBlocker[]        @relation("job_blocker_cleared_by")
+  rostersCreated            ForemanDayRoster[]  @relation("foreman_day_roster_created_by")
+  segmentRosterLinksCreated SegmentRosterLink[] @relation("segment_roster_link_created_by")
+  activityLogsActed         ActivityLog[]       @relation("activity_log_actor")
+  importRunsStarted         ImportRun[]         @relation("import_run_by_user")
+
+  @@map("users")
+}
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  name      String
+  phone     String?
+  email     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  jobs          Job[]
+  customerRisks CustomerRisk[]
+
+  @@map("customers")
+}
+
+model RiskReason {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  label     String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  customerRiskReasons CustomerRiskReason[]
+
+  @@map("risk_reasons")
+}
+
+model CustomerRisk {
+  id          Int                @id @default(autoincrement())
+  customerId  Int                @map("customer_id")
+  severity    Int
+  narrative   String?
+  status      CustomerRiskStatus
+  ownerUserId Int?               @map("owner_user_id")
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  customer  Customer             @relation(fields: [customerId], references: [id])
+  ownerUser User?                @relation("customer_risk_owner", fields: [ownerUserId], references: [id])
+  reasons   CustomerRiskReason[]
+
+  @@map("customer_risks")
+}
+
+model CustomerRiskReason {
+  id             Int @id @default(autoincrement())
+  customerRiskId Int @map("customer_risk_id")
+  riskReasonId   Int @map("risk_reason_id")
+
+  customerRisk CustomerRisk @relation(fields: [customerRiskId], references: [id])
+  riskReason   RiskReason   @relation(fields: [riskReasonId], references: [id])
+
+  @@unique([customerRiskId, riskReasonId], map: "uq_customer_risk_reason")
+  @@map("customer_risk_reasons")
+}
+
+model Job {
+  id                    Int                    @id @default(autoincrement())
+  customerId            Int                    @map("customer_id")
+  equipmentType         EquipmentType          @map("equipment_type")
+  salesRepCode          String                 @map("sales_rep_code")
+  jobSiteAddress        String                 @map("job_site_address")
+  town                  String
+  completedDate         DateTime?              @map("completed_date") @db.Date
+  completedByUserId     Int?                   @map("completed_by_user_id")
+  completionNotes       String?                @map("completion_notes")
+  amountDollars         Decimal                @map("amount_dollars") @db.Decimal(12, 2)
+  estimateHoursCurrent  Decimal?               @map("estimate_hours_current") @db.Decimal(10, 2)
+  travelHoursEstimate   Decimal                @default(0) @map("travel_hours_estimate") @db.Decimal(10, 2)
+  approvalDate          DateTime?              @map("approval_date") @db.Date
+  approvalCall          String?                @map("approval_call")
+  confirmedText         String?                @map("confirmed_text")
+  confirmedByUserId     Int?                   @map("confirmed_by_user_id")
+  confirmedAt           DateTime?              @map("confirmed_at") @db.Timestamptz(6)
+  craneModelSuitability CraneModelSuitability? @map("crane_model_suitability")
+  requiresSpiderLift    Boolean                @default(false) @map("requires_spider_lift")
+  winterFlag            Boolean                @default(false) @map("winter_flag")
+  frozenGroundFlag      Boolean                @default(false) @map("frozen_ground_flag")
+  notesRaw              String                 @map("notes_raw")
+  notesLastParsedAt     DateTime?              @map("notes_last_parsed_at") @db.Timestamptz(6)
+  notesParseConfidence  Json?                  @map("notes_parse_confidence")
+  pushUpIfPossible      Boolean                @default(false) @map("push_up_if_possible")
+  mustBeFirstJob        Boolean                @default(false) @map("must_be_first_job")
+  preferredStartTime    DateTime?              @map("preferred_start_time") @db.Time(6)
+  preferredEndTime      DateTime?              @map("preferred_end_time") @db.Time(6)
+  availabilityNotes     String?                @map("availability_notes")
+  noEmail               Boolean                @default(false) @map("no_email")
+  contactAllowed        Boolean                @default(true) @map("contact_allowed")
+  contactOwnerUserId    Int?                   @map("contact_owner_user_id")
+  contactInstructions   String?                @map("contact_instructions")
+  accessNotes           String?                @map("access_notes")
+  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  customer           Customer              @relation(fields: [customerId], references: [id])
+  completedByUser    User?                 @relation("job_completed_by", fields: [completedByUserId], references: [id])
+  confirmedByUser    User?                 @relation("job_confirmed_by", fields: [confirmedByUserId], references: [id])
+  contactOwnerUser   User?                 @relation("job_contact_owner", fields: [contactOwnerUserId], references: [id])
+  estimateHistory    EstimateHistory[]
+  requirements       Requirement[]
+  scheduleSegments   ScheduleSegment[]
+  scheduleEvents     ScheduleEvent[]
+  vacatedSlotsChosen VacatedSlot[]         @relation("vacated_slot_chosen_job")
+  jobBlockers        JobBlocker[]
+  preferredChannels  JobPreferredChannel[]
+  accessConstraints  JobAccessConstraint[]
+  travelSegments     TravelSegment[]
+
+  @@index([equipmentType], map: "idx_jobs_equipment_type")
+  @@index([town], map: "idx_jobs_town")
+  @@index([completedDate], map: "idx_jobs_completed_date")
+  @@index([customerId], map: "idx_jobs_customer_id")
+  @@map("jobs")
+}
+
+model EstimateHistory {
+  id                    Int      @id @default(autoincrement())
+  jobId                 Int      @map("job_id")
+  changedByUserId       Int      @map("changed_by_user_id")
+  changedAt             DateTime @map("changed_at") @db.Timestamptz(6)
+  previousAmountDollars Decimal? @map("previous_amount_dollars") @db.Decimal(12, 2)
+  newAmountDollars      Decimal? @map("new_amount_dollars") @db.Decimal(12, 2)
+  previousEstimateHours Decimal? @map("previous_estimate_hours") @db.Decimal(10, 2)
+  newEstimateHours      Decimal? @map("new_estimate_hours") @db.Decimal(10, 2)
+  note                  String?
+
+  job           Job  @relation(fields: [jobId], references: [id])
+  changedByUser User @relation("estimate_history_changed_by", fields: [changedByUserId], references: [id])
+
+  @@map("estimate_history")
+}
+
+model RequirementType {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  label     String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  requirements Requirement[]
+
+  @@map("requirement_types")
+}
+
+model Requirement {
+  id                Int               @id @default(autoincrement())
+  jobId             Int               @map("job_id")
+  requirementTypeId Int               @map("requirement_type_id")
+  status            RequirementStatus
+  notes             String?
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job             Job             @relation(fields: [jobId], references: [id])
+  requirementType RequirementType @relation(fields: [requirementTypeId], references: [id])
+
+  @@index([status], map: "idx_requirements_status")
+  @@index([requirementTypeId], map: "idx_requirements_requirement_type_id")
+  @@map("requirements")
+}
+
+model ScheduleSegment {
+  id                     Int         @id @default(autoincrement())
+  jobId                  Int         @map("job_id")
+  segmentGroupId         String?     @map("segment_group_id") @db.Uuid
+  segmentType            SegmentType @map("segment_type")
+  startDatetime          DateTime    @map("start_datetime") @db.Timestamptz(6)
+  endDatetime            DateTime    @map("end_datetime") @db.Timestamptz(6)
+  scheduledHoursOverride Decimal?    @map("scheduled_hours_override") @db.Decimal(10, 2)
+  deletedAt              DateTime?   @map("deleted_at") @db.Timestamptz(6)
+  notes                  String?
+  createdByUserId        Int         @map("created_by_user_id")
+  createdAt              DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job                  Job                   @relation(fields: [jobId], references: [id])
+  createdByUser        User                  @relation("schedule_segment_created_by", fields: [createdByUserId], references: [id])
+  resourceReservations ResourceReservation[]
+  segmentRosterLink    SegmentRosterLink?
+  vacatedSlotsSource   VacatedSlot[]         @relation("vacated_slot_source_segment")
+  vacatedSlotsChosen   VacatedSlot[]         @relation("vacated_slot_chosen_segment")
+
+  @@index([startDatetime], map: "idx_schedule_segments_start_datetime")
+  @@index([endDatetime], map: "idx_schedule_segments_end_datetime")
+  @@map("schedule_segments")
+}
+
+model TravelSegment {
+  id              Int           @id @default(autoincrement())
+  foremanPersonId Int           @map("foreman_person_id")
+  relatedJobId    Int?          @map("related_job_id")
+  serviceDate     DateTime      @map("service_date") @db.Date
+  startDatetime   DateTime      @map("start_datetime") @db.Timestamptz(6)
+  endDatetime     DateTime      @map("end_datetime") @db.Timestamptz(6)
+  travelType      TravelType    @map("travel_type")
+  source          SegmentSource
+  locked          Boolean       @default(false)
+  notes           String?
+  createdByUserId Int           @map("created_by_user_id")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime?     @map("deleted_at") @db.Timestamptz(6)
+
+  foremanPerson Resource @relation("travel_foreman_person", fields: [foremanPersonId], references: [id])
+  relatedJob    Job?     @relation(fields: [relatedJobId], references: [id])
+  createdByUser User     @relation("travel_segment_created_by", fields: [createdByUserId], references: [id])
+
+  @@index([foremanPersonId, serviceDate], map: "idx_travel_segments_foreman_service_date")
+  @@index([startDatetime], map: "idx_travel_segments_start_datetime")
+  @@index([endDatetime], map: "idx_travel_segments_end_datetime")
+  @@map("travel_segments")
+}
+
+model ScheduleEvent {
+  id          Int               @id @default(autoincrement())
+  jobId       Int               @map("job_id")
+  eventType   ScheduleEventType @map("event_type")
+  source      EventSource
+  fromAt      DateTime?         @map("from_at") @db.Timestamptz(6)
+  toAt        DateTime?         @map("to_at") @db.Timestamptz(6)
+  actorUserId Int?              @map("actor_user_id")
+  actorCode   String?           @map("actor_code")
+  rawSnippet  String?           @map("raw_snippet")
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  job       Job   @relation(fields: [jobId], references: [id])
+  actorUser User? @relation("schedule_event_actor", fields: [actorUserId], references: [id])
+
+  @@map("schedule_events")
+}
+
+model VacatedSlot {
+  id                Int               @id @default(autoincrement())
+  sourceSegmentId   Int               @map("source_segment_id")
+  sourceAction      VacatedSlotAction @map("source_action")
+  startDatetime     DateTime          @map("start_datetime") @db.Timestamptz(6)
+  endDatetime       DateTime          @map("end_datetime") @db.Timestamptz(6)
+  slotHours         Decimal           @map("slot_hours") @db.Decimal(10, 2)
+  equipmentType     EquipmentType     @map("equipment_type")
+  status            VacatedSlotStatus @default(OPEN)
+  chosenJobId       Int?              @map("chosen_job_id")
+  chosenSegmentId   Int?              @map("chosen_segment_id")
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  dismissedAt       DateTime?         @map("dismissed_at") @db.Timestamptz(6)
+  dismissedByUserId Int?              @map("dismissed_by_user_id")
+
+  sourceSegment   ScheduleSegment  @relation("vacated_slot_source_segment", fields: [sourceSegmentId], references: [id])
+  chosenJob       Job?             @relation("vacated_slot_chosen_job", fields: [chosenJobId], references: [id])
+  chosenSegment   ScheduleSegment? @relation("vacated_slot_chosen_segment", fields: [chosenSegmentId], references: [id])
+  dismissedByUser User?            @relation("vacated_slot_dismissed_by", fields: [dismissedByUserId], references: [id])
+
+  @@map("vacated_slots")
+}
+
+model BlockerReason {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  label     String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  jobBlockers JobBlocker[]
+
+  @@map("blocker_reasons")
+}
+
+model JobBlocker {
+  id              Int              @id @default(autoincrement())
+  jobId           Int              @map("job_id")
+  blockerReasonId Int              @map("blocker_reason_id")
+  status          JobBlockerStatus
+  notes           String?
+  createdByUserId Int?             @map("created_by_user_id")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  clearedAt       DateTime?        @map("cleared_at") @db.Timestamptz(6)
+  clearedByUserId Int?             @map("cleared_by_user_id")
+
+  job           Job           @relation(fields: [jobId], references: [id])
+  blockerReason BlockerReason @relation(fields: [blockerReasonId], references: [id])
+  createdByUser User?         @relation("job_blocker_created_by", fields: [createdByUserId], references: [id])
+  clearedByUser User?         @relation("job_blocker_cleared_by", fields: [clearedByUserId], references: [id])
+
+  @@map("job_blockers")
+}
+
+model Resource {
+  id                Int          @id @default(autoincrement())
+  resourceType      ResourceType @map("resource_type")
+  name              String
+  inventoryQuantity Int          @default(1) @map("inventory_quantity")
+  isForeman         Boolean      @default(false) @map("is_foreman")
+  active            Boolean      @default(true)
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  resourceReservations ResourceReservation[]
+  foremanRosters       ForemanDayRoster[]       @relation("roster_foreman_person")
+  rosterMemberships    ForemanDayRosterMember[] @relation("roster_member_person")
+  travelAsForeman      TravelSegment[]          @relation("travel_foreman_person")
+
+  @@map("resources")
+}
+
+model ResourceReservation {
+  id                Int     @id @default(autoincrement())
+  scheduleSegmentId Int     @map("schedule_segment_id")
+  resourceId        Int     @map("resource_id")
+  quantity          Int     @default(1)
+  notes             String?
+
+  scheduleSegment ScheduleSegment @relation(fields: [scheduleSegmentId], references: [id])
+  resource        Resource        @relation(fields: [resourceId], references: [id])
+
+  @@unique([scheduleSegmentId, resourceId], map: "uq_resource_reservation_segment_resource")
+  @@map("resource_reservations")
+}
+
+model HomeBase {
+  id           Int       @id @default(autoincrement())
+  name         String
+  addressLine1 String    @map("address_line1")
+  addressLine2 String?   @map("address_line2")
+  city         String
+  state        String
+  postalCode   String    @map("postal_code")
+  openingTime  DateTime? @map("opening_time") @db.Time(6)
+  closingTime  DateTime? @map("closing_time") @db.Time(6)
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  foremanRosters ForemanDayRoster[]
+
+  @@map("home_bases")
+}
+
+model ForemanDayRoster {
+  id                 Int       @id @default(autoincrement())
+  date               DateTime  @db.Date
+  foremanPersonId    Int       @map("foreman_person_id")
+  homeBaseId         Int       @map("home_base_id")
+  preferredStartTime DateTime? @map("preferred_start_time") @db.Time(6)
+  preferredEndTime   DateTime? @map("preferred_end_time") @db.Time(6)
+  notes              String?
+  createdByUserId    Int       @map("created_by_user_id")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  foremanPerson      Resource                 @relation("roster_foreman_person", fields: [foremanPersonId], references: [id])
+  homeBase           HomeBase                 @relation(fields: [homeBaseId], references: [id])
+  createdByUser      User                     @relation("foreman_day_roster_created_by", fields: [createdByUserId], references: [id])
+  members            ForemanDayRosterMember[]
+  segmentRosterLinks SegmentRosterLink[]
+
+  @@unique([date, foremanPersonId], map: "uq_foreman_day_roster_date_foreman")
+  @@map("foreman_day_rosters")
+}
+
+model ForemanDayRosterMember {
+  id               Int              @id @default(autoincrement())
+  rosterId         Int              @map("roster_id")
+  date             DateTime         @db.Date
+  personResourceId Int              @map("person_resource_id")
+  role             RosterMemberRole
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  roster         ForemanDayRoster @relation(fields: [rosterId], references: [id])
+  personResource Resource         @relation("roster_member_person", fields: [personResourceId], references: [id])
+
+  @@unique([date, personResourceId], map: "uq_foreman_day_roster_member_date_person")
+  @@map("foreman_day_roster_members")
+}
+
+model SegmentRosterLink {
+  id                Int      @id @default(autoincrement())
+  scheduleSegmentId Int      @map("schedule_segment_id")
+  rosterId          Int      @map("roster_id")
+  createdByUserId   Int      @map("created_by_user_id")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  scheduleSegment ScheduleSegment  @relation(fields: [scheduleSegmentId], references: [id])
+  roster          ForemanDayRoster @relation(fields: [rosterId], references: [id])
+  createdByUser   User             @relation("segment_roster_link_created_by", fields: [createdByUserId], references: [id])
+
+  @@unique([scheduleSegmentId], map: "uq_segment_roster_link_segment")
+  @@map("segment_roster_links")
+}
+
+model AccessConstraint {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  label     String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  jobAccessConstraints JobAccessConstraint[]
+
+  @@map("access_constraints")
+}
+
+model JobAccessConstraint {
+  id                 Int @id @default(autoincrement())
+  jobId              Int @map("job_id")
+  accessConstraintId Int @map("access_constraint_id")
+
+  job              Job              @relation(fields: [jobId], references: [id])
+  accessConstraint AccessConstraint @relation(fields: [accessConstraintId], references: [id])
+
+  @@unique([jobId, accessConstraintId], map: "uq_job_access_constraint")
+  @@map("job_access_constraints")
+}
+
+model JobPreferredChannel {
+  id      Int    @id @default(autoincrement())
+  jobId   Int    @map("job_id")
+  channel String
+
+  job Job @relation(fields: [jobId], references: [id])
+
+  @@unique([jobId, channel], map: "uq_job_preferred_channel")
+  @@map("job_preferred_channels")
+}
+
+model ActivityLog {
+  id          Int      @id @default(autoincrement())
+  entityType  String   @map("entity_type")
+  entityId    Int      @map("entity_id")
+  actionType  String   @map("action_type")
+  diff        Json?
+  actorUserId Int?     @map("actor_user_id")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actorUser User? @relation("activity_log_actor", fields: [actorUserId], references: [id])
+
+  @@index([entityType, entityId], map: "idx_activity_log_entity")
+  @@map("activity_logs")
+}
+
+model ImportRun {
+  id             Int          @id @default(autoincrement())
+  startedAt      DateTime     @map("started_at") @db.Timestamptz(6)
+  finishedAt     DateTime?    @map("finished_at") @db.Timestamptz(6)
+  runByUserId    Int?         @map("run_by_user_id")
+  sourceFilename String       @map("source_filename")
+  status         ImportStatus
+  summaryJson    Json?        @map("summary_json")
+
+  runByUser User?          @relation("import_run_by_user", fields: [runByUserId], references: [id])
+  rowMaps   ImportRowMap[]
+
+  @@map("import_runs")
+}
+
+model ImportRowMap {
+  id          Int      @id @default(autoincrement())
+  importRunId Int      @map("import_run_id")
+  sheetName   String   @map("sheet_name")
+  rowNumber   Int      @map("row_number")
+  entityType  String   @map("entity_type")
+  entityId    Int      @map("entity_id")
+  rawRowJson  Json     @map("raw_row_json")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  importRun ImportRun @relation(fields: [importRunId], references: [id])
+
+  @@map("import_row_maps")
+}
+
+model OrgSettings {
+  id                 Int       @id @default(1)
+  companyTimezone    String    @default("America/New_York") @map("company_timezone")
+  operatingStartTime DateTime? @map("operating_start_time") @db.Time(6)
+  operatingEndTime   DateTime? @map("operating_end_time") @db.Time(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("org_settings")
+}
