@@ -12,6 +12,7 @@
     "test:smoke": "corepack pnpm test:api:smoke && corepack pnpm test:e2e:smoke"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.3",
     "eslint": "^9.22.0",
     "prettier": "^3.5.3",
     "turbo": "^2.4.4",

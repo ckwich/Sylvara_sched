@@ -102,6 +102,12 @@ enum ImportStatus {
   FAILED
 }
 
+enum PreferredChannel {
+  CALL
+  TEXT
+  EMAIL
+}
+
 model User {
   id     Int      @id @default(autoincrement())
   name   String
@@ -209,11 +215,13 @@ model Job {
   requiresSpiderLift    Boolean                @default(false) @map("requires_spider_lift")
   winterFlag            Boolean                @default(false) @map("winter_flag")
   frozenGroundFlag      Boolean                @default(false) @map("frozen_ground_flag")
-  notesRaw              String                 @map("notes_raw")
+  notesRaw              String                 @default("") @map("notes_raw")
   notesLastParsedAt     DateTime?              @map("notes_last_parsed_at") @db.Timestamptz(6)
   notesParseConfidence  Json?                  @map("notes_parse_confidence")
   pushUpIfPossible      Boolean                @default(false) @map("push_up_if_possible")
   mustBeFirstJob        Boolean                @default(false) @map("must_be_first_job")
+  preferredStartMinute  Int?                   @map("preferred_start_minute")
+  preferredEndMinute    Int?                   @map("preferred_end_minute")
   preferredStartTime    DateTime?              @map("preferred_start_time") @db.Time(6)
   preferredEndTime      DateTime?              @map("preferred_end_time") @db.Time(6)
   availabilityNotes     String?                @map("availability_notes")
@@ -458,8 +466,10 @@ model HomeBase {
   city         String
   state        String
   postalCode   String    @map("postal_code")
-  openingTime  DateTime? @map("opening_time") @db.Time(6)
-  closingTime  DateTime? @map("closing_time") @db.Time(6)
+  openingMinute Int?      @map("opening_minute")
+  closingMinute Int?      @map("closing_minute")
+  openingTime   DateTime? @map("opening_time") @db.Time(6)
+  closingTime   DateTime? @map("closing_time") @db.Time(6)
   active       Boolean   @default(true)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -474,8 +484,10 @@ model ForemanDayRoster {
   date               DateTime  @db.Date
   foremanPersonId    Int       @map("foreman_person_id")
   homeBaseId         Int       @map("home_base_id")
-  preferredStartTime DateTime? @map("preferred_start_time") @db.Time(6)
-  preferredEndTime   DateTime? @map("preferred_end_time") @db.Time(6)
+  preferredStartMinute Int?      @map("preferred_start_minute")
+  preferredEndMinute   Int?      @map("preferred_end_minute")
+  preferredStartTime   DateTime? @map("preferred_start_time") @db.Time(6)
+  preferredEndTime     DateTime? @map("preferred_end_time") @db.Time(6)
   notes              String?
   createdByUserId    Int       @map("created_by_user_id")
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -549,7 +561,7 @@ model JobAccessConstraint {
 model JobPreferredChannel {
   id      Int    @id @default(autoincrement())
   jobId   Int    @map("job_id")
-  channel String
+  channel PreferredChannel
 
   job Job @relation(fields: [jobId], references: [id])
 
@@ -605,8 +617,10 @@ model ImportRowMap {
 model OrgSettings {
   id                 Int       @id @default(1)
   companyTimezone    String    @default("America/New_York") @map("company_timezone")
-  operatingStartTime DateTime? @map("operating_start_time") @db.Time(6)
-  operatingEndTime   DateTime? @map("operating_end_time") @db.Time(6)
+  operatingStartMinute Int?      @map("operating_start_minute")
+  operatingEndMinute   Int?      @map("operating_end_minute")
+  operatingStartTime   DateTime? @map("operating_start_time") @db.Time(6)
+  operatingEndTime     DateTime? @map("operating_end_time") @db.Time(6)
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
