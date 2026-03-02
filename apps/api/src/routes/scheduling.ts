@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   findFirstFittingStartMinute,
+  findStartAtClickedTime,
   minutesFromEstimatedHoursRoundedToTen,
   reject,
   requirementWarnings,
@@ -20,11 +21,14 @@ import {
   parseCustomerAvailabilityWindow,
 } from '../scheduling/customer-window.js';
 import type { MinuteWindow } from '../scheduling/types.js';
+import { DateTime } from 'luxon';
 
 const oneClickBodySchema = z.object({
   jobId: z.number().int().positive(),
   foremanPersonId: z.number().int().positive(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  homeBaseId: z.number().int().positive().optional(),
+  requestedStartMinute: z.number().int().min(0).max(1439).optional(),
   includeStartOfDayTravel: z.boolean().optional().default(false),
 });
 
@@ -46,20 +50,55 @@ function dateOnlyToUtc(date: string): Date {
   return new Date(`${date}T00:00:00.000Z`);
 }
 
-function minuteOfUtcDate(value: Date): number {
-  return value.getUTCHours() * 60 + value.getUTCMinutes();
+function localDayBoundsUtc(localDate: string, timezone: string): { startUtc: Date; endUtc: Date } {
+  const start = DateTime.fromISO(localDate, { zone: timezone }).startOf('day');
+  const end = start.plus({ days: 1 });
+  return { startUtc: start.toUTC().toJSDate(), endUtc: end.toUTC().toJSDate() };
 }
 
-function utcDateAtMinute(date: string, minute: number): Date {
-  const start = dateOnlyToUtc(date);
-  return new Date(start.getTime() + minute * 60_000);
+function minuteOfLocalDate(value: Date, timezone: string): number {
+  const local = DateTime.fromJSDate(value, { zone: 'utc' }).setZone(timezone);
+  return local.hour * 60 + local.minute;
 }
 
-function occupiedFromSegments(segments: Array<{ startDatetime: Date; endDatetime: Date }>): MinuteWindow[] {
-  return segments.map((segment) => ({
-    startMinute: minuteOfUtcDate(segment.startDatetime),
-    endMinute: minuteOfUtcDate(segment.endDatetime),
-  }));
+function splitToLocalDayIntervals(input: {
+  segments: Array<{ startDatetime: Date; endDatetime: Date }>;
+  timezone: string;
+  dayStartUtc: Date;
+  dayEndUtc: Date;
+}): MinuteWindow[] {
+  const dayStartMs = input.dayStartUtc.getTime();
+  const dayEndMs = input.dayEndUtc.getTime();
+
+  return input.segments.flatMap((segment) => {
+    const startMs = Math.max(segment.startDatetime.getTime(), dayStartMs);
+    const endMs = Math.min(segment.endDatetime.getTime(), dayEndMs);
+    if (endMs <= startMs) {
+      return [];
+    }
+
+    const clippedStart = new Date(startMs);
+    const clippedEnd = new Date(endMs);
+    return [
+      {
+        startMinute: minuteOfLocalDate(clippedStart, input.timezone),
+        endMinute: minuteOfLocalDate(clippedEnd, input.timezone),
+      },
+    ];
+  });
+}
+
+function localDateAtMinute(date: string, minute: number, timezone: string): Date {
+  const local = DateTime.fromISO(date, { zone: timezone })
+    .startOf('day')
+    .plus({ minutes: minute });
+  return local.toUTC().toJSDate();
+}
+
+function crossesLocalMidnight(start: Date, end: Date, timezone: string): boolean {
+  const localStart = DateTime.fromJSDate(start, { zone: 'utc' }).setZone(timezone);
+  const localEnd = DateTime.fromJSDate(end, { zone: 'utc' }).setZone(timezone);
+  return localStart.toISODate() !== localEnd.toISODate();
 }
 
 export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
@@ -102,7 +141,11 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
         .send(reject('NO_CONTIGUOUS_SLOT_AT_CLICK', 'Job estimate hours are required for one-click scheduling.'));
     }
 
-    const roster = await deps.prisma.foremanDayRoster.findFirst({
+    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
+    const { startUtc: dayStartUtc, endUtc: dayEndUtc } = localDayBoundsUtc(body.date, timezone);
+
+    let roster = await deps.prisma.foremanDayRoster.findFirst({
       where: {
         foremanPersonId: body.foremanPersonId,
         date: serviceDate,
@@ -113,15 +156,44 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     });
 
     if (!roster) {
-      return reply.code(200).send(reject('ROSTER_NOT_FOUND', 'No foreman roster exists for that date.'));
+      if (!body.homeBaseId) {
+        return reply.code(200).send(reject('HOME_BASE_REQUIRED', 'homeBaseId is required to create roster.'));
+      }
+
+      roster = await deps.prisma.foremanDayRoster.create({
+        data: {
+          foremanPersonId: body.foremanPersonId,
+          date: serviceDate,
+          homeBaseId: body.homeBaseId,
+          createdByUserId: 1,
+        },
+        include: {
+          homeBase: true,
+        },
+      });
+
+      await deps.prisma.activityLog.create({
+        data: {
+          entityType: 'ForemanDayRoster',
+          entityId: roster.id,
+          actionType: 'CREATED',
+          actorUserId: 1,
+          diff: {
+            foremanPersonId: body.foremanPersonId,
+            date: body.date,
+            homeBaseId: body.homeBaseId,
+          },
+        },
+      });
     }
 
-    const [travel, onsite, orgSettings] = await Promise.all([
+    const [travel, onsite] = await Promise.all([
       deps.prisma.travelSegment.findMany({
         where: {
           foremanPersonId: body.foremanPersonId,
-          serviceDate,
           deletedAt: null,
+          startDatetime: { lt: dayEndUtc },
+          endDatetime: { gt: dayStartUtc },
         },
         select: {
           startDatetime: true,
@@ -133,19 +205,36 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           deletedAt: null,
           segmentRosterLink: {
             is: {
-              rosterId: roster.id,
+              roster: {
+                foremanPersonId: body.foremanPersonId,
+                date: serviceDate,
+              },
             },
           },
+          startDatetime: { lt: dayEndUtc },
+          endDatetime: { gt: dayStartUtc },
         },
         select: {
           startDatetime: true,
           endDatetime: true,
         },
       }),
-      deps.prisma.orgSettings.findFirst(),
     ]);
 
-    const occupied = [...occupiedFromSegments(travel), ...occupiedFromSegments(onsite)];
+    const occupied = [
+      ...splitToLocalDayIntervals({
+        segments: travel,
+        timezone,
+        dayStartUtc,
+        dayEndUtc,
+      }),
+      ...splitToLocalDayIntervals({
+        segments: onsite,
+        timezone,
+        dayStartUtc,
+        dayEndUtc,
+      }),
+    ];
     const earliestEvent = occupied.length > 0 ? Math.min(...occupied.map((v) => v.startMinute)) : null;
 
     const rosterPreferred = resolveAnchorMinute({
@@ -161,14 +250,33 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       legacyTime: orgSettings?.operatingStartTime,
     });
 
+    // Authoritative anchor order:
+    // 1) roster preferred start
+    // 2) earliest event start on that day
+    // 3) home base opening
+    // 4) org operating start
     const anchorMinute = rosterPreferred ?? earliestEvent ?? homeBaseOpening ?? operatingStart ?? 0;
     const durationMinutes = minutesFromEstimatedHoursRoundedToTen(new Prisma.Decimal(job.estimateHoursCurrent));
 
-    const startMinute = findFirstFittingStartMinute({
-      occupied,
-      anchorMinute,
-      durationMinutes,
-    });
+    if (body.requestedStartMinute !== undefined) {
+      const snapped = Math.floor(body.requestedStartMinute / 10) * 10;
+      if (snapped + durationMinutes > 1440) {
+        return reply.code(200).send(reject('CROSSES_MIDNIGHT', 'Segment would cross local midnight.'));
+      }
+    }
+
+    const startMinute =
+      body.requestedStartMinute !== undefined
+        ? findStartAtClickedTime({
+            occupied,
+            clickedMinute: body.requestedStartMinute,
+            durationMinutes,
+          })
+        : findFirstFittingStartMinute({
+            occupied,
+            anchorMinute,
+            durationMinutes,
+          });
 
     if (startMinute === null) {
       return reply.code(200).send(reject('NO_CONTIGUOUS_SLOT_AT_CLICK', 'No contiguous slot can fit this job.'));
@@ -194,8 +302,11 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const startDatetime = utcDateAtMinute(body.date, startMinute);
-    const endDatetime = utcDateAtMinute(body.date, endMinute);
+    const startDatetime = localDateAtMinute(body.date, startMinute, timezone);
+    const endDatetime = localDateAtMinute(body.date, endMinute, timezone);
+    if (crossesLocalMidnight(startDatetime, endDatetime, timezone)) {
+      return reply.code(200).send(reject('CROSSES_MIDNIGHT', 'Segment would cross local midnight.'));
+    }
 
     const result = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const segment = await tx.scheduleSegment.create({
@@ -213,6 +324,21 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           scheduleSegmentId: segment.id,
           rosterId: roster.id,
           createdByUserId: 1,
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'ScheduleSegment',
+          entityId: segment.id,
+          actionType: 'SEGMENT_ADDED',
+          actorUserId: 1,
+          diff: {
+            jobId: job.id,
+            startDatetime,
+            endDatetime,
+            rosterId: roster.id,
+          },
         },
       });
 
@@ -240,13 +366,17 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
 
     const body = parsed.data;
     const serviceDate = dateOnlyToUtc(body.date);
+    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
+    const { startUtc: dayStartUtc, endUtc: dayEndUtc } = localDayBoundsUtc(body.date, timezone);
 
     const existingEnd = await deps.prisma.travelSegment.findFirst({
       where: {
         foremanPersonId: body.foremanPersonId,
-        serviceDate,
         travelType: TravelType.END_OF_DAY,
         deletedAt: null,
+        startDatetime: { lt: dayEndUtc },
+        endDatetime: { gt: dayStartUtc },
       },
     });
 
@@ -259,6 +389,8 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     const segments = await deps.prisma.scheduleSegment.findMany({
       where: {
         deletedAt: null,
+        startDatetime: { lt: dayEndUtc },
+        endDatetime: { gt: dayStartUtc },
         segmentRosterLink: {
           is: {
             roster: {
@@ -269,6 +401,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
         },
       },
       select: {
+        id: true,
         endDatetime: true,
       },
     });
@@ -277,23 +410,50 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       return reply.code(200).send(reject('NO_ONSITE_SEGMENTS', 'No onsite segments found for close out.'));
     }
 
-    const latestEndMinute = Math.max(...segments.map((s: { endDatetime: Date }) => minuteOfUtcDate(s.endDatetime)));
+    const latestEndMinute = Math.max(
+      ...segments.map((s: { endDatetime: Date }) => minuteOfLocalDate(s.endDatetime, timezone)),
+    );
     const endMinute = latestEndMinute + body.durationMinutes;
 
     if (endMinute > 1440) {
       return reply.code(200).send(reject('CROSSES_MIDNIGHT', 'END_OF_DAY travel would cross midnight.'));
     }
 
-    const travel = await deps.prisma.travelSegment.create({
-      data: {
-        foremanPersonId: body.foremanPersonId,
-        serviceDate,
-        startDatetime: utcDateAtMinute(body.date, latestEndMinute),
-        endDatetime: utcDateAtMinute(body.date, endMinute),
-        travelType: TravelType.END_OF_DAY,
-        source: SegmentSource.MANUAL,
-        createdByUserId: 1,
-      },
+    const startDatetime = localDateAtMinute(body.date, latestEndMinute, timezone);
+    const endDatetime = localDateAtMinute(body.date, endMinute, timezone);
+    if (crossesLocalMidnight(startDatetime, endDatetime, timezone)) {
+      return reply.code(200).send(reject('CROSSES_MIDNIGHT', 'END_OF_DAY travel would cross local midnight.'));
+    }
+
+    const travel = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const created = await tx.travelSegment.create({
+        data: {
+          foremanPersonId: body.foremanPersonId,
+          serviceDate,
+          startDatetime,
+          endDatetime,
+          travelType: TravelType.END_OF_DAY,
+          source: SegmentSource.MANUAL,
+          createdByUserId: 1,
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'TravelSegment',
+          entityId: created.id,
+          actionType: 'CREATED',
+          actorUserId: 1,
+          diff: {
+            foremanPersonId: body.foremanPersonId,
+            date: body.date,
+            startDatetime,
+            endDatetime,
+          },
+        },
+      });
+
+      return created;
     });
 
     return reply.code(200).send({
@@ -336,6 +496,18 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           })),
         });
       }
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'Job',
+          entityId: params.data.jobId,
+          actionType: 'UPDATED',
+          actorUserId: 1,
+          diff: {
+            preferredChannels: body.data.channels,
+          },
+        },
+      });
     });
 
     return reply.code(200).send({

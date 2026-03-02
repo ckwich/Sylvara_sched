@@ -53,6 +53,49 @@ export function findFirstFittingStartMinute(input: {
   return null;
 }
 
+export function floorToTenMinute(minute: number): number {
+  if (!isValidMinuteOfDay(minute)) {
+    return minute;
+  }
+
+  return Math.floor(minute / 10) * 10;
+}
+
+export function findStartAtClickedTime(input: {
+  occupied: MinuteWindow[];
+  clickedMinute: number;
+  durationMinutes: number;
+}): number | null {
+  if (!isValidMinuteOfDay(input.clickedMinute) || input.durationMinutes <= 0) {
+    return null;
+  }
+
+  const clicked = floorToTenMinute(input.clickedMinute);
+  const occupied = coalesceIntervals(input.occupied);
+
+  let prevEnd = 0;
+  let nextStart = MINUTES_PER_DAY;
+
+  for (const interval of occupied) {
+    if (interval.endMinute <= clicked) {
+      prevEnd = Math.max(prevEnd, interval.endMinute);
+    }
+
+    if (interval.startMinute >= clicked) {
+      nextStart = interval.startMinute;
+      break;
+    }
+  }
+
+  const start = Math.max(clicked, prevEnd);
+  const end = start + input.durationMinutes;
+  if (end <= nextStart && end <= MINUTES_PER_DAY) {
+    return start;
+  }
+
+  return null;
+}
+
 export function minutesFromEstimatedHoursRoundedToTen(onsiteHours: Prisma.Decimal): number {
   if (onsiteHours.lte(0)) {
     return 0;
