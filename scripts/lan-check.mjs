@@ -6,6 +6,7 @@ const baseHost = '127.0.0.1';
 async function check(url, label) {
   const { path } = new URL(url);
   return new Promise((resolve) => {
+    let settled = false;
     const request = http.request(
       {
         host: baseHost,
@@ -16,6 +17,10 @@ async function check(url, label) {
       (response) => {
         response.resume();
         response.on('end', () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
           if ((response.statusCode ?? 500) >= 200 && (response.statusCode ?? 500) < 300) {
             console.log(`[PASS] ${label}: HTTP ${response.statusCode}`);
             resolve(true);
@@ -27,7 +32,21 @@ async function check(url, label) {
       },
     );
 
+    request.setTimeout(5000, () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      request.destroy(new Error('Request timed out.'));
+      console.error(`[FAIL] ${label}: timeout`);
+      resolve(false);
+    });
+
     request.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       console.error(`[FAIL] ${label}: ${error.message}`);
       resolve(false);
     });
@@ -45,13 +64,12 @@ async function main() {
 
   if (webHealthOk && apiHealthOk) {
     console.log('LAN check passed.');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    process.exit(0);
+    process.exitCode = 0;
+    return;
   }
 
   console.error('LAN check failed.');
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  process.exit(1);
+  process.exitCode = 1;
 }
 
 await main();
