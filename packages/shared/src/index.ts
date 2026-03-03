@@ -10,4 +10,4 @@ export {
   minuteFromLegacyTime,
   parseHHMMToMinute,
   resolveAnchorMinute,
-} from './time-of-day';
+} from './time-of-day.js';

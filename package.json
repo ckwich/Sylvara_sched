@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "corepack pnpm --filter @sylvara/web dev",
     "lan": "node scripts/lan-dev.mjs",
-    "lan:build": "corepack pnpm --filter @sylvara/api build && corepack pnpm --filter @sylvara/web build",
+    "lan:build": "corepack pnpm --filter @sylvara/shared build && corepack pnpm --filter @sylvara/api build && corepack pnpm --filter @sylvara/web build",
     "lan:start": "node scripts/lan-start.mjs",
     "lan:stop": "node scripts/lan-stop.mjs",
     "lan:check": "node scripts/lan-check.mjs",
