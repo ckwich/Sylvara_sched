@@ -1,7 +1,8 @@
-import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import http from 'node:http';
 
 const hostBind = process.env.HOST_BIND ?? '0.0.0.0';
 const webPort = process.env.WEB_PORT ?? '3000';
@@ -44,6 +45,51 @@ function spawnDetached(command, args, logPath, cwd = process.cwd()) {
   return child.pid;
 }
 
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function checkHealth(pathname, webPort) {
+  return new Promise((resolve) => {
+    const request = http.request(
+      {
+        host: '127.0.0.1',
+        port: Number(webPort),
+        path: pathname,
+        method: 'GET',
+      },
+      (response) => {
+        response.resume();
+        response.on('end', () => {
+          resolve((response.statusCode ?? 500) >= 200 && (response.statusCode ?? 500) < 300);
+        });
+      },
+    );
+    request.on('error', () => resolve(false));
+    request.end();
+  });
+}
+
+async function waitForHealth(webPort, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const [webOk, apiOk] = await Promise.all([
+      checkHealth('/api/web-health', webPort),
+      checkHealth('/api/health', webPort),
+    ]);
+    if (webOk && apiOk) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
 function readExistingPid(path) {
   try {
     return Number.parseInt(readFileSync(path, 'utf8').trim(), 10);
@@ -58,6 +104,11 @@ if (readExistingPid(apiPidPath) || readExistingPid(webPidPath)) {
 }
 
 const apiEntrypoint = join(process.cwd(), 'apps', 'api', 'dist', 'server.js');
+const webBuildMarker = join(process.cwd(), 'apps', 'web', '.next', 'BUILD_ID');
+if (!existsSync(apiEntrypoint) || !existsSync(webBuildMarker)) {
+  console.error('Missing build artifacts. Run `corepack pnpm lan:build` before `lan:start`.');
+  process.exit(1);
+}
 const webRequire = createRequire(join(process.cwd(), 'apps', 'web', 'package.json'));
 const nextBin = webRequire.resolve('next/dist/bin/next');
 const webCwd = join(process.cwd(), 'apps', 'web');
@@ -65,8 +116,19 @@ const webCwd = join(process.cwd(), 'apps', 'web');
 const apiPid = spawnDetached(process.execPath, [apiEntrypoint], apiLogPath);
 const webPid = spawnDetached(process.execPath, [nextBin, 'start', '-H', hostBind, '-p', webPort], webLogPath, webCwd);
 
+if (!isProcessAlive(apiPid) || !isProcessAlive(webPid)) {
+  console.error('LAN services exited immediately. Check .lan/*.log files for startup errors.');
+  process.exit(1);
+}
+
 writeFileSync(apiPidPath, `${apiPid}\n`);
 writeFileSync(webPidPath, `${webPid}\n`);
 
-console.log(`LAN services started (API PID ${apiPid}, WEB PID ${webPid}).`);
+const ready = await waitForHealth(webPort, 15000);
+if (!ready) {
+  console.error('LAN services failed health checks within 15s. Check .lan/*.log files.');
+  process.exit(1);
+}
+
+console.log(`LAN services started and healthy (API PID ${apiPid}, WEB PID ${webPid}).`);
 console.log(`Logs: ${apiLogPath} and ${webLogPath}`);

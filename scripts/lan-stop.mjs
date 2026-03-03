@@ -22,8 +22,14 @@ function stopFromPidFile(path, name) {
     process.kill(pid);
     console.log(`${name}: stopped pid ${pid}.`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.log(`${name}: unable to stop pid ${pid} (${message}).`);
+    const code =
+      error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+    if (code === 'ESRCH') {
+      console.log(`${name}: already stopped (pid ${pid} not found).`);
+    } else {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(`${name}: unable to stop pid ${pid} (${message}).`);
+    }
   } finally {
     rmSync(path, { force: true });
   }
