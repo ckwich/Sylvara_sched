@@ -199,6 +199,22 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 
 ---
 
+### A11 — ScheduleSegment read/list endpoints use roster-linked truth
+**Goal:** Read endpoints return only active roster-linked segments.
+
+**Arrange**
+- Create a segment through `POST /api/schedule-segments` (linked to a roster)
+- Insert an orphan `schedule_segment` fixture without `segment_roster_links`
+
+**Act/Assert**
+- `GET /api/foremen/:foremanPersonId/schedule?date=YYYY-MM-DD` returns the linked segment and excludes orphan rows
+- Soft-delete the segment and verify foreman schedule list becomes empty
+- `GET /api/jobs/:jobId/schedule-segments` returns only linked active segments and includes derived job state
+
+**File:** `apps/api/tests/smoke/schedule_segment_read_endpoints.test.*`
+
+---
+
 ## B) Playwright E2E Smoke Tests (UI workflow)
 
 ### B1 — Roster exclusivity in UI

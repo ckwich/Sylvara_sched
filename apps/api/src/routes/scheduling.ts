@@ -47,6 +47,13 @@ const closeOutBodySchema = z.object({
 const preferredChannelsSchema = z.object({
   channels: z.array(z.nativeEnum(PreferredChannel)).max(3),
 });
+const foremanScheduleQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  includeTravel: z
+    .union([z.literal('true'), z.literal('false')])
+    .optional()
+    .transform((value) => value === 'true'),
+});
 
 const createSegmentBodySchema = z.object({
   jobId: z.number().int().positive(),
@@ -569,6 +576,131 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       result: 'ACCEPT',
       warnings: [],
       travelSegment: travel,
+    });
+  });
+
+  app.get('/api/foremen/:foremanPersonId/schedule', async (request, reply) => {
+    const paramsSchema = z.object({ foremanPersonId: z.coerce.number().int().positive() });
+    const params = paramsSchema.safeParse(request.params);
+    const query = foremanScheduleQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid schedule query.',
+          details: {
+            params: params.success ? undefined : params.error.flatten(),
+            query: query.success ? undefined : query.error.flatten(),
+          },
+        },
+      });
+    }
+
+    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
+    const serviceDate = dateOnlyToUtc(query.data.date);
+    const { startUtc: dayStartUtc, endUtc: dayEndUtc } = localDayBoundsUtc(query.data.date, timezone);
+
+    const roster = await deps.prisma.foremanDayRoster.findFirst({
+      where: {
+        foremanPersonId: params.data.foremanPersonId,
+        date: serviceDate,
+      },
+    });
+
+    if (!roster) {
+      return reply.code(200).send({
+        roster: null,
+        scheduleSegments: [],
+        travelSegments: query.data.includeTravel ? [] : undefined,
+      });
+    }
+
+    const scheduleSegments = await deps.prisma.scheduleSegment.findMany({
+      where: {
+        deletedAt: null,
+        segmentRosterLink: {
+          is: {
+            rosterId: roster.id,
+          },
+        },
+        startDatetime: { lt: dayEndUtc },
+        endDatetime: { gt: dayStartUtc },
+      },
+      orderBy: { startDatetime: 'asc' },
+    });
+
+    const travelSegments = query.data.includeTravel
+      ? await deps.prisma.travelSegment.findMany({
+          where: {
+            foremanPersonId: params.data.foremanPersonId,
+            deletedAt: null,
+            startDatetime: { lt: dayEndUtc },
+            endDatetime: { gt: dayStartUtc },
+          },
+          orderBy: { startDatetime: 'asc' },
+        })
+      : undefined;
+
+    return reply.code(200).send({
+      roster,
+      scheduleSegments,
+      travelSegments,
+    });
+  });
+
+  app.get('/api/jobs/:jobId/schedule-segments', async (request, reply) => {
+    const paramsSchema = z.object({ jobId: z.coerce.number().int().positive() });
+    const params = paramsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid job id.',
+          details: params.error.flatten(),
+        },
+      });
+    }
+
+    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
+
+    const segments = await deps.prisma.scheduleSegment.findMany({
+      where: {
+        jobId: params.data.jobId,
+        deletedAt: null,
+        segmentRosterLink: {
+          isNot: null,
+        },
+      },
+      orderBy: { startDatetime: 'asc' },
+      include: {
+        segmentRosterLink: {
+          include: {
+            roster: true,
+          },
+        },
+      },
+    });
+
+    const jobState = await getDerivedJobState({
+      prisma: deps.prisma,
+      jobId: params.data.jobId,
+      timezone,
+    });
+    if (!jobState) {
+      return reply.code(404).send({
+        error: {
+          code: 'JOB_NOT_FOUND',
+          message: 'Job not found.',
+          details: {},
+        },
+      });
+    }
+
+    return reply.code(200).send({
+      segments,
+      jobState,
     });
   });
 
