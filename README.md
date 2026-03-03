@@ -19,6 +19,21 @@
    - `corepack pnpm test:e2e:smoke`
    - `corepack pnpm test:smoke`
 
+## Fixture Reset Command (Dev Only)
+
+Use this to reset a foreman/day schedule fixture without manual DB cleanup.
+
+- Dry run:
+  - `corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4 --dryRun`
+- Apply reset (links deleted first, segments soft-deleted):
+  - `corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4`
+- Restrict to one job:
+  - `corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4 --jobId=4`
+- Also clear same-day travel segments:
+  - `corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4 --includeTravel`
+
+Warning: this command is destructive and intended for local dev/test use only. It is disabled when `NODE_ENV=production`.
+
 ## Verify Scheduling Core (Phase 2)
 
 1. Call `POST /api/schedule/one-click-attempt` with a valid job/foreman/date.

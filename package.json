@@ -7,6 +7,7 @@
     "dev:all": "turbo run dev --parallel",
     "lint": "corepack pnpm -r lint",
     "format": "prettier --write .",
+    "reset:schedule-day": "corepack pnpm --filter @sylvara/api reset:schedule-day --",
     "test:api:smoke": "corepack pnpm --filter @sylvara/api test:smoke",
     "test:e2e:smoke": "corepack pnpm --filter @sylvara/e2e test:smoke",
     "test:smoke": "corepack pnpm test:api:smoke && corepack pnpm test:e2e:smoke"
