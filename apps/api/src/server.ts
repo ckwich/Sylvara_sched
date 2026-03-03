@@ -6,8 +6,10 @@ import {
   getLanUserHeader,
   hasActorIdHeader,
   hasValidLanBearer,
+  isStrongLanSharedSecret,
   isLanModeEnabled,
   isWriteMethod,
+  MIN_LAN_SHARED_SECRET_LENGTH,
 } from './http/lan-guard.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
 
@@ -24,8 +26,10 @@ export function buildServer(
   const lanModeEnabled = authConfig?.lanModeEnabled ?? isLanModeEnabled(process.env.LAN_MODE);
   const lanSharedSecret = authConfig?.lanSharedSecret ?? process.env.LAN_SHARED_SECRET ?? null;
 
-  if (lanModeEnabled && !lanSharedSecret) {
-    throw new Error('LAN_SHARED_SECRET is required when LAN_MODE=true');
+  if (lanModeEnabled && !isStrongLanSharedSecret(lanSharedSecret)) {
+    throw new Error(
+      `LAN_SHARED_SECRET is required and must be at least ${MIN_LAN_SHARED_SECRET_LENGTH} characters when LAN_MODE=true`,
+    );
   }
 
   app.get('/health', async () => {

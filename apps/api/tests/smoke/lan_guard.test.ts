@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PreferredChannel, PrismaClient } from '@prisma/client';
 
-const LAN_SECRET = 'office-shared-secret';
+const LAN_SECRET = 'office-shared-secret-123456';
 const ORIGINAL_LAN_MODE = process.env.LAN_MODE;
 
 function enableLanMode() {
@@ -18,6 +18,13 @@ afterEach(() => {
 });
 
 describe('LAN guard', () => {
+  test('fails startup when LAN secret is too short', async () => {
+    enableLanMode();
+    expect(() =>
+      buildServer({ prisma: {} as PrismaClient }, { lanModeEnabled: true, lanSharedSecret: 'short-secret' }),
+    ).toThrow('LAN_SHARED_SECRET is required and must be at least 24 characters when LAN_MODE=true');
+  });
+
   test('GET /api/health is allowed without bearer in LAN mode', async () => {
     enableLanMode();
     const app = buildServer({ prisma: {} as PrismaClient }, { lanModeEnabled: true, lanSharedSecret: LAN_SECRET });

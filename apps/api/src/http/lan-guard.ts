@@ -1,5 +1,7 @@
 import type { FastifyRequest } from 'fastify';
 
+export const MIN_LAN_SHARED_SECRET_LENGTH = 24;
+
 export function isLanModeEnabled(value: string | undefined): boolean {
   return value === 'true';
 }
@@ -34,4 +36,11 @@ export function getLanUserHeader(request: FastifyRequest): string | null {
 
 export function hasActorIdHeader(request: FastifyRequest): boolean {
   return request.headers['x-actor-user-id'] !== undefined;
+}
+
+export function isStrongLanSharedSecret(sharedSecret: string | null | undefined): boolean {
+  if (!sharedSecret) {
+    return false;
+  }
+  return sharedSecret.trim().length >= MIN_LAN_SHARED_SECRET_LENGTH;
 }

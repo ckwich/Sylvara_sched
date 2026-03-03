@@ -4,9 +4,10 @@ const hostBind = process.env.HOST_BIND ?? '0.0.0.0';
 const webPort = process.env.WEB_PORT ?? '3000';
 const apiPort = process.env.API_PORT ?? '4000';
 const lanSharedSecret = process.env.LAN_SHARED_SECRET;
+const minSharedSecretLength = 24;
 
-if (!lanSharedSecret) {
-  console.error('LAN_SHARED_SECRET is required for LAN mode.');
+if (!lanSharedSecret || lanSharedSecret.trim().length < minSharedSecretLength) {
+  console.error(`LAN_SHARED_SECRET is required and must be at least ${minSharedSecretLength} characters for LAN mode.`);
   process.exit(1);
 }
 

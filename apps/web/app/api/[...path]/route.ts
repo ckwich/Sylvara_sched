@@ -7,15 +7,21 @@ type RouteContext = {
 };
 
 const METHODS_WITHOUT_BODY = new Set(['GET', 'HEAD']);
+const MIN_LAN_SHARED_SECRET_LENGTH = 24;
 
 async function proxy(request: NextRequest, context: RouteContext): Promise<Response> {
   const apiPort = process.env.API_PORT ?? '4000';
   const lanMode = process.env.LAN_MODE === 'true';
   const sharedSecret = process.env.LAN_SHARED_SECRET;
 
-  if (lanMode && !sharedSecret) {
+  if (lanMode && (!sharedSecret || sharedSecret.trim().length < MIN_LAN_SHARED_SECRET_LENGTH)) {
     return Response.json(
-      { error: { code: 'SERVER_MISCONFIG', message: 'LAN_SHARED_SECRET is required in LAN mode.' } },
+      {
+        error: {
+          code: 'SERVER_MISCONFIG',
+          message: `LAN_SHARED_SECRET must be at least ${MIN_LAN_SHARED_SECRET_LENGTH} characters in LAN mode.`,
+        },
+      },
       { status: 500 },
     );
   }
