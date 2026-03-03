@@ -41,6 +41,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
       $transaction: async (
         fn: (tx: {
           travelSegment: { create: (args: { data: Record<string, unknown> }) => Promise<Record<string, unknown>> };
+          scheduleEvent: { create: () => Promise<void> };
           activityLog: { create: () => Promise<void> };
         }) => Promise<Record<string, unknown>>,
       ) =>
@@ -51,6 +52,9 @@ describe('A7 close out day END_OF_DAY travel', () => {
               created.push(row);
               return row;
             },
+          },
+          scheduleEvent: {
+            create: async () => undefined,
           },
           activityLog: {
             create: async () => undefined,

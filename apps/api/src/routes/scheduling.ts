@@ -518,6 +518,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       },
       select: {
         id: true,
+        jobId: true,
         endDatetime: true,
       },
     });
@@ -551,6 +552,27 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           travelType: TravelType.END_OF_DAY,
           source: SegmentSource.MANUAL,
           createdByUserId: actorUserId,
+        },
+      });
+
+      const latestSegment = segments.reduce((latest, segment) =>
+        segment.endDatetime > latest.endDatetime ? segment : latest,
+      );
+
+      await tx.scheduleEvent.create({
+        data: {
+          jobId: latestSegment.jobId,
+          eventType: 'MANUAL_EDIT',
+          source: 'USER_ACTION',
+          fromAt: startDatetime,
+          toAt: endDatetime,
+          actorUserId,
+          rawSnippet: JSON.stringify({
+            action: 'CLOSE_OUT_DAY',
+            travelType: TravelType.END_OF_DAY,
+            foremanPersonId: body.foremanPersonId,
+            date: body.date,
+          }),
         },
       });
 
