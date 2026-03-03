@@ -10,6 +10,7 @@ import { resolveAnchorMinute } from '@sylvara/db';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
+  getActorDisplay,
   isUnauthenticatedError,
   requireActorUserId,
   UNAUTHENTICATED_ERROR,
@@ -280,6 +281,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       }
       throw error;
     }
+    const actorDisplay = getActorDisplay(request);
 
     const parsed = orgSettingsPatchSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -325,6 +327,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityId: 1,
           actionType: 'UPDATED',
           actorUserId,
+          actorDisplay,
           diff: {
             companyTimezone: settings.companyTimezone,
           },
@@ -351,6 +354,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       }
       throw error;
     }
+    const actorDisplay = getActorDisplay(request);
 
     const parsed = oneClickBodySchema.safeParse(request.body);
     if (!parsed.success) {
@@ -427,6 +431,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityId: roster.id,
           actionType: 'CREATED',
           actorUserId,
+          actorDisplay,
           diff: {
             foremanPersonId: body.foremanPersonId,
             date: body.date,
@@ -582,6 +587,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityId: segment.id,
           actionType: 'SEGMENT_ADDED',
           actorUserId,
+          actorDisplay,
           diff: {
             jobId: job.id,
             startDatetime,
@@ -611,6 +617,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       }
       throw error;
     }
+    const actorDisplay = getActorDisplay(request);
 
     const parsed = closeOutBodySchema.safeParse(request.body);
     if (!parsed.success) {
@@ -725,6 +732,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityId: created.id,
           actionType: 'CREATED',
           actorUserId,
+          actorDisplay,
           diff: {
             foremanPersonId: body.foremanPersonId,
             date: body.date,
@@ -879,6 +887,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       }
       throw error;
     }
+    const actorDisplay = getActorDisplay(request);
 
     const parsed = createSegmentBodySchema.safeParse(request.body);
     if (!parsed.success) {
@@ -1036,6 +1045,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityId: segment.id,
           actionType: 'SEGMENT_CREATED',
           actorUserId,
+          actorDisplay,
           diff: {
             jobId: body.jobId,
             rosterId: body.rosterId,
@@ -1071,6 +1081,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       }
       throw error;
     }
+    const actorDisplay = getActorDisplay(request);
 
     const paramsSchema = z.object({ segmentId: z.coerce.number().int().positive() });
     const params = paramsSchema.safeParse(request.params);
@@ -1256,6 +1267,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityId: existing.id,
           actionType: eventType,
           actorUserId,
+          actorDisplay,
           diff: {
             oldStart: existing.startDatetime,
             oldEnd: existing.endDatetime,
@@ -1290,6 +1302,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       }
       throw error;
     }
+    const actorDisplay = getActorDisplay(request);
 
     const paramsSchema = z.object({ segmentId: z.coerce.number().int().positive() });
     const params = paramsSchema.safeParse(request.params);
@@ -1353,6 +1366,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityId: existing.id,
           actionType: 'SEGMENT_DELETED',
           actorUserId,
+          actorDisplay,
           diff: {
             deletedAt,
           },
@@ -1384,6 +1398,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       }
       throw error;
     }
+    const actorDisplay = getActorDisplay(request);
 
     const paramsSchema = z.object({
       jobId: z.coerce.number().int().positive(),
@@ -1438,6 +1453,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityId: params.data.jobId,
           actionType: 'UPDATED',
           actorUserId,
+          actorDisplay,
           diff: {
             preferredChannels: body.data.channels,
           },

@@ -2,7 +2,13 @@ import Fastify from 'fastify';
 import { prisma } from '@sylvara/db';
 import { fileURLToPath } from 'node:url';
 import { UNAUTHENTICATED_ERROR } from './http/actor.js';
-import { hasValidLanBearer, isLanModeEnabled } from './http/lan-guard.js';
+import {
+  getLanUserHeader,
+  hasActorIdHeader,
+  hasValidLanBearer,
+  isLanModeEnabled,
+  isWriteMethod,
+} from './http/lan-guard.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
 
 type ServerAuthConfig = {
@@ -44,6 +50,19 @@ export function buildServer(
     }
     if (!lanSharedSecret || !hasValidLanBearer(request, lanSharedSecret)) {
       return reply.code(401).send(UNAUTHENTICATED_ERROR);
+    }
+    if (isWriteMethod(request.method)) {
+      if (!getLanUserHeader(request)) {
+        return reply.code(401).send(UNAUTHENTICATED_ERROR);
+      }
+      if (hasActorIdHeader(request)) {
+        return reply.code(400).send({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'x-actor-user-id is not allowed in LAN mode.',
+          },
+        });
+      }
     }
   });
 

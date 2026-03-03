@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
+import { getLanUserHeader, isLanModeEnabled } from './lan-guard.js';
 
 export const UNAUTHENTICATED_ERROR = {
   error: {
@@ -27,6 +28,23 @@ export async function requireActorUserId(
     throw new UnauthenticatedError();
   }
 
+  if (isLanModeEnabled(process.env.LAN_MODE)) {
+    const lanUser = getLanUserHeader(request);
+    if (!lanUser) {
+      throw new UnauthenticatedError();
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { active: true },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new UnauthenticatedError();
+    }
+    return user.id;
+  }
+
   const rawHeader = request.headers['x-actor-user-id'];
   const value = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
 
@@ -49,4 +67,11 @@ export async function requireActorUserId(
   }
 
   return actorUserId;
+}
+
+export function getActorDisplay(request: FastifyRequest): string | null {
+  if (!isLanModeEnabled(process.env.LAN_MODE)) {
+    return null;
+  }
+  return getLanUserHeader(request);
 }
