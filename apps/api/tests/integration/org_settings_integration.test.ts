@@ -1,0 +1,42 @@
+import { afterAll, beforeEach, describe, expect, test } from 'vitest';
+import { buildServer } from '../../src/server';
+import { makePrisma, resetDb, seedBase } from './_helpers/db';
+
+const prisma = makePrisma();
+
+describe('org settings integration (real postgres)', () => {
+  beforeEach(async () => {
+    await resetDb(prisma);
+  });
+
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
+
+  test('PATCH timezone persists and GET returns updated value', async () => {
+    const { actor } = await seedBase(prisma);
+    const app = buildServer({ prisma });
+
+    const patchResponse = await app.inject({
+      method: 'PATCH',
+      url: '/api/org-settings',
+      headers: {
+        'x-actor-user-id': String(actor.id),
+      },
+      payload: {
+        companyTimezone: 'America/Chicago',
+      },
+    });
+    expect(patchResponse.statusCode).toBe(200);
+    expect(patchResponse.json().companyTimezone).toBe('America/Chicago');
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: '/api/org-settings',
+    });
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json().companyTimezone).toBe('America/Chicago');
+
+    await app.close();
+  });
+});

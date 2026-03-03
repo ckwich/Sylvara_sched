@@ -215,6 +215,19 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 
 ---
 
+### A12 — Org settings timezone read/update
+**Goal:** Company timezone is readable and writable through API with validation and auth on writes.
+
+**Arrange/Act/Assert**
+- `GET /api/org-settings` returns `companyTimezone`
+- `PATCH /api/org-settings` without actor header returns `401 UNAUTHENTICATED`
+- `PATCH /api/org-settings` with invalid timezone returns `400 VALIDATION_ERROR`
+- `PATCH /api/org-settings` with valid IANA timezone persists the update
+
+**File:** `apps/api/tests/smoke/org_settings.test.*`
+
+---
+
 ## B) Playwright E2E Smoke Tests (UI workflow)
 
 ### B1 — Roster exclusivity in UI

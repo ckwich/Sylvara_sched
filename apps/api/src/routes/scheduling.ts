@@ -47,6 +47,9 @@ const closeOutBodySchema = z.object({
 const preferredChannelsSchema = z.object({
   channels: z.array(z.nativeEnum(PreferredChannel)).max(3),
 });
+const orgSettingsPatchSchema = z.object({
+  companyTimezone: z.string().min(1),
+});
 const foremanScheduleQuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   includeTravel: z
@@ -89,6 +92,15 @@ function localDayBoundsUtc(localDate: string, timezone: string): { startUtc: Dat
 function minuteOfLocalDate(value: Date, timezone: string): number {
   const local = DateTime.fromJSDate(value, { zone: 'utc' }).setZone(timezone);
   return local.hour * 60 + local.minute;
+}
+
+function isValidIanaTimeZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function splitToLocalDayIntervals(input: {
@@ -198,6 +210,89 @@ async function getDerivedJobState(input: {
 }
 
 export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
+  app.get('/api/org-settings', async (_request, reply) => {
+    const settings = await deps.prisma.orgSettings.findFirst({
+      select: {
+        companyTimezone: true,
+        operatingStartMinute: true,
+        operatingEndMinute: true,
+      },
+    });
+
+    return reply.code(200).send({
+      companyTimezone: settings?.companyTimezone ?? 'America/New_York',
+      operatingStartMinute: settings?.operatingStartMinute ?? null,
+      operatingEndMinute: settings?.operatingEndMinute ?? null,
+    });
+  });
+
+  app.patch('/api/org-settings', async (request, reply) => {
+    let actorUserId: number;
+    try {
+      actorUserId = await requireActorUserId(deps.prisma, request);
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        return reply.code(401).send(UNAUTHENTICATED_ERROR);
+      }
+      throw error;
+    }
+
+    const parsed = orgSettingsPatchSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid org settings payload.',
+          details: parsed.error.flatten(),
+        },
+      });
+    }
+
+    if (!isValidIanaTimeZone(parsed.data.companyTimezone)) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid company timezone.',
+          details: {},
+        },
+      });
+    }
+
+    const updated = await deps.prisma.orgSettings.upsert({
+      where: { id: 1 },
+      create: {
+        id: 1,
+        companyTimezone: parsed.data.companyTimezone,
+      },
+      update: {
+        companyTimezone: parsed.data.companyTimezone,
+      },
+      select: {
+        companyTimezone: true,
+        operatingStartMinute: true,
+        operatingEndMinute: true,
+      },
+    });
+
+    await deps.prisma.activityLog.create({
+      data: {
+        entityType: 'OrgSettings',
+        entityId: 1,
+        actionType: 'UPDATED',
+        actorUserId,
+        diff: {
+          companyTimezone: updated.companyTimezone,
+        },
+      },
+    });
+
+    return reply.code(200).send({
+      companyTimezone: updated.companyTimezone,
+      operatingStartMinute: updated.operatingStartMinute,
+      operatingEndMinute: updated.operatingEndMinute,
+    });
+  });
+
   app.post('/api/schedule/one-click-attempt', async (request, reply) => {
     let actorUserId: number;
     try {
