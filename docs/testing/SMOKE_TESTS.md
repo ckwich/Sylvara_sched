@@ -228,6 +228,19 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 
 ---
 
+### A13 — LAN API guard behavior
+**Goal:** In LAN mode, API requires bearer auth for `/api/*` except health.
+
+**Arrange/Act/Assert**
+- With LAN guard enabled, `GET /api/health` returns 200 without auth
+- With LAN guard enabled, non-health read route returns `401 UNAUTHENTICATED` when bearer is missing
+- With LAN guard enabled, non-health write route returns `401 UNAUTHENTICATED` when bearer is invalid
+- With valid bearer, route behavior proceeds normally
+
+**File:** `apps/api/tests/smoke/lan_guard.test.*`
+
+---
+
 ## B) Playwright E2E Smoke Tests (UI workflow)
 
 ### B1 — Roster exclusivity in UI

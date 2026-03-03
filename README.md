@@ -1,6 +1,8 @@
 # Sylvara Scheduling App
 
-## How To Run Locally
+## Run Modes
+
+### Local dev (single machine)
 
 1. Install dependencies:
    - `corepack pnpm install`
@@ -19,19 +21,30 @@
    - `corepack pnpm test:e2e:smoke`
    - `corepack pnpm test:smoke`
 
-## LAN Pilot (Internal Only)
+### LAN mode (internal office pilot)
 
-Use this when running the Scheduler from an always-on office host so other office PCs can access it over LAN.
+Use this when running the Scheduler from an always-on office host so coworkers can access it over LAN.
 
-1. Start services:
-   - `corepack pnpm dev` (web on `0.0.0.0:3000`)
-   - API defaults to host `0.0.0.0` on port `4000`
-2. Windows Firewall:
+1. Set env vars (example):
+   - `LAN_MODE=true`
+   - `LAN_SHARED_SECRET=<shared-internal-secret>`
+   - `HOST_BIND=0.0.0.0`
+   - `WEB_PORT=3000`
+   - `API_PORT=4000`
+   - `PUBLIC_WEB_ORIGIN=http://schedule-pc:3000`
+2. Start services:
+   - `corepack pnpm lan`
+3. API access in LAN mode:
+   - Browser still calls same-origin `/api/*` from the web app.
+   - API requires `Authorization: Bearer <LAN_SHARED_SECRET>` on `/api/*`, except `GET /api/health`.
+   - The web server proxy adds this header server-side in LAN mode.
+4. Windows Firewall:
    - Allow inbound TCP `3000` on the host machine
    - Allow inbound TCP `4000` only if clients need direct API access (normally web uses same-origin `/api` proxy)
-3. From another office PC:
+5. From another office PC:
    - Open `http://<host-machine-name>:3000/dispatch`
    - Example: `http://SCHED-HOST:3000/dispatch`
+6. Keep the shared secret internal. This is LAN-only guardrail, not SSO.
 
 ## Integration Tests (Real Postgres)
 
