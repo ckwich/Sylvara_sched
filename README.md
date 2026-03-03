@@ -19,6 +19,20 @@
    - `corepack pnpm test:e2e:smoke`
    - `corepack pnpm test:smoke`
 
+## LAN Pilot (Internal Only)
+
+Use this when running the Scheduler from an always-on office host so other office PCs can access it over LAN.
+
+1. Start services:
+   - `corepack pnpm dev` (web on `0.0.0.0:3000`)
+   - API defaults to host `0.0.0.0` on port `4000`
+2. Windows Firewall:
+   - Allow inbound TCP `3000` on the host machine
+   - Allow inbound TCP `4000` only if clients need direct API access (normally web uses same-origin `/api` proxy)
+3. From another office PC:
+   - Open `http://<host-machine-name>:3000/dispatch`
+   - Example: `http://SCHED-HOST:3000/dispatch`
+
 ## Integration Tests (Real Postgres)
 
 Test DB uses `docker-compose.test.yml` and `TEST_DATABASE_URL`.
