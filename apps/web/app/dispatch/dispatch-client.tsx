@@ -289,9 +289,11 @@ export default function DispatchClient() {
 
       <section style={{ marginTop: 20 }}>
         <h2>Diagnostics</h2>
-        <p>API base URL: {isHydrated ? (API_BASE_URL || '(same-origin)') : '(client-only)'}</p>
+        <p>Request mode: {isHydrated ? '/api/* (same-origin rewrite proxy)' : '(client-only)'}</p>
+        <p>API base URL: {isHydrated ? (API_BASE_URL || '(browser uses relative /api)') : '(client-only)'}</p>
         <p>Timezone used for display: {companyTimezone}</p>
         <p>Timezone load error: {timezoneError ?? 'none'}</p>
+        {/* TODO(dev-only): trim raw error payloads before exposing diagnostics to broader users. */}
         <pre style={{ background: '#f5f5f5', padding: 8, overflowX: 'auto' }}>
 {JSON.stringify(
   isHydrated
