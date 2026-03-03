@@ -49,7 +49,13 @@ type RequestDiagnostics = {
   networkErrorMessage?: string | null;
 };
 
-export default function DispatchClient() {
+type DispatchClientProps = {
+  lanModeEnabled: boolean;
+};
+
+const LAN_USER_STORAGE_KEY = 'sylvara.lanUser';
+
+export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [foremanPersonId, setForemanPersonId] = useState('4');
   const [date, setDate] = useState(todayIsoDate());
@@ -77,6 +83,7 @@ export default function DispatchClient() {
     errorBody: null,
     networkErrorMessage: null,
   });
+  const [lanUser, setLanUser] = useState('');
 
   const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
 
@@ -93,6 +100,16 @@ export default function DispatchClient() {
   useEffect(() => {
     setIsHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!lanModeEnabled || typeof window === 'undefined') {
+      return;
+    }
+    const stored = window.localStorage.getItem(LAN_USER_STORAGE_KEY);
+    if (stored) {
+      setLanUser(stored);
+    }
+  }, [lanModeEnabled]);
 
   useEffect(() => {
     setScheduleDiagnostics((current) => ({
@@ -203,6 +220,11 @@ export default function DispatchClient() {
 
     setCreating(true);
     try {
+      const normalizedLanUser = lanModeEnabled ? lanUser.trim() : '';
+      if (lanModeEnabled && !normalizedLanUser) {
+        setCreateError('UNAUTHENTICATED: LAN User is required in LAN mode.');
+        return;
+      }
       await createScheduleSegment(
         {
           jobId: parsedJobId,
@@ -211,7 +233,11 @@ export default function DispatchClient() {
           endDatetime: toIsoFromLocalInput(endDatetime),
         },
         actorUserId,
+        normalizedLanUser || undefined,
       );
+      if (lanModeEnabled) {
+        window.localStorage.setItem(LAN_USER_STORAGE_KEY, normalizedLanUser);
+      }
       await loadSchedule();
       setJobId('');
       setStartDatetime('');
@@ -248,6 +274,17 @@ export default function DispatchClient() {
         <button type="button" onClick={loadSchedule} disabled={loading}>
           {loading ? 'Loading...' : 'Load'}
         </button>
+        {lanModeEnabled ? (
+          <label>
+            LAN User
+            <input
+              type="text"
+              value={lanUser}
+              onChange={(event) => setLanUser(event.target.value)}
+              placeholder="Your name"
+            />
+          </label>
+        ) : null}
       </section>
 
       {error ? (

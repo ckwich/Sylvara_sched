@@ -12,13 +12,30 @@ const COMMON_TIMEZONES = [
   'UTC',
 ];
 
-export default function CompanyClient() {
+type CompanyClientProps = {
+  lanModeEnabled: boolean;
+};
+
+const LAN_USER_STORAGE_KEY = 'sylvara.lanUser';
+
+export default function CompanyClient({ lanModeEnabled }: CompanyClientProps) {
   const [companyTimezone, setCompanyTimezone] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [lanUser, setLanUser] = useState('');
   const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
+
+  useEffect(() => {
+    if (!lanModeEnabled || typeof window === 'undefined') {
+      return;
+    }
+    const stored = window.localStorage.getItem(LAN_USER_STORAGE_KEY);
+    if (stored) {
+      setLanUser(stored);
+    }
+  }, [lanModeEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,8 +69,20 @@ export default function CompanyClient() {
     setError(null);
     setSaved(null);
     try {
-      const response = await patchOrgSettingsTimezone(companyTimezone, actorUserId);
+      const normalizedLanUser = lanModeEnabled ? lanUser.trim() : '';
+      if (lanModeEnabled && !normalizedLanUser) {
+        setError('UNAUTHENTICATED: LAN User is required in LAN mode.');
+        return;
+      }
+      const response = await patchOrgSettingsTimezone(
+        companyTimezone,
+        actorUserId,
+        normalizedLanUser || undefined,
+      );
       setCompanyTimezone(response.companyTimezone);
+      if (lanModeEnabled) {
+        window.localStorage.setItem(LAN_USER_STORAGE_KEY, normalizedLanUser);
+      }
       setSaved('Saved.');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'ORG_SETTINGS_ERROR: Failed to save settings.');
@@ -69,6 +98,17 @@ export default function CompanyClient() {
       {error ? <p style={{ color: 'crimson' }}>{error}</p> : null}
       {saved ? <p style={{ color: 'green' }}>{saved}</p> : null}
       <form onSubmit={onSave} style={{ display: 'grid', gap: 8, maxWidth: 420 }}>
+        {lanModeEnabled ? (
+          <label>
+            LAN User
+            <input
+              type="text"
+              value={lanUser}
+              onChange={(event) => setLanUser(event.target.value)}
+              placeholder="Your name"
+            />
+          </label>
+        ) : null}
         <label>
           Common Timezones
           <select

@@ -26,6 +26,10 @@ async function proxy(request: NextRequest, context: RouteContext): Promise<Respo
 
   const headers = new Headers(request.headers);
   headers.delete('host');
+  const lanUser = request.headers.get('x-lan-user');
+  if (lanUser) {
+    headers.set('x-lan-user', lanUser);
+  }
   if (lanMode && sharedSecret) {
     headers.set('authorization', `Bearer ${sharedSecret}`);
   }

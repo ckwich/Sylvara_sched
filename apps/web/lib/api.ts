@@ -119,12 +119,16 @@ export async function getForemanSchedule(
 export async function createScheduleSegment(
   payload: CreateScheduleSegmentPayload,
   actorUserId: string | undefined,
+  lanUser: string | undefined,
 ): Promise<void> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
   if (actorUserId) {
     headers['x-actor-user-id'] = actorUserId;
+  }
+  if (lanUser) {
+    headers['x-lan-user'] = lanUser;
   }
 
   const url = `${API_BASE_URL}/api/schedule-segments`;
@@ -177,12 +181,16 @@ export async function getOrgSettings(): Promise<OrgSettingsResponse> {
 export async function patchOrgSettingsTimezone(
   companyTimezone: string,
   actorUserId: string | undefined,
+  lanUser: string | undefined,
 ): Promise<OrgSettingsResponse> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
   if (actorUserId) {
     headers['x-actor-user-id'] = actorUserId;
+  }
+  if (lanUser) {
+    headers['x-lan-user'] = lanUser;
   }
 
   const url = buildOrgSettingsUrl();
