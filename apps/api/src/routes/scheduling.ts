@@ -1400,6 +1400,20 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
+    const job = await deps.prisma.job.findUnique({
+      where: { id: params.data.jobId },
+      select: { id: true },
+    });
+    if (!job) {
+      return reply.code(404).send({
+        error: {
+          code: 'JOB_NOT_FOUND',
+          message: 'Job not found.',
+          details: {},
+        },
+      });
+    }
+
     await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.jobPreferredChannel.deleteMany({
         where: { jobId: params.data.jobId },

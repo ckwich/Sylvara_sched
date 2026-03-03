@@ -30,6 +30,10 @@ describe('preferred channels auth-backed actor attribution', () => {
         findUnique: async ({ where }: { where: { id: number } }) =>
           where.id === 42 ? { id: 42 } : null,
       },
+      job: {
+        findUnique: async ({ where }: { where: { id: number } }) =>
+          where.id === 10 ? { id: 10 } : null,
+      },
       $transaction: async (
         fn: (tx: {
           jobPreferredChannel: {
@@ -73,6 +77,37 @@ describe('preferred channels auth-backed actor attribution', () => {
     });
     expect(captured.actorUserId).toBe(42);
     expect(captured.channels).toEqual(['CALL', 'TEXT']);
+    await app.close();
+  });
+
+  test('returns 404 when job does not exist and does not write', async () => {
+    let transactionCalled = false;
+    const fakePrisma = {
+      user: {
+        findUnique: async ({ where }: { where: { id: number } }) =>
+          where.id === 42 ? { id: 42 } : null,
+      },
+      job: {
+        findUnique: async () => null,
+      },
+      $transaction: async () => {
+        transactionCalled = true;
+      },
+    } as unknown as PrismaClient;
+
+    const app = buildServer({ prisma: fakePrisma });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/jobs/999999/preferred-channels',
+      headers: { 'x-actor-user-id': '42' },
+      payload: {
+        channels: ['CALL'],
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('JOB_NOT_FOUND');
+    expect(transactionCalled).toBe(false);
     await app.close();
   });
 

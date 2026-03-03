@@ -98,4 +98,34 @@ describe('preferred channels integration (real postgres)', () => {
     );
     await app.close();
   });
+
+  test('returns 404 JOB_NOT_FOUND for missing job and leaves DB unchanged', async () => {
+    const { actor } = await seedBase(prisma);
+    const app = buildServer({ prisma });
+
+    const beforeChannels = await prisma.jobPreferredChannel.count();
+    const beforeLogs = await prisma.activityLog.count({
+      where: { entityType: 'Job' },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/jobs/999999/preferred-channels',
+      headers: { 'x-actor-user-id': String(actor.id) },
+      payload: {
+        channels: ['CALL'],
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('JOB_NOT_FOUND');
+
+    const afterChannels = await prisma.jobPreferredChannel.count();
+    const afterLogs = await prisma.activityLog.count({
+      where: { entityType: 'Job' },
+    });
+    expect(afterChannels).toBe(beforeChannels);
+    expect(afterLogs).toBe(beforeLogs);
+    await app.close();
+  });
 });
