@@ -29,6 +29,23 @@ Replace the existing backlog tracking workbook with a multi-user app that:
 - Job revenue stays in backlog until job is complete and customer satisfied (no partial $ recognition).
 - Requirements enforcement UX: **polite reminder pop-up** (no hard warnings/blocks). Requirements that are not Approved or Not Required are clearly indicated with their actual status.
 
+## 0.9 UX Priority (Now)
+
+UX is a first-class priority for this scheduler module. The goal is **low-friction dispatch work** (fast, obvious, hard to misuse) and **low-ops burden** (easy to start/stop, diagnose, and recover).
+
+**UX principles (apply to every UI change):**
+- **Make the “happy path” obvious**: schedule view loads with minimal inputs; clear primary CTA; sensible defaults.
+- **Progressive disclosure**: keep advanced controls (filters, diagnostics, admin settings) out of the primary flow.
+- **Guardrails over cleverness**: validate early, explain *why* a write is blocked (conflict windows, overlap, midnight, missing roster) and how to fix it.
+- **Fast feedback**: optimistic UI only when safe; otherwise show immediate status, errors, and next action.
+- **Keyboard-first and accessibility-minded**: tab order, visible focus, ARIA where appropriate; avoid UI patterns that require precision mouse work.
+- **Operational clarity**: surface “system state” minimally (API reachable, timezone in use, roster-linked semantics) without leaking sensitive internals.
+
+**Definition of Done for any user-facing change:**
+- Adds/updates smoke coverage where feasible (API) and/or integration coverage when correctness is at risk.
+- Includes clear error strings and user-facing affordances (retry, reset, copy details) where a failure is likely.
+- Does not introduce hydration mismatches or environment-specific assumptions.
+
 ---
 
 ## 1. Scope Boundaries (Beta)
