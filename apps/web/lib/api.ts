@@ -1,7 +1,7 @@
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  'http://localhost:4000';
+  typeof window === 'undefined'
+    ? (process.env.API_BASE_URL ?? 'http://localhost:4000')
+    : '';
 
 type ApiErrorBody = {
   error?: {
@@ -11,16 +11,24 @@ type ApiErrorBody = {
 };
 
 export class ApiRequestError extends Error {
-  status: number;
+  status: number | null;
   url: string;
   body: unknown;
+  networkErrorMessage?: string;
 
-  constructor(params: { status: number; url: string; body: unknown; message: string }) {
+  constructor(params: {
+    status: number | null;
+    url: string;
+    body: unknown;
+    message: string;
+    networkErrorMessage?: string;
+  }) {
     super(params.message);
     this.name = 'ApiRequestError';
     this.status = params.status;
     this.url = params.url;
     this.body = params.body;
+    this.networkErrorMessage = params.networkErrorMessage;
   }
 }
 
@@ -68,9 +76,17 @@ export function buildForemanScheduleUrl(foremanPersonId: number, date: string): 
   return `${API_BASE_URL}/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}`;
 }
 
+async function parseJsonSafe(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 function buildApiError(status: number, url: string, body: ApiErrorBody): Error {
-  const code = body.error?.code ?? `HTTP_${status}`;
-  const message = body.error?.message ?? 'Request failed.';
+  const code = body?.error?.code ?? `HTTP_${status}`;
+  const message = body?.error?.message ?? 'Request failed.';
   return new ApiRequestError({
     status,
     url,
@@ -84,10 +100,21 @@ export async function getForemanSchedule(
   date: string,
 ): Promise<ForemanScheduleResponse> {
   const url = buildForemanScheduleUrl(foremanPersonId, date);
-  const response = await fetch(url, { method: 'GET', cache: 'no-store' });
-  const body = (await response.json()) as ForemanScheduleResponse | ApiErrorBody;
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ForemanScheduleResponse | ApiErrorBody;
   if (!response.ok) {
-    throw buildApiError(response.status, url, body as ApiErrorBody);
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as ForemanScheduleResponse;
 }
@@ -104,26 +131,48 @@ export async function createScheduleSegment(
   }
 
   const url = `${API_BASE_URL}/api/schedule-segments`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
-  const body = (await response.json()) as ApiErrorBody;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
   if (!response.ok) {
-    throw buildApiError(response.status, url, body);
+    throw buildApiError(response.status, url, body ?? {});
   }
 }
 
 export async function getOrgSettings(): Promise<OrgSettingsResponse> {
   const url = buildOrgSettingsUrl();
-  const response = await fetch(url, {
-    method: 'GET',
-    cache: 'no-store',
-  });
-  const body = (await response.json()) as OrgSettingsResponse | ApiErrorBody;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as OrgSettingsResponse | ApiErrorBody;
   if (!response.ok) {
-    throw buildApiError(response.status, url, body as ApiErrorBody);
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as OrgSettingsResponse;
 }
@@ -140,14 +189,25 @@ export async function patchOrgSettingsTimezone(
   }
 
   const url = buildOrgSettingsUrl();
-  const response = await fetch(url, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify({ companyTimezone }),
-  });
-  const body = (await response.json()) as OrgSettingsResponse | ApiErrorBody;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ companyTimezone }),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as OrgSettingsResponse | ApiErrorBody;
   if (!response.ok) {
-    throw buildApiError(response.status, url, body as ApiErrorBody);
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as OrgSettingsResponse;
 }

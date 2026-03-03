@@ -46,6 +46,7 @@ type RequestDiagnostics = {
   url: string;
   status: number | null;
   errorBody: unknown | null;
+  networkErrorMessage?: string | null;
 };
 
 export default function DispatchClient() {
@@ -67,11 +68,13 @@ export default function DispatchClient() {
     url: buildOrgSettingsUrl(),
     status: null,
     errorBody: null,
+    networkErrorMessage: null,
   });
   const [scheduleDiagnostics, setScheduleDiagnostics] = useState<RequestDiagnostics>({
     url: buildForemanScheduleUrl(Number(foremanPersonId), date),
     status: null,
     errorBody: null,
+    networkErrorMessage: null,
   });
 
   const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
@@ -99,15 +102,20 @@ export default function DispatchClient() {
     const parsedForemanId = Number(foremanPersonId);
     const orgUrl = buildOrgSettingsUrl();
     const scheduleUrl = buildForemanScheduleUrl(parsedForemanId, date);
-    setOrgDiagnostics({ url: orgUrl, status: null, errorBody: null });
-    setScheduleDiagnostics({ url: scheduleUrl, status: null, errorBody: null });
+    setOrgDiagnostics({ url: orgUrl, status: null, errorBody: null, networkErrorMessage: null });
+    setScheduleDiagnostics({
+      url: scheduleUrl,
+      status: null,
+      errorBody: null,
+      networkErrorMessage: null,
+    });
 
     try {
       try {
         const settings = await getOrgSettings();
         setCompanyTimezone(settings.companyTimezone);
         setTimezoneError(null);
-        setOrgDiagnostics({ url: orgUrl, status: 200, errorBody: null });
+        setOrgDiagnostics({ url: orgUrl, status: 200, errorBody: null, networkErrorMessage: null });
       } catch (orgError) {
         setCompanyTimezone(FALLBACK_TIMEZONE);
         if (orgError instanceof ApiRequestError) {
@@ -116,6 +124,7 @@ export default function DispatchClient() {
             url: orgError.url,
             status: orgError.status,
             errorBody: orgError.body,
+            networkErrorMessage: orgError.networkErrorMessage ?? null,
           });
         } else {
           setTimezoneError('ORG_SETTINGS_ERROR: Failed to load company timezone.');
@@ -123,13 +132,19 @@ export default function DispatchClient() {
             url: orgUrl,
             status: null,
             errorBody: String(orgError),
+            networkErrorMessage: null,
           });
         }
       }
 
       const response = await getForemanSchedule(parsedForemanId, date);
       setData(response);
-      setScheduleDiagnostics({ url: scheduleUrl, status: 200, errorBody: null });
+      setScheduleDiagnostics({
+        url: scheduleUrl,
+        status: 200,
+        errorBody: null,
+        networkErrorMessage: null,
+      });
       if (response.roster) {
         setRosterId(String(response.roster.id));
       }
@@ -140,6 +155,7 @@ export default function DispatchClient() {
           url: loadError.url,
           status: loadError.status,
           errorBody: loadError.body,
+          networkErrorMessage: loadError.networkErrorMessage ?? null,
         });
       } else {
         setError(loadError instanceof Error ? loadError.message : 'UNKNOWN_ERROR: Failed to load schedule.');
@@ -147,6 +163,7 @@ export default function DispatchClient() {
           url: scheduleUrl,
           status: null,
           errorBody: String(loadError),
+          networkErrorMessage: null,
         });
       }
       setData(null);
