@@ -51,7 +51,15 @@ function buildWindowConflictPrisma(availabilityNotes: string | null): PrismaClie
 }
 
 describe('A6 customer window conflict and unconfigured warning', () => {
-  test.each(['09:00-11:00', '9am-11am', '9-11am', '9 to 11am', '7am-5pm', '7:00am-5:00pm'])(
+  test.each([
+    '09:00-11:00',
+    '9am-11am',
+    '9-11am',
+    '9 to 11am',
+    '7am-5pm',
+    '7:00am-5:00pm',
+    'mornings only, 7am-5pm',
+  ])(
     'rejects CUSTOMER_WINDOW_CONFLICT when only outside-window capacity remains (%s)',
     async (availabilityNotes) => {
       const app = buildServer({ prisma: buildWindowConflictPrisma(availabilityNotes) });
