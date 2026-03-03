@@ -12,6 +12,34 @@ function run(command, args, env = process.env) {
   }
 }
 
+function validateTestDatabaseUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    console.error('TEST_DATABASE_URL must be a valid URL.');
+    process.exit(1);
+  }
+
+  if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
+    console.error(
+      `TEST_DATABASE_URL must use postgres protocol (postgresql:// or postgres://). Received ${parsed.protocol}`,
+    );
+    process.exit(1);
+  }
+
+  return parsed;
+}
+
+function buildPrismaEnv(databaseUrl) {
+  const env = {
+    ...process.env,
+    DATABASE_URL: databaseUrl,
+  };
+  delete env.PRISMA_GENERATE_NO_ENGINE;
+  return env;
+}
+
 async function waitForPostgres() {
   for (let i = 0; i < 60; i += 1) {
     const probe = spawnSync(
@@ -37,23 +65,30 @@ if (!process.env.TEST_DATABASE_URL) {
   process.exit(1);
 }
 
+const parsedTestDatabaseUrl = validateTestDatabaseUrl(process.env.TEST_DATABASE_URL);
+console.log(
+  `Integration DB target: ${parsedTestDatabaseUrl.protocol}//${parsedTestDatabaseUrl.hostname}:${parsedTestDatabaseUrl.port || '5432'}${parsedTestDatabaseUrl.pathname}`,
+);
+
 run('docker', ['compose', '-f', 'docker-compose.test.yml', 'up', '-d']);
 await waitForPostgres();
+
+const prismaEnv = buildPrismaEnv(process.env.TEST_DATABASE_URL);
+
+run(
+  'corepack',
+  ['pnpm', '--filter', '@sylvara/db', 'prisma:generate'],
+  prismaEnv,
+);
 
 run(
   'corepack',
   ['pnpm', '--filter', '@sylvara/db', 'prisma:migrate:deploy'],
-  {
-    ...process.env,
-    DATABASE_URL: process.env.TEST_DATABASE_URL,
-  },
+  prismaEnv,
 );
 
 run(
   'corepack',
   ['pnpm', '--filter', '@sylvara/api', 'test:integration'],
-  {
-    ...process.env,
-    DATABASE_URL: process.env.TEST_DATABASE_URL,
-  },
+  prismaEnv,
 );
