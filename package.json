@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "corepack pnpm --filter @sylvara/web dev",
     "lan": "node scripts/lan-dev.mjs",
+    "lan:build": "corepack pnpm --filter @sylvara/api build && corepack pnpm --filter @sylvara/web build",
+    "lan:start": "node scripts/lan-start.mjs",
+    "lan:stop": "node scripts/lan-stop.mjs",
     "dev:all": "turbo run dev --parallel",
     "lint": "corepack pnpm -r lint",
     "format": "prettier --write .",
