@@ -50,6 +50,7 @@ type RequestDiagnostics = {
 };
 
 export default function DispatchClient() {
+  const [isHydrated, setIsHydrated] = useState(false);
   const [foremanPersonId, setForemanPersonId] = useState('4');
   const [date, setDate] = useState(todayIsoDate());
   const [data, setData] = useState<ForemanScheduleResponse | null>(null);
@@ -88,6 +89,10 @@ export default function DispatchClient() {
     }
     return null;
   }, [startDatetime, endDatetime]);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   useEffect(() => {
     setScheduleDiagnostics((current) => ({
@@ -284,15 +289,20 @@ export default function DispatchClient() {
 
       <section style={{ marginTop: 20 }}>
         <h2>Diagnostics</h2>
-        <p>API base URL: {API_BASE_URL}</p>
+        <p>API base URL: {isHydrated ? (API_BASE_URL || '(same-origin)') : '(client-only)'}</p>
         <p>Timezone used for display: {companyTimezone}</p>
         <p>Timezone load error: {timezoneError ?? 'none'}</p>
         <pre style={{ background: '#f5f5f5', padding: 8, overflowX: 'auto' }}>
 {JSON.stringify(
-  {
-    orgSettingsRequest: orgDiagnostics,
-    foremanScheduleRequest: scheduleDiagnostics,
-  },
+  isHydrated
+    ? {
+        orgSettingsRequest: orgDiagnostics,
+        foremanScheduleRequest: scheduleDiagnostics,
+      }
+    : {
+        orgSettingsRequest: { url: '(client-only)', status: null, errorBody: null },
+        foremanScheduleRequest: { url: '(client-only)', status: null, errorBody: null },
+      },
   null,
   2,
 )}
@@ -302,15 +312,25 @@ export default function DispatchClient() {
           <textarea
             readOnly
             value={JSON.stringify(
-              {
-                foremanPersonId,
-                date,
-                apiBaseUrl: API_BASE_URL,
-                timezoneUsed: companyTimezone,
-                timezoneError,
-                orgSettingsRequest: orgDiagnostics,
-                foremanScheduleRequest: scheduleDiagnostics,
-              },
+              isHydrated
+                ? {
+                    foremanPersonId,
+                    date,
+                    apiBaseUrl: API_BASE_URL || '(same-origin)',
+                    timezoneUsed: companyTimezone,
+                    timezoneError,
+                    orgSettingsRequest: orgDiagnostics,
+                    foremanScheduleRequest: scheduleDiagnostics,
+                  }
+                : {
+                    foremanPersonId,
+                    date,
+                    apiBaseUrl: '(client-only)',
+                    timezoneUsed: companyTimezone,
+                    timezoneError,
+                    orgSettingsRequest: { url: '(client-only)', status: null, errorBody: null },
+                    foremanScheduleRequest: { url: '(client-only)', status: null, errorBody: null },
+                  },
               null,
               2,
             )}
