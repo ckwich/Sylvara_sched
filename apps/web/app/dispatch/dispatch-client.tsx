@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  API_BASE_URL,
+  ApiRequestError,
+  buildForemanScheduleUrl,
+  buildOrgSettingsUrl,
   createScheduleSegment,
   getForemanSchedule,
   getOrgSettings,
@@ -38,6 +42,12 @@ function toIsoFromLocalInput(value: string): string {
   return new Date(value).toISOString();
 }
 
+type RequestDiagnostics = {
+  url: string;
+  status: number | null;
+  errorBody: unknown | null;
+};
+
 export default function DispatchClient() {
   const [foremanPersonId, setForemanPersonId] = useState('4');
   const [date, setDate] = useState(todayIsoDate());
@@ -53,6 +63,16 @@ export default function DispatchClient() {
   const [creating, setCreating] = useState(false);
   const [companyTimezone, setCompanyTimezone] = useState(FALLBACK_TIMEZONE);
   const [timezoneError, setTimezoneError] = useState<string | null>(null);
+  const [orgDiagnostics, setOrgDiagnostics] = useState<RequestDiagnostics>({
+    url: buildOrgSettingsUrl(),
+    status: null,
+    errorBody: null,
+  });
+  const [scheduleDiagnostics, setScheduleDiagnostics] = useState<RequestDiagnostics>({
+    url: buildForemanScheduleUrl(Number(foremanPersonId), date),
+    status: null,
+    errorBody: null,
+  });
 
   const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
 
@@ -67,43 +87,68 @@ export default function DispatchClient() {
   }, [startDatetime, endDatetime]);
 
   useEffect(() => {
-    let cancelled = false;
-    async function loadTimezone() {
-      try {
-        const settings = await getOrgSettings();
-        if (!cancelled) {
-          setCompanyTimezone(settings.companyTimezone);
-          setTimezoneError(null);
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          setCompanyTimezone(FALLBACK_TIMEZONE);
-          setTimezoneError(
-            loadError instanceof Error
-              ? loadError.message
-              : 'ORG_SETTINGS_ERROR: Failed to load company timezone.',
-          );
-        }
-      }
-    }
-    void loadTimezone();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    setScheduleDiagnostics((current) => ({
+      ...current,
+      url: buildForemanScheduleUrl(Number(foremanPersonId), date),
+    }));
+  }, [foremanPersonId, date]);
 
   async function loadSchedule() {
     setLoading(true);
     setError(null);
+    const parsedForemanId = Number(foremanPersonId);
+    const orgUrl = buildOrgSettingsUrl();
+    const scheduleUrl = buildForemanScheduleUrl(parsedForemanId, date);
+    setOrgDiagnostics({ url: orgUrl, status: null, errorBody: null });
+    setScheduleDiagnostics({ url: scheduleUrl, status: null, errorBody: null });
+
     try {
-      const parsedForemanId = Number(foremanPersonId);
+      try {
+        const settings = await getOrgSettings();
+        setCompanyTimezone(settings.companyTimezone);
+        setTimezoneError(null);
+        setOrgDiagnostics({ url: orgUrl, status: 200, errorBody: null });
+      } catch (orgError) {
+        setCompanyTimezone(FALLBACK_TIMEZONE);
+        if (orgError instanceof ApiRequestError) {
+          setTimezoneError(orgError.message);
+          setOrgDiagnostics({
+            url: orgError.url,
+            status: orgError.status,
+            errorBody: orgError.body,
+          });
+        } else {
+          setTimezoneError('ORG_SETTINGS_ERROR: Failed to load company timezone.');
+          setOrgDiagnostics({
+            url: orgUrl,
+            status: null,
+            errorBody: String(orgError),
+          });
+        }
+      }
+
       const response = await getForemanSchedule(parsedForemanId, date);
       setData(response);
+      setScheduleDiagnostics({ url: scheduleUrl, status: 200, errorBody: null });
       if (response.roster) {
         setRosterId(String(response.roster.id));
       }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'UNKNOWN_ERROR: Failed to load schedule.');
+      if (loadError instanceof ApiRequestError) {
+        setError(loadError.message);
+        setScheduleDiagnostics({
+          url: loadError.url,
+          status: loadError.status,
+          errorBody: loadError.body,
+        });
+      } else {
+        setError(loadError instanceof Error ? loadError.message : 'UNKNOWN_ERROR: Failed to load schedule.');
+        setScheduleDiagnostics({
+          url: scheduleUrl,
+          status: null,
+          errorBody: String(loadError),
+        });
+      }
       setData(null);
     } finally {
       setLoading(false);
@@ -197,7 +242,10 @@ export default function DispatchClient() {
         {data?.roster ? (
           <pre>{JSON.stringify(data.roster, null, 2)}</pre>
         ) : (
-          <p>No roster found for this foreman/date.</p>
+          <p>
+            No roster found for this foreman/date. Schedule is roster-linked, so segments will
+            not appear without a roster + link.
+          </p>
         )}
       </section>
 
@@ -215,6 +263,44 @@ export default function DispatchClient() {
         ) : (
           <p>No active linked segments.</p>
         )}
+      </section>
+
+      <section style={{ marginTop: 20 }}>
+        <h2>Diagnostics</h2>
+        <p>API base URL: {API_BASE_URL}</p>
+        <p>Timezone used for display: {companyTimezone}</p>
+        <p>Timezone load error: {timezoneError ?? 'none'}</p>
+        <pre style={{ background: '#f5f5f5', padding: 8, overflowX: 'auto' }}>
+{JSON.stringify(
+  {
+    orgSettingsRequest: orgDiagnostics,
+    foremanScheduleRequest: scheduleDiagnostics,
+  },
+  null,
+  2,
+)}
+        </pre>
+        <label style={{ display: 'block', marginTop: 8 }}>
+          Copy debug info
+          <textarea
+            readOnly
+            value={JSON.stringify(
+              {
+                foremanPersonId,
+                date,
+                apiBaseUrl: API_BASE_URL,
+                timezoneUsed: companyTimezone,
+                timezoneError,
+                orgSettingsRequest: orgDiagnostics,
+                foremanScheduleRequest: scheduleDiagnostics,
+              },
+              null,
+              2,
+            )}
+            rows={12}
+            style={{ width: '100%', fontFamily: 'monospace' }}
+          />
+        </label>
       </section>
 
       <section style={{ marginTop: 20 }}>
