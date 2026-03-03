@@ -1,13 +1,50 @@
 import Fastify from 'fastify';
 import { prisma } from '@sylvara/db';
 import { fileURLToPath } from 'node:url';
+import { UNAUTHENTICATED_ERROR } from './http/actor.js';
+import { hasValidLanBearer, isLanModeEnabled } from './http/lan-guard.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
 
-export function buildServer(deps: { prisma: typeof prisma } = { prisma }) {
+type ServerAuthConfig = {
+  lanModeEnabled: boolean;
+  lanSharedSecret: string | null;
+};
+
+export function buildServer(
+  deps: { prisma: typeof prisma } = { prisma },
+  authConfig?: ServerAuthConfig,
+) {
   const app = Fastify();
+  const lanModeEnabled = authConfig?.lanModeEnabled ?? isLanModeEnabled(process.env.LAN_MODE);
+  const lanSharedSecret = authConfig?.lanSharedSecret ?? process.env.LAN_SHARED_SECRET ?? null;
+
+  if (lanModeEnabled && !lanSharedSecret) {
+    throw new Error('LAN_SHARED_SECRET is required when LAN_MODE=true');
+  }
 
   app.get('/health', async () => {
     return { ok: true };
+  });
+
+  app.get('/api/health', async () => {
+    return { ok: true };
+  });
+
+  app.addHook('preHandler', async (request, reply) => {
+    if (!lanModeEnabled) {
+      return;
+    }
+
+    const path = request.raw.url?.split('?')[0] ?? '';
+    if (!path.startsWith('/api/')) {
+      return;
+    }
+    if (request.method === 'GET' && path === '/api/health') {
+      return;
+    }
+    if (!lanSharedSecret || !hasValidLanBearer(request, lanSharedSecret)) {
+      return reply.code(401).send(UNAUTHENTICATED_ERROR);
+    }
   });
 
   registerSchedulingRoutes(app, { prisma: deps.prisma });
