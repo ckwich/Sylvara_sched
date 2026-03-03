@@ -18,6 +18,7 @@ describe('A5 reject active blocker', () => {
       travelSegment: { findMany: async () => [] },
       scheduleSegment: { findMany: async () => [] },
       orgSettings: { findFirst: async () => null },
+      user: { findUnique: async () => ({ id: 1 }) },
       segmentRosterLink: { create: async () => undefined },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
       $transaction: async () => undefined,
@@ -47,6 +48,32 @@ describe('A5 reject active blocker', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      payload: {
+        jobId: 10,
+        foremanPersonId: 77,
+        date: '2026-03-02',
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'UNAUTHENTICATED',
+        message: 'Authentication required.',
+      },
+    });
+    await app.close();
+  });
+
+  test('returns 401 when actor header user does not exist', async () => {
+    const fakePrisma = {
+      user: { findUnique: async () => null },
+    } as unknown as PrismaClient;
+    const app = buildServer({ prisma: fakePrisma });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '999999' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,

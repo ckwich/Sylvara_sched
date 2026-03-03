@@ -75,6 +75,7 @@ describe('A3 click-to-create snap and no-overlap', () => {
           operatingStartTime: null,
         }),
       },
+      user: { findUnique: async () => ({ id: 1 }) },
       segmentRosterLink: {
         create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
           createdLinks.push(data);

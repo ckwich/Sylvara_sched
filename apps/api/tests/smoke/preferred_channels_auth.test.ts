@@ -26,6 +26,10 @@ describe('preferred channels auth-backed actor attribution', () => {
   test('uses actor header for activity log write', async () => {
     const captured: { actorUserId?: number; channels?: PreferredChannel[] } = {};
     const fakePrisma = {
+      user: {
+        findUnique: async ({ where }: { where: { id: number } }) =>
+          where.id === 42 ? { id: 42 } : null,
+      },
       $transaction: async (
         fn: (tx: {
           jobPreferredChannel: {
@@ -69,6 +73,30 @@ describe('preferred channels auth-backed actor attribution', () => {
     });
     expect(captured.actorUserId).toBe(42);
     expect(captured.channels).toEqual(['CALL', 'TEXT']);
+    await app.close();
+  });
+
+  test('returns 401 when actor header user does not exist', async () => {
+    const fakePrisma = {
+      user: { findUnique: async () => null },
+    } as unknown as PrismaClient;
+    const app = buildServer({ prisma: fakePrisma });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/jobs/10/preferred-channels',
+      headers: { 'x-actor-user-id': '999999' },
+      payload: {
+        channels: ['CALL'],
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'UNAUTHENTICATED',
+        message: 'Authentication required.',
+      },
+    });
     await app.close();
   });
 });

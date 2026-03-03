@@ -44,6 +44,7 @@ describe('A4 one-click rejects when no contiguous slot exists', () => {
           operatingStartTime: null,
         }),
       },
+      user: { findUnique: async () => ({ id: 1 }) },
       segmentRosterLink: {
         create: async () => undefined,
       },

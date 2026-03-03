@@ -41,6 +41,7 @@ function buildWindowConflictPrisma(availabilityNotes: string | null): PrismaClie
         operatingStartTime: null,
       }),
     },
+    user: { findUnique: async () => ({ id: 1 }) },
     segmentRosterLink: { create: async () => undefined },
     jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
     $transaction: async () => undefined,
@@ -103,6 +104,7 @@ describe('A6 customer window conflict and unconfigured warning', () => {
           operatingStartTime: null,
         }),
       },
+      user: { findUnique: async () => ({ id: 1 }) },
       segmentRosterLink: {
         create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
           createdLinks.push(data);

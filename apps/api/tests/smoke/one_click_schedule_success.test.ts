@@ -66,6 +66,7 @@ describe('A2 one-click schedule success', () => {
           operatingStartTime: null,
         }),
       },
+      user: { findUnique: async () => ({ id: 1 }) },
       segmentRosterLink: {
         create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
           createdLinks.push(data);
@@ -159,6 +160,7 @@ describe('A2 one-click schedule success', () => {
           operatingStartTime: null,
         }),
       },
+      user: { findUnique: async () => ({ id: 1 }) },
       segmentRosterLink: { create: async () => undefined },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
       $transaction: async () => undefined,
@@ -218,6 +220,7 @@ describe('A2 one-click schedule success', () => {
           operatingStartTime: null,
         }),
       },
+      user: { findUnique: async () => ({ id: 1 }) },
       segmentRosterLink: {
         create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
           createdLinks.push(data);
@@ -348,6 +351,7 @@ describe('A2 one-click schedule success', () => {
           operatingStartTime: null,
         }),
       },
+      user: { findUnique: async () => ({ id: 1 }) },
       activityLog: { create: async () => undefined },
       segmentRosterLink: { create: async () => ({}) },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },

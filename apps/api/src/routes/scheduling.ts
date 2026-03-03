@@ -110,7 +110,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   app.post('/api/schedule/one-click-attempt', async (request, reply) => {
     let actorUserId: number;
     try {
-      actorUserId = requireActorUserId(request);
+      actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
       if (isUnauthenticatedError(error)) {
         return reply.code(401).send(UNAUTHENTICATED_ERROR);
@@ -370,7 +370,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   app.post('/api/travel/close-out-day', async (request, reply) => {
     let actorUserId: number;
     try {
-      actorUserId = requireActorUserId(request);
+      actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
       if (isUnauthenticatedError(error)) {
         return reply.code(401).send(UNAUTHENTICATED_ERROR);
@@ -491,7 +491,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   app.post('/api/jobs/:jobId/preferred-channels', async (request, reply) => {
     let actorUserId: number;
     try {
-      actorUserId = requireActorUserId(request);
+      actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
       if (isUnauthenticatedError(error)) {
         return reply.code(401).send(UNAUTHENTICATED_ERROR);

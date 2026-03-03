@@ -35,6 +35,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
           operatingStartTime: null,
         }),
       },
+      user: { findUnique: async () => ({ id: 1 }) },
       segmentRosterLink: { create: async () => undefined },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
       $transaction: async (
@@ -98,6 +99,32 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
+      payload: {
+        foremanPersonId: 77,
+        date: '2026-03-02',
+        durationMinutes: 45,
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'UNAUTHENTICATED',
+        message: 'Authentication required.',
+      },
+    });
+    await app.close();
+  });
+
+  test('returns 401 when actor header user does not exist', async () => {
+    const fakePrisma = {
+      user: { findUnique: async () => null },
+    } as unknown as PrismaClient;
+    const app = buildServer({ prisma: fakePrisma });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/travel/close-out-day',
+      headers: { 'x-actor-user-id': '999999' },
       payload: {
         foremanPersonId: 77,
         date: '2026-03-02',
