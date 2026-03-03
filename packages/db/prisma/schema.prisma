@@ -581,6 +581,7 @@ model ActivityLog {
   actionType  String   @map("action_type")
   diff        Json?
   actorUserId Int?     @map("actor_user_id")
+  actorDisplay String? @map("actor_display")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   actorUser User? @relation("activity_log_actor", fields: [actorUserId], references: [id])
