@@ -1,4 +1,6 @@
-# Sylvara Backlog + Scheduling App (Beta) — plan.md
+# Scheduler — plan.md
+
+> This repository is currently the scheduling module. It will later be merged into the broader **Sylvara** CRM suite. Initial deployment target is LAN-only (internal) under an office hostname (e.g., `schedule-pc:3000`) and/or the internal subdomain `scheduler.irontreeservice.com` when appropriate.
 
 ## 0. North Star
 Replace the existing backlog tracking workbook with a multi-user app that:
@@ -572,7 +574,6 @@ Log all edits to:
 - Basic auth/users/roles
 - CRUD for Customers and Jobs
 - ActivityLog framework
-- Temporary dev/test actor header shim (x-actor-user-id) implemented; replace with real auth provider/session in M1 before production.
 
 ### M2 — Scheduling Core
 - ScheduleSegment CRUD (with datetime)
@@ -580,6 +581,16 @@ Log all edits to:
 - Completed workflow (manual mark complete, completed_date)
 - Schedule event history (user-action events)
 
+
+### M2.1 — Internal LAN Pilot (Office Host)
+- Run Scheduler on an always-on Windows machine inside the company network (LAN-only; not for crews/mobile in this phase).
+- Users access the UI from other office PCs via an internal hostname (e.g., `http://schedule-pc:3000`).
+- Runtime must not assume `localhost` from the user’s browser:
+  - `apps/web` uses same-origin `/api/*` calls and proxies to `apps/api` via Next rewrites.
+  - `apps/api` binds to `0.0.0.0` for LAN reachability (and is firewalled to internal subnets).
+- Authentication/authorization requirement for multi-user LAN usage:
+  - Human usage must not rely on the dev/test header shim (`x-actor-user-id`).
+  - Implement real login + roles (MANAGER/SCHEDULER/VIEWER). Target is Google Workspace SSO restricted to `@irontreeservice.com`.
 ### M3 — Resources & Rosters
 - Resource inventory CRUD (count-based)
 - Resource reservations per segment
@@ -669,12 +680,7 @@ Log all edits to:
 
 **Timezone policy:** Store all timestamps as `timestamptz` (UTC-normalized). The app operates in a single company timezone (America/New_York unless configured otherwise). All display and date input uses that timezone. Document the configured timezone in README. Never store naive local timestamps.
 
-**Date/time handling (novice-safety):** Do not use Luxon. Use the shared minute-of-day helpers (`packages/shared/src/time-of-day.ts`) and the configured company timezone (`OrgSettings.company_timezone`) for all local-day boundary logic. Store all schedule/travel timestamps as `timestamptz` (UTC-normalized). When the UI/API deals with time-of-day values, use minute-of-day integers (0–1439) internally and keep AM/PM-friendly display in the UI.
-
-**Minute-of-day transition rule (authoritative):**
-- Read path: prefer minute-of-day fields; where legacy Postgres `TIME` fields exist, derive minutes using UTC wall-clock extraction (Prisma TIME -> JS Date).
-- Write path: runtime scheduling and validation must use minute-of-day semantics (snapping/flooring rules apply) even if legacy `TIME` columns still exist.
-- Compatibility: the database may temporarily include both minute and legacy `TIME` representations during transition; runtime must resolve to minutes deterministically.
+**Date/time handling (novice-safety):** In the web UI and API, do not perform arithmetic with native `Date` objects. Use a single timezone-aware library (Luxon recommended) and always interpret/format “day” boundaries in the configured company timezone.
 
 **Numeric math (novice-safety):** Postgres `numeric` values must not be manipulated as JavaScript `number` in runtime logic (money, hours, and state math). Use `Prisma.Decimal` (or equivalent decimal library) end-to-end for arithmetic and comparisons. For calendar placement/overlap logic, prefer integer minutes derived from the snapped datetimes.
 
