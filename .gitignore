@@ -8,3 +8,7 @@ test-results
 .env
 .env.local
 .env.*.local
+.lan/
+apps/api/tests/**/*.js
+apps/api/tests/**/*.js.map
+apps/api/vitest.config.js
