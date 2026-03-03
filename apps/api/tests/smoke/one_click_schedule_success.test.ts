@@ -2,8 +2,33 @@ import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
 
+const TEST_TZ = 'America/New_York';
+
 function makeDate(date: string, minute: number) {
   return new Date(new Date(`${date}T00:00:00.000Z`).getTime() + minute * 60_000);
+}
+
+function localParts(iso: string, timeZone: string): { date: string; minute: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(iso));
+
+  const year = Number(parts.find((p) => p.type === 'year')?.value ?? '0');
+  const month = Number(parts.find((p) => p.type === 'month')?.value ?? '0');
+  const day = Number(parts.find((p) => p.type === 'day')?.value ?? '0');
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+
+  return {
+    date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    minute: hour * 60 + minute,
+  };
 }
 
 describe('A2 one-click schedule success', () => {
@@ -186,7 +211,7 @@ describe('A2 one-click schedule success', () => {
       },
       orgSettings: {
         findFirst: async () => ({
-          companyTimezone: 'America/New_York',
+          companyTimezone: TEST_TZ,
           operatingStartMinute: 420,
           operatingStartTime: null,
         }),
@@ -270,12 +295,17 @@ describe('A2 one-click schedule success', () => {
     expect(second.statusCode).toBe(200);
     expect(secondBody.result).toBe('ACCEPT');
 
-    const firstEndMinute = new Date(firstBody.segment.endDatetime).getUTCHours() * 60 + new Date(firstBody.segment.endDatetime).getUTCMinutes();
-    const secondStartMinute =
-      new Date(secondBody.segment.startDatetime).getUTCHours() * 60 + new Date(secondBody.segment.startDatetime).getUTCMinutes();
+    const firstLocalStart = localParts(firstBody.segment.startDatetime, TEST_TZ);
+    const firstLocalEnd = localParts(firstBody.segment.endDatetime, TEST_TZ);
+    const secondLocalStart = localParts(secondBody.segment.startDatetime, TEST_TZ);
+    const secondLocalEnd = localParts(secondBody.segment.endDatetime, TEST_TZ);
 
-    expect(secondStartMinute).toBeGreaterThanOrEqual(firstEndMinute);
-    expect(secondStartMinute % 10).toBe(0);
+    expect(firstLocalStart.date).toBe('2026-03-03');
+    expect(firstLocalEnd.date).toBe('2026-03-03');
+    expect(secondLocalStart.date).toBe('2026-03-03');
+    expect(secondLocalEnd.date).toBe('2026-03-03');
+    expect(secondLocalStart.minute).toBeGreaterThanOrEqual(firstLocalEnd.minute);
+    expect(secondLocalStart.minute % 10).toBe(0);
     expect(
       createdLinks.some((link) => link.scheduleSegmentId === firstBody.segment.id && link.rosterId === 99),
     ).toBe(true);
