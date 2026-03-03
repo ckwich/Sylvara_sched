@@ -16,7 +16,7 @@ This document is **authoritative** instructions for Codex (and any other coding 
 - **Database:** PostgreSQL
 - **ORM & migrations:** Prisma (recommended for novice clarity) *(migrations are required; never edit committed migrations)*
 - **Validation:** Zod (shared schemas between web/api)
-- **Date/time:** Luxon (timezone-safe; required — do not use native Date arithmetic)
+- **Date/time:** **No Luxon.** Use shared minute-of-day helpers (`packages/shared/src/time-of-day.ts`) and explicit timezone policy (`org_settings.company_timezone`) with UTC storage/serialization.
 - **Testing:** Vitest (unit/integration) + Playwright (E2E)
 - **Formatting/lint:** ESLint + Prettier
 
@@ -194,6 +194,10 @@ At minimum:
 - Crews are fluid. All scheduling availability and daily planning anchors to the **FOREMAN**.
 - Foreman is a PERSON resource where `is_foreman=true`.
 - A ScheduleSegment is associated to a foreman via `SegmentRosterLink -> ForemanDayRoster.foreman_person_id`.
+- **Source of truth (authoritative):** “What’s scheduled for a foreman on a date” is the roster-linked join:
+  - `ForemanDayRoster (foreman_person_id, date)` → `SegmentRosterLink (roster_id, schedule_segment_id)` → `ScheduleSegment`
+- `ScheduleSegment` rows **without** a corresponding `SegmentRosterLink` are **not** considered scheduled for any foreman/day (treat as test artifacts or a write bug).
+- All scheduling writes that create segments for a foreman/day must create the `ScheduleSegment` **and** its `SegmentRosterLink` in the **same DB transaction**.
 - A TravelSegment is associated directly via `TravelSegment.foreman_person_id`.
 - Staffing is day-scoped via `ForemanDayRoster / ForemanDayRosterMember` and MUST enforce day-exclusivity at the DB layer:
 - **PERSON resources are unique individuals** (quantity is effectively 1). Assigning a person to a roster does not “decrement inventory”; day-exclusivity is enforced via the roster uniqueness constraint.
