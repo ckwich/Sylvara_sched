@@ -25,31 +25,38 @@
 
 Use this when running the Scheduler from an always-on office host so coworkers can access it over LAN.
 
-1. Set env vars (example):
+1. Set required env vars (example):
    - `LAN_MODE=true`
-   - `LAN_SHARED_SECRET=<shared-internal-secret>`
+   - `LAN_SHARED_SECRET=<long-random-secret-min-24-chars>`
    - `HOST_BIND=0.0.0.0`
    - `WEB_PORT=3000`
    - `API_PORT=4000`
    - `PUBLIC_WEB_ORIGIN=http://schedule-pc:3000`
-2. Start services:
+2. LAN dev mode (watchers):
    - `corepack pnpm lan`
-3. API access in LAN mode:
+3. LAN prod-ish mode (build + start):
+   - `corepack pnpm lan:build`
+   - `corepack pnpm lan:start`
+   - `corepack pnpm lan:check`
+   - `corepack pnpm lan:stop`
+4. API access in LAN mode:
    - Browser still calls same-origin `/api/*` from the web app.
    - API requires `Authorization: Bearer <LAN_SHARED_SECRET>` on `/api/*`, except `GET /api/health`.
    - API writes also require `X-LAN-USER` (set from the web UI "LAN User" field).
    - The web server proxy adds this header server-side in LAN mode.
-4. Windows Firewall:
-   - Allow inbound TCP `3000` on the host machine
-   - Allow inbound TCP `4000` only if clients need direct API access (normally web uses same-origin `/api` proxy)
-5. From another office PC:
+5. Windows Firewall:
+   - Allow inbound TCP `WEB_PORT` only (default `3000`) on the host machine.
+   - Keep `API_PORT` inbound blocked; API is reached through web same-origin proxy.
+6. From another office PC:
    - Open `http://<host-machine-name>:3000/dispatch`
    - Example: `http://SCHED-HOST:3000/dispatch`
-6. Keep the shared secret internal. This is LAN-only guardrail, not SSO.
-7. LAN User attribution:
+7. Keep the shared secret internal. This is LAN-only guardrail, not SSO.
+8. LAN User attribution:
    - Each coworker enters their own `LAN User` value on `/dispatch` or `/company`.
    - The value is saved in browser localStorage and sent as `X-LAN-USER` on writes.
    - It is recorded in `activity_logs.actor_display` for audit context only (not authorization).
+9. Security caveat:
+   - This is not real authentication/authorization and must remain internal-only.
 
 ## Integration Tests (Real Postgres)
 
