@@ -572,6 +572,7 @@ Log all edits to:
 - Basic auth/users/roles
 - CRUD for Customers and Jobs
 - ActivityLog framework
+- Temporary dev/test actor header shim (x-actor-user-id) implemented; replace with real auth provider/session in M1 before production.
 
 ### M2 — Scheduling Core
 - ScheduleSegment CRUD (with datetime)

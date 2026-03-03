@@ -114,6 +114,7 @@ describe('A2 one-click schedule success', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,
@@ -167,6 +168,7 @@ describe('A2 one-click schedule success', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,
@@ -269,6 +271,7 @@ describe('A2 one-click schedule success', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,
@@ -284,6 +287,7 @@ describe('A2 one-click schedule success', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,
@@ -365,6 +369,7 @@ describe('A2 one-click schedule success', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,

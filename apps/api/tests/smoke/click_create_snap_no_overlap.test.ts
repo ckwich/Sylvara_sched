@@ -122,6 +122,7 @@ describe('A3 click-to-create snap and no-overlap', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,

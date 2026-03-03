@@ -10,6 +10,11 @@ import { resolveAnchorMinute } from '@sylvara/db';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
+  isUnauthenticatedError,
+  requireActorUserId,
+  UNAUTHENTICATED_ERROR,
+} from '../http/actor.js';
+import {
   findFirstFittingStartMinute,
   findStartAtClickedTime,
   minutesFromEstimatedHoursRoundedToTen,
@@ -103,6 +108,16 @@ function crossesLocalMidnight(start: Date, end: Date, timezone: string): boolean
 
 export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   app.post('/api/schedule/one-click-attempt', async (request, reply) => {
+    let actorUserId: number;
+    try {
+      actorUserId = requireActorUserId(request);
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        return reply.code(401).send(UNAUTHENTICATED_ERROR);
+      }
+      throw error;
+    }
+
     const parsed = oneClickBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({
@@ -165,7 +180,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           foremanPersonId: body.foremanPersonId,
           date: serviceDate,
           homeBaseId: body.homeBaseId,
-          createdByUserId: 1,
+          createdByUserId: actorUserId,
         },
         include: {
           homeBase: true,
@@ -177,7 +192,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityType: 'ForemanDayRoster',
           entityId: roster.id,
           actionType: 'CREATED',
-          actorUserId: 1,
+          actorUserId,
           diff: {
             foremanPersonId: body.foremanPersonId,
             date: body.date,
@@ -315,7 +330,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           segmentType: SegmentType.PRIMARY,
           startDatetime,
           endDatetime,
-          createdByUserId: 1,
+          createdByUserId: actorUserId,
         },
       });
 
@@ -323,7 +338,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
         data: {
           scheduleSegmentId: segment.id,
           rosterId: roster.id,
-          createdByUserId: 1,
+          createdByUserId: actorUserId,
         },
       });
 
@@ -332,7 +347,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityType: 'ScheduleSegment',
           entityId: segment.id,
           actionType: 'SEGMENT_ADDED',
-          actorUserId: 1,
+          actorUserId,
           diff: {
             jobId: job.id,
             startDatetime,
@@ -353,6 +368,16 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/travel/close-out-day', async (request, reply) => {
+    let actorUserId: number;
+    try {
+      actorUserId = requireActorUserId(request);
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        return reply.code(401).send(UNAUTHENTICATED_ERROR);
+      }
+      throw error;
+    }
+
     const parsed = closeOutBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({
@@ -434,7 +459,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           endDatetime,
           travelType: TravelType.END_OF_DAY,
           source: SegmentSource.MANUAL,
-          createdByUserId: 1,
+          createdByUserId: actorUserId,
         },
       });
 
@@ -443,7 +468,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityType: 'TravelSegment',
           entityId: created.id,
           actionType: 'CREATED',
-          actorUserId: 1,
+          actorUserId,
           diff: {
             foremanPersonId: body.foremanPersonId,
             date: body.date,
@@ -464,6 +489,16 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/jobs/:jobId/preferred-channels', async (request, reply) => {
+    let actorUserId: number;
+    try {
+      actorUserId = requireActorUserId(request);
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        return reply.code(401).send(UNAUTHENTICATED_ERROR);
+      }
+      throw error;
+    }
+
     const paramsSchema = z.object({
       jobId: z.coerce.number().int().positive(),
     });
@@ -502,7 +537,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           entityType: 'Job',
           entityId: params.data.jobId,
           actionType: 'UPDATED',
-          actorUserId: 1,
+          actorUserId,
           diff: {
             preferredChannels: body.data.channels,
           },

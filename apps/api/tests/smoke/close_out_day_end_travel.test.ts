@@ -62,6 +62,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         foremanPersonId: 77,
         date: '2026-03-02',
@@ -77,6 +78,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         foremanPersonId: 77,
         date: '2026-03-02',
@@ -88,6 +90,28 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const secondBody = second.json();
     expect(secondBody.result).toBe('REJECT');
     expect(secondBody.rejections[0].code).toBe('END_OF_DAY_ALREADY_EXISTS');
+    await app.close();
+  });
+
+  test('returns 401 when actor header is missing', async () => {
+    const app = buildServer({ prisma: {} as PrismaClient });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/travel/close-out-day',
+      payload: {
+        foremanPersonId: 77,
+        date: '2026-03-02',
+        durationMinutes: 45,
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'UNAUTHENTICATED',
+        message: 'Authentication required.',
+      },
+    });
     await app.close();
   });
 });

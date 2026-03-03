@@ -58,6 +58,7 @@ describe('A6 customer window conflict and unconfigured warning', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/schedule/one-click-attempt',
+        headers: { 'x-actor-user-id': '1' },
         payload: {
           jobId: 10,
           foremanPersonId: 77,
@@ -143,6 +144,7 @@ describe('A6 customer window conflict and unconfigured warning', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,

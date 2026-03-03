@@ -55,6 +55,7 @@ describe('A4 one-click rejects when no contiguous slot exists', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,

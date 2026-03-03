@@ -27,6 +27,7 @@ describe('A5 reject active blocker', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
+      headers: { 'x-actor-user-id': '1' },
       payload: {
         jobId: 10,
         foremanPersonId: 77,
@@ -38,6 +39,28 @@ describe('A5 reject active blocker', () => {
     const body = response.json();
     expect(body.result).toBe('REJECT');
     expect(body.rejections[0].code).toBe('ACTIVE_BLOCKER');
+    await app.close();
+  });
+
+  test('returns 401 when actor header is missing', async () => {
+    const app = buildServer({ prisma: {} as PrismaClient });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/schedule/one-click-attempt',
+      payload: {
+        jobId: 10,
+        foremanPersonId: 77,
+        date: '2026-03-02',
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'UNAUTHENTICATED',
+        message: 'Authentication required.',
+      },
+    });
     await app.close();
   });
 });
