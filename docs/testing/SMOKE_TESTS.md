@@ -178,6 +178,27 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 
 ---
 
+### A10 — ScheduleSegment CRUD + derived state impact
+**Goal:** Segment CRUD validates scheduling constraints and updates derived job state from active roster-linked segments.
+
+**Arrange**
+- Existing Job and ForemanDayRoster for date D in company timezone
+
+**Act/Assert**
+- Create segment with valid start/end:
+  - segment is created
+  - state reflects scheduled allocation (`FULLY_SCHEDULED` / `PARTIALLY_SCHEDULED` depending on estimate)
+- Move/resize segment:
+  - rejects invalid increments/cross-midnight
+  - accepts valid snapped updates
+- Delete segment:
+  - soft-delete path returns success
+  - derived state updates (e.g., from `FULLY_SCHEDULED` to `TBS` when no active segments remain)
+
+**File:** `apps/api/tests/smoke/schedule_segment_crud.test.*`
+
+---
+
 ## B) Playwright E2E Smoke Tests (UI workflow)
 
 ### B1 — Roster exclusivity in UI
