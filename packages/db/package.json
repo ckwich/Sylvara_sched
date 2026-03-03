@@ -7,6 +7,8 @@
   "scripts": {
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:reset": "prisma migrate reset --force --skip-seed --skip-generate",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {

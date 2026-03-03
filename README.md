@@ -19,6 +19,25 @@
    - `corepack pnpm test:e2e:smoke`
    - `corepack pnpm test:smoke`
 
+## Integration Tests (Real Postgres)
+
+Test DB uses `docker-compose.test.yml` and `TEST_DATABASE_URL`.
+
+1. Start/stop test DB:
+   - `corepack pnpm test:db:up`
+   - `corepack pnpm test:db:down`
+2. Set `TEST_DATABASE_URL`:
+   - macOS/Linux:
+     - `export TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:55432/sylvara_test"`
+   - Windows PowerShell:
+     - `$env:TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:55432/sylvara_test"`
+3. Reset test DB schema/data:
+   - `corepack pnpm test:db:reset`
+4. Run integration tests:
+   - `corepack pnpm test:integration`
+
+If you hit Prisma Windows file-lock errors (`EPERM ... query_engine-windows.dll.node`), stop dev/watch processes and rerun the command.
+
 ## Fixture Reset Command (Dev Only)
 
 Use this to reset a foreman/day schedule fixture without manual DB cleanup.
