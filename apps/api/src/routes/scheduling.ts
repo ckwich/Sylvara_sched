@@ -25,6 +25,7 @@ import {
   isIntervalInsideWindow,
   parseCustomerAvailabilityWindow,
 } from '../scheduling/customer-window.js';
+import { computeScheduledEffectiveHours, deriveJobState } from '../scheduling/job-state.js';
 import type { MinuteWindow } from '../scheduling/types.js';
 import { DateTime } from 'luxon';
 
@@ -45,6 +46,23 @@ const closeOutBodySchema = z.object({
 
 const preferredChannelsSchema = z.object({
   channels: z.array(z.nativeEnum(PreferredChannel)).max(3),
+});
+
+const createSegmentBodySchema = z.object({
+  jobId: z.number().int().positive(),
+  rosterId: z.number().int().positive(),
+  startDatetime: z.string().datetime({ offset: true }),
+  endDatetime: z.string().datetime({ offset: true }),
+  segmentType: z.nativeEnum(SegmentType).optional().default(SegmentType.PRIMARY),
+  scheduledHoursOverride: z.number().positive().optional(),
+  notes: z.string().optional(),
+});
+
+const updateSegmentBodySchema = z.object({
+  startDatetime: z.string().datetime({ offset: true }).optional(),
+  endDatetime: z.string().datetime({ offset: true }).optional(),
+  scheduledHoursOverride: z.number().positive().nullable().optional(),
+  notes: z.string().nullable().optional(),
 });
 
 type AppDeps = {
@@ -104,6 +122,72 @@ function crossesLocalMidnight(start: Date, end: Date, timezone: string): boolean
   const localStart = DateTime.fromJSDate(start, { zone: 'utc' }).setZone(timezone);
   const localEnd = DateTime.fromJSDate(end, { zone: 'utc' }).setZone(timezone);
   return localStart.toISODate() !== localEnd.toISODate();
+}
+
+function localDateIso(value: Date, timezone: string): string {
+  return DateTime.fromJSDate(value, { zone: 'utc' }).setZone(timezone).toISODate() ?? '';
+}
+
+function isTenMinuteBoundary(value: Date, timezone: string): boolean {
+  const local = DateTime.fromJSDate(value, { zone: 'utc' }).setZone(timezone);
+  return local.minute % 10 === 0 && local.second === 0 && local.millisecond === 0;
+}
+
+function parseIsoDatetime(value: string): Date | null {
+  const parsed = DateTime.fromISO(value, { setZone: true });
+  if (!parsed.isValid) {
+    return null;
+  }
+  return parsed.toUTC().toJSDate();
+}
+
+async function getDerivedJobState(input: {
+  prisma: PrismaClient;
+  jobId: number;
+  timezone: string;
+}) {
+  const job = await input.prisma.job.findUnique({
+    where: { id: input.jobId },
+    select: {
+      id: true,
+      completedDate: true,
+      estimateHoursCurrent: true,
+    },
+  });
+
+  if (!job) {
+    return null;
+  }
+
+  const activeSegments = await input.prisma.scheduleSegment.findMany({
+    where: {
+      jobId: input.jobId,
+      deletedAt: null,
+      segmentRosterLink: {
+        isNot: null,
+      },
+    },
+    select: {
+      startDatetime: true,
+      endDatetime: true,
+      scheduledHoursOverride: true,
+    },
+  });
+
+  const scheduledEffectiveHours = computeScheduledEffectiveHours({
+    timezone: input.timezone,
+    segments: activeSegments,
+  });
+
+  return {
+    jobId: input.jobId,
+    scheduledEffectiveHours: scheduledEffectiveHours.toString(),
+    state: deriveJobState({
+      completedDate: job.completedDate,
+      estimateHoursCurrent: job.estimateHoursCurrent,
+      scheduledEffectiveHours,
+    }),
+  };
 }
 
 export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
@@ -485,6 +569,473 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       result: 'ACCEPT',
       warnings: [],
       travelSegment: travel,
+    });
+  });
+
+  app.post('/api/schedule-segments', async (request, reply) => {
+    let actorUserId: number;
+    try {
+      actorUserId = await requireActorUserId(deps.prisma, request);
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        return reply.code(401).send(UNAUTHENTICATED_ERROR);
+      }
+      throw error;
+    }
+
+    const parsed = createSegmentBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid request body.',
+          details: parsed.error.flatten(),
+        },
+      });
+    }
+
+    const body = parsed.data;
+    const startDatetime = parseIsoDatetime(body.startDatetime);
+    const endDatetime = parseIsoDatetime(body.endDatetime);
+    if (!startDatetime || !endDatetime) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid datetime values.',
+          details: {},
+        },
+      });
+    }
+
+    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
+    if (endDatetime <= startDatetime) {
+      return reply.code(400).send({
+        error: {
+          code: 'INVALID_DURATION',
+          message: 'Segment end must be after start.',
+          details: {},
+        },
+      });
+    }
+
+    if (crossesLocalMidnight(startDatetime, endDatetime, timezone)) {
+      return reply.code(400).send({
+        error: {
+          code: 'CROSSES_MIDNIGHT',
+          message: 'Segment must not cross local midnight.',
+          details: {},
+        },
+      });
+    }
+
+    if (!isTenMinuteBoundary(startDatetime, timezone) || !isTenMinuteBoundary(endDatetime, timezone)) {
+      return reply.code(400).send({
+        error: {
+          code: 'INVALID_INCREMENT',
+          message: 'Segment start and end must align to 10-minute increments.',
+          details: {},
+        },
+      });
+    }
+
+    const [job, roster] = await Promise.all([
+      deps.prisma.job.findUnique({ where: { id: body.jobId }, select: { id: true } }),
+      deps.prisma.foremanDayRoster.findUnique({
+        where: { id: body.rosterId },
+        select: { id: true, date: true },
+      }),
+    ]);
+    if (!job) {
+      return reply.code(404).send({
+        error: {
+          code: 'JOB_NOT_FOUND',
+          message: 'Job not found.',
+          details: {},
+        },
+      });
+    }
+    if (!roster) {
+      return reply.code(404).send({
+        error: {
+          code: 'ROSTER_NOT_FOUND',
+          message: 'Roster not found.',
+          details: {},
+        },
+      });
+    }
+
+    const rosterLocalDate = DateTime.fromJSDate(roster.date, { zone: 'utc' }).toISODate();
+    const segmentLocalDate = localDateIso(startDatetime, timezone);
+    if (rosterLocalDate !== segmentLocalDate) {
+      return reply.code(400).send({
+        error: {
+          code: 'ROSTER_DATE_MISMATCH',
+          message: 'Segment date must match roster date in company timezone.',
+          details: {},
+        },
+      });
+    }
+
+    const created = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const segment = await tx.scheduleSegment.create({
+        data: {
+          jobId: body.jobId,
+          segmentType: body.segmentType,
+          startDatetime,
+          endDatetime,
+          scheduledHoursOverride:
+            body.scheduledHoursOverride !== undefined
+              ? new Prisma.Decimal(body.scheduledHoursOverride)
+              : undefined,
+          notes: body.notes,
+          createdByUserId: actorUserId,
+        },
+      });
+
+      await tx.segmentRosterLink.create({
+        data: {
+          scheduleSegmentId: segment.id,
+          rosterId: body.rosterId,
+          createdByUserId: actorUserId,
+        },
+      });
+
+      await tx.scheduleEvent.create({
+        data: {
+          jobId: body.jobId,
+          eventType: 'SEGMENT_CREATED',
+          source: 'USER_ACTION',
+          fromAt: startDatetime,
+          toAt: endDatetime,
+          actorUserId,
+          rawSnippet: JSON.stringify({
+            segmentId: segment.id,
+            rosterId: body.rosterId,
+          }),
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'ScheduleSegment',
+          entityId: segment.id,
+          actionType: 'SEGMENT_CREATED',
+          actorUserId,
+          diff: {
+            jobId: body.jobId,
+            rosterId: body.rosterId,
+            startDatetime,
+            endDatetime,
+            scheduledHoursOverride: body.scheduledHoursOverride ?? null,
+          },
+        },
+      });
+
+      return segment;
+    });
+
+    const jobState = await getDerivedJobState({
+      prisma: deps.prisma,
+      jobId: body.jobId,
+      timezone,
+    });
+
+    return reply.code(200).send({
+      segment: created,
+      jobState,
+    });
+  });
+
+  app.patch('/api/schedule-segments/:segmentId', async (request, reply) => {
+    let actorUserId: number;
+    try {
+      actorUserId = await requireActorUserId(deps.prisma, request);
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        return reply.code(401).send(UNAUTHENTICATED_ERROR);
+      }
+      throw error;
+    }
+
+    const paramsSchema = z.object({ segmentId: z.coerce.number().int().positive() });
+    const params = paramsSchema.safeParse(request.params);
+    const parsed = updateSegmentBodySchema.safeParse(request.body);
+    if (!params.success || !parsed.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid request payload.',
+          details: {
+            params: params.success ? undefined : params.error.flatten(),
+            body: parsed.success ? undefined : parsed.error.flatten(),
+          },
+        },
+      });
+    }
+
+    const existing = await deps.prisma.scheduleSegment.findFirst({
+      where: {
+        id: params.data.segmentId,
+        deletedAt: null,
+      },
+      include: {
+        segmentRosterLink: {
+          include: {
+            roster: true,
+          },
+        },
+      },
+    });
+
+    if (!existing) {
+      return reply.code(404).send({
+        error: {
+          code: 'SEGMENT_NOT_FOUND',
+          message: 'Schedule segment not found.',
+          details: {},
+        },
+      });
+    }
+
+    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
+    const nextStart = parsed.data.startDatetime
+      ? parseIsoDatetime(parsed.data.startDatetime)
+      : existing.startDatetime;
+    const nextEnd = parsed.data.endDatetime
+      ? parseIsoDatetime(parsed.data.endDatetime)
+      : existing.endDatetime;
+    if (!nextStart || !nextEnd) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid datetime values.',
+          details: {},
+        },
+      });
+    }
+
+    if (nextEnd <= nextStart) {
+      return reply.code(400).send({
+        error: {
+          code: 'INVALID_DURATION',
+          message: 'Segment end must be after start.',
+          details: {},
+        },
+      });
+    }
+    if (crossesLocalMidnight(nextStart, nextEnd, timezone)) {
+      return reply.code(400).send({
+        error: {
+          code: 'CROSSES_MIDNIGHT',
+          message: 'Segment must not cross local midnight.',
+          details: {},
+        },
+      });
+    }
+    if (!isTenMinuteBoundary(nextStart, timezone) || !isTenMinuteBoundary(nextEnd, timezone)) {
+      return reply.code(400).send({
+        error: {
+          code: 'INVALID_INCREMENT',
+          message: 'Segment start and end must align to 10-minute increments.',
+          details: {},
+        },
+      });
+    }
+
+    if (existing.segmentRosterLink) {
+      const rosterLocalDate = DateTime.fromJSDate(existing.segmentRosterLink.roster.date, { zone: 'utc' }).toISODate();
+      const segmentLocalDate = localDateIso(nextStart, timezone);
+      if (rosterLocalDate !== segmentLocalDate) {
+        return reply.code(400).send({
+          error: {
+            code: 'ROSTER_DATE_MISMATCH',
+            message: 'Segment date must match roster date in company timezone.',
+            details: {},
+          },
+        });
+      }
+    }
+
+    const previousDurationMinutes = Math.round(
+      DateTime.fromJSDate(existing.endDatetime, { zone: 'utc' })
+        .setZone(timezone)
+        .diff(DateTime.fromJSDate(existing.startDatetime, { zone: 'utc' }).setZone(timezone), 'minutes').minutes,
+    );
+    const nextDurationMinutes = Math.round(
+      DateTime.fromJSDate(nextEnd, { zone: 'utc' })
+        .setZone(timezone)
+        .diff(DateTime.fromJSDate(nextStart, { zone: 'utc' }).setZone(timezone), 'minutes').minutes,
+    );
+    const movedOnly =
+      previousDurationMinutes === nextDurationMinutes &&
+      (existing.startDatetime.getTime() !== nextStart.getTime() ||
+        existing.endDatetime.getTime() !== nextEnd.getTime());
+
+    const eventType =
+      existing.startDatetime.getTime() === nextStart.getTime() &&
+      existing.endDatetime.getTime() === nextEnd.getTime()
+        ? 'SEGMENT_UPDATED'
+        : movedOnly
+          ? 'SEGMENT_MOVED'
+          : 'SEGMENT_RESIZED';
+
+    const updated = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const segment = await tx.scheduleSegment.update({
+        where: { id: existing.id },
+        data: {
+          startDatetime: nextStart,
+          endDatetime: nextEnd,
+          scheduledHoursOverride:
+            parsed.data.scheduledHoursOverride !== undefined
+              ? parsed.data.scheduledHoursOverride === null
+                ? null
+                : new Prisma.Decimal(parsed.data.scheduledHoursOverride)
+              : undefined,
+          notes: parsed.data.notes !== undefined ? parsed.data.notes : undefined,
+        },
+      });
+
+      await tx.scheduleEvent.create({
+        data: {
+          jobId: existing.jobId,
+          eventType,
+          source: 'USER_ACTION',
+          fromAt: existing.startDatetime,
+          toAt: nextStart,
+          actorUserId,
+          rawSnippet: JSON.stringify({
+            segmentId: existing.id,
+            oldStart: existing.startDatetime,
+            oldEnd: existing.endDatetime,
+            newStart: nextStart,
+            newEnd: nextEnd,
+          }),
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'ScheduleSegment',
+          entityId: existing.id,
+          actionType: eventType,
+          actorUserId,
+          diff: {
+            oldStart: existing.startDatetime,
+            oldEnd: existing.endDatetime,
+            newStart: nextStart,
+            newEnd: nextEnd,
+          },
+        },
+      });
+
+      return segment;
+    });
+
+    const jobState = await getDerivedJobState({
+      prisma: deps.prisma,
+      jobId: existing.jobId,
+      timezone,
+    });
+
+    return reply.code(200).send({
+      segment: updated,
+      jobState,
+    });
+  });
+
+  app.delete('/api/schedule-segments/:segmentId', async (request, reply) => {
+    let actorUserId: number;
+    try {
+      actorUserId = await requireActorUserId(deps.prisma, request);
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        return reply.code(401).send(UNAUTHENTICATED_ERROR);
+      }
+      throw error;
+    }
+
+    const paramsSchema = z.object({ segmentId: z.coerce.number().int().positive() });
+    const params = paramsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid segment id.',
+          details: params.error.flatten(),
+        },
+      });
+    }
+
+    const existing = await deps.prisma.scheduleSegment.findFirst({
+      where: {
+        id: params.data.segmentId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        jobId: true,
+        startDatetime: true,
+        endDatetime: true,
+      },
+    });
+    if (!existing) {
+      return reply.code(404).send({
+        error: {
+          code: 'SEGMENT_NOT_FOUND',
+          message: 'Schedule segment not found.',
+          details: {},
+        },
+      });
+    }
+
+    const deletedAt = new Date();
+    await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.scheduleSegment.update({
+        where: { id: existing.id },
+        data: { deletedAt },
+      });
+
+      await tx.scheduleEvent.create({
+        data: {
+          jobId: existing.jobId,
+          eventType: 'SEGMENT_DELETED',
+          source: 'USER_ACTION',
+          fromAt: existing.startDatetime,
+          toAt: existing.endDatetime,
+          actorUserId,
+          rawSnippet: JSON.stringify({
+            segmentId: existing.id,
+            deletedAt,
+          }),
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'ScheduleSegment',
+          entityId: existing.id,
+          actionType: 'SEGMENT_DELETED',
+          actorUserId,
+          diff: {
+            deletedAt,
+          },
+        },
+      });
+    });
+
+    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
+    const jobState = await getDerivedJobState({
+      prisma: deps.prisma,
+      jobId: existing.jobId,
+      timezone,
+    });
+
+    return reply.code(200).send({
+      ok: true,
+      jobState,
     });
   });
 
