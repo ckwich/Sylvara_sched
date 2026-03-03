@@ -1,6 +1,7 @@
 import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const hostBind = process.env.HOST_BIND ?? '0.0.0.0';
 const webPort = process.env.WEB_PORT ?? '3000';
@@ -30,13 +31,14 @@ const childEnv = {
   API_PORT: apiPort,
 };
 
-function spawnDetached(command, args, logPath) {
+function spawnDetached(command, args, logPath, cwd = process.cwd()) {
   const out = openSync(logPath, 'a');
   const child = spawn(command, args, {
+    cwd,
     env: childEnv,
     detached: true,
     stdio: ['ignore', out, out],
-    shell: process.platform === 'win32',
+    shell: false,
   });
   child.unref();
   return child.pid;
@@ -55,8 +57,13 @@ if (readExistingPid(apiPidPath) || readExistingPid(webPidPath)) {
   process.exit(1);
 }
 
-const apiPid = spawnDetached('corepack', ['pnpm', '--filter', '@sylvara/api', 'start'], apiLogPath);
-const webPid = spawnDetached('corepack', ['pnpm', '--filter', '@sylvara/web', 'start'], webLogPath);
+const apiEntrypoint = join(process.cwd(), 'apps', 'api', 'dist', 'server.js');
+const webRequire = createRequire(join(process.cwd(), 'apps', 'web', 'package.json'));
+const nextBin = webRequire.resolve('next/dist/bin/next');
+const webCwd = join(process.cwd(), 'apps', 'web');
+
+const apiPid = spawnDetached(process.execPath, [apiEntrypoint], apiLogPath);
+const webPid = spawnDetached(process.execPath, [nextBin, 'start', '-H', hostBind, '-p', webPort], webLogPath, webCwd);
 
 writeFileSync(apiPidPath, `${apiPid}\n`);
 writeFileSync(webPidPath, `${webPid}\n`);
