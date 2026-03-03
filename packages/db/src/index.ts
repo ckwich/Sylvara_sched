@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient, ResourceType } from '@prisma/client';
+import { PrismaClient, ResourceType } from '@prisma/client';
 import {
   formatMinuteToHHMM,
   minuteFieldUpdate as sharedMinuteFieldUpdate,
@@ -13,9 +13,7 @@ export function validateResourceInventoryQuantity(input: {
   inventoryQuantity: number;
 }) {
   if (input.resourceType === ResourceType.PERSON && input.inventoryQuantity !== 1) {
-    throw new Prisma.PrismaClientValidationError(
-      'PERSON resources must use inventory_quantity=1.',
-    );
+    throw new Error('PERSON resources must use inventory_quantity=1.');
   }
 }
 

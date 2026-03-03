@@ -1,9 +1,9 @@
 import type { NextRequest } from 'next/server';
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     path: string[];
-  };
+  }>;
 };
 
 const METHODS_WITHOUT_BODY = new Set(['GET', 'HEAD']);
@@ -26,7 +26,8 @@ async function proxy(request: NextRequest, context: RouteContext): Promise<Respo
     );
   }
 
-  const path = context.params.path.join('/');
+  const { path: pathSegments } = await context.params;
+  const path = pathSegments.join('/');
   const targetUrl = new URL(`http://127.0.0.1:${apiPort}/api/${path}`);
   targetUrl.search = request.nextUrl.search;
 
