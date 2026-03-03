@@ -82,21 +82,43 @@ describe('org settings endpoints', () => {
         user: {
           findUnique: async () => ({ id: 7 }),
         },
-        orgSettings: {
-          upsert: async ({ create }: { create: { companyTimezone: string } }) => {
-            captured.companyTimezone = create.companyTimezone;
-            return {
-              companyTimezone: create.companyTimezone,
-              operatingStartMinute: null,
-              operatingEndMinute: null,
+        $transaction: async (
+          fn: (tx: {
+            orgSettings: {
+              upsert: (args: {
+                create: { companyTimezone: string };
+              }) => Promise<{
+                companyTimezone: string;
+                operatingStartMinute: null;
+                operatingEndMinute: null;
+              }>;
             };
-          },
-        },
-        activityLog: {
-          create: async ({ data }: { data: { actorUserId: number } }) => {
-            captured.actorUserId = data.actorUserId;
-          },
-        },
+            activityLog: {
+              create: (args: { data: { actorUserId: number } }) => Promise<void>;
+            };
+          }) => Promise<{
+            companyTimezone: string;
+            operatingStartMinute: null;
+            operatingEndMinute: null;
+          }>,
+        ) =>
+          fn({
+            orgSettings: {
+              upsert: async ({ create }) => {
+                captured.companyTimezone = create.companyTimezone;
+                return {
+                  companyTimezone: create.companyTimezone,
+                  operatingStartMinute: null,
+                  operatingEndMinute: null,
+                };
+              },
+            },
+            activityLog: {
+              create: async ({ data }) => {
+                captured.actorUserId = data.actorUserId;
+              },
+            },
+          }),
       } as unknown as PrismaClient,
     });
     const response = await app.inject({
@@ -114,6 +136,67 @@ describe('org settings endpoints', () => {
     expect(response.json().companyTimezone).toBe('America/Chicago');
     expect(captured.companyTimezone).toBe('America/Chicago');
     expect(captured.actorUserId).toBe(7);
+    await app.close();
+  });
+
+  test('PATCH /api/org-settings transaction rolls back when activity log write fails', async () => {
+    let timezone = 'America/New_York';
+    const app = buildServer({
+      prisma: {
+        user: {
+          findUnique: async () => ({ id: 9 }),
+        },
+        $transaction: async (
+          fn: (tx: {
+            orgSettings: {
+              upsert: (args: { create: { companyTimezone: string } }) => Promise<{
+                companyTimezone: string;
+                operatingStartMinute: null;
+                operatingEndMinute: null;
+              }>;
+            };
+            activityLog: {
+              create: () => Promise<void>;
+            };
+          }) => Promise<unknown>,
+        ) => {
+          const staged = { timezone };
+          const result = await fn({
+            orgSettings: {
+              upsert: async ({ create }) => {
+                staged.timezone = create.companyTimezone;
+                return {
+                  companyTimezone: staged.timezone,
+                  operatingStartMinute: null,
+                  operatingEndMinute: null,
+                };
+              },
+            },
+            activityLog: {
+              create: async () => {
+                throw new Error('log failure');
+              },
+            },
+          });
+          timezone = staged.timezone;
+          return result;
+        },
+      } as unknown as PrismaClient,
+    });
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/org-settings',
+      headers: {
+        'x-actor-user-id': '9',
+      },
+      payload: {
+        companyTimezone: 'America/Chicago',
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(timezone).toBe('America/New_York');
     await app.close();
   });
 });

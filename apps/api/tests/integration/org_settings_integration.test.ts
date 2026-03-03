@@ -37,6 +37,17 @@ describe('org settings integration (real postgres)', () => {
     expect(getResponse.statusCode).toBe(200);
     expect(getResponse.json().companyTimezone).toBe('America/Chicago');
 
+    const log = await prisma.activityLog.findFirst({
+      where: {
+        entityType: 'OrgSettings',
+        entityId: 1,
+        actionType: 'UPDATED',
+        actorUserId: actor.id,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(log).not.toBeNull();
+
     await app.close();
   });
 });

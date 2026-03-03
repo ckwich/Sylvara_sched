@@ -302,32 +302,36 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const updated = await deps.prisma.orgSettings.upsert({
-      where: { id: 1 },
-      create: {
-        id: 1,
-        companyTimezone: parsed.data.companyTimezone,
-      },
-      update: {
-        companyTimezone: parsed.data.companyTimezone,
-      },
-      select: {
-        companyTimezone: true,
-        operatingStartMinute: true,
-        operatingEndMinute: true,
-      },
-    });
-
-    await deps.prisma.activityLog.create({
-      data: {
-        entityType: 'OrgSettings',
-        entityId: 1,
-        actionType: 'UPDATED',
-        actorUserId,
-        diff: {
-          companyTimezone: updated.companyTimezone,
+    const updated = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const settings = await tx.orgSettings.upsert({
+        where: { id: 1 },
+        create: {
+          id: 1,
+          companyTimezone: parsed.data.companyTimezone,
         },
-      },
+        update: {
+          companyTimezone: parsed.data.companyTimezone,
+        },
+        select: {
+          companyTimezone: true,
+          operatingStartMinute: true,
+          operatingEndMinute: true,
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'OrgSettings',
+          entityId: 1,
+          actionType: 'UPDATED',
+          actorUserId,
+          diff: {
+            companyTimezone: settings.companyTimezone,
+          },
+        },
+      });
+
+      return settings;
     });
 
     return reply.code(200).send({
