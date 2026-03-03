@@ -234,8 +234,9 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 **Arrange/Act/Assert**
 - With LAN guard enabled, `GET /api/health` returns 200 without auth
 - With LAN guard enabled, non-health read route returns `401 UNAUTHENTICATED` when bearer is missing
-- With LAN guard enabled, non-health write route returns `401 UNAUTHENTICATED` when bearer is invalid
-- With valid bearer, route behavior proceeds normally
+- With LAN guard enabled, non-health write route returns `401 UNAUTHENTICATED` when `X-LAN-USER` is missing
+- With LAN guard enabled, non-health write route rejects `x-actor-user-id` in favor of LAN user attribution
+- With valid bearer + `X-LAN-USER`, write behavior proceeds and `activity_logs.actor_display` stores the LAN user value
 
 **File:** `apps/api/tests/smoke/lan_guard.test.*`
 

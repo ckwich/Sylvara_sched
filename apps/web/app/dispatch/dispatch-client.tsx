@@ -49,6 +49,40 @@ type RequestDiagnostics = {
   networkErrorMessage?: string | null;
 };
 
+type DiagnosticsView = {
+  url: string;
+  status: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  networkErrorMessage: string | null;
+  errorBody?: unknown | null;
+};
+
+function extractErrorSummary(errorBody: unknown): { errorCode: string | null; errorMessage: string | null } {
+  if (!errorBody || typeof errorBody !== 'object') {
+    return { errorCode: null, errorMessage: null };
+  }
+  const error = (errorBody as { error?: { code?: unknown; message?: unknown } }).error;
+  const errorCode = typeof error?.code === 'string' ? error.code : null;
+  const errorMessage = typeof error?.message === 'string' ? error.message : null;
+  return { errorCode, errorMessage };
+}
+
+function buildDiagnosticsView(
+  diagnostics: RequestDiagnostics,
+  includeRawDetails: boolean,
+): DiagnosticsView {
+  const summary = extractErrorSummary(diagnostics.errorBody);
+  return {
+    url: diagnostics.url,
+    status: diagnostics.status,
+    errorCode: summary.errorCode,
+    errorMessage: summary.errorMessage,
+    networkErrorMessage: diagnostics.networkErrorMessage ?? null,
+    ...(includeRawDetails ? { errorBody: diagnostics.errorBody } : {}),
+  };
+}
+
 type DispatchClientProps = {
   lanModeEnabled: boolean;
 };
@@ -84,8 +118,10 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
     networkErrorMessage: null,
   });
   const [lanUser, setLanUser] = useState('');
+  const [showDebugDetails, setShowDebugDetails] = useState(false);
 
   const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
+  const canExpandDebugDetails = process.env.NODE_ENV !== 'production' && !lanModeEnabled;
 
   const createValidationError = useMemo(() => {
     if (!startDatetime || !endDatetime) {
@@ -330,13 +366,29 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
         <p>API base URL: {isHydrated ? (API_BASE_URL || '(browser uses relative /api)') : '(client-only)'}</p>
         <p>Timezone used for display: {companyTimezone}</p>
         <p>Timezone load error: {timezoneError ?? 'none'}</p>
-        {/* TODO(dev-only): trim raw error payloads before exposing diagnostics to broader users. */}
+        {!canExpandDebugDetails ? <p>Raw debug details are hidden in LAN mode.</p> : null}
+        {canExpandDebugDetails ? (
+          <label style={{ display: 'block', marginBottom: 8 }}>
+            <input
+              type="checkbox"
+              checked={showDebugDetails}
+              onChange={(event) => setShowDebugDetails(event.target.checked)}
+            />{' '}
+            Expand debug details
+          </label>
+        ) : null}
         <pre style={{ background: '#f5f5f5', padding: 8, overflowX: 'auto' }}>
 {JSON.stringify(
   isHydrated
     ? {
-        orgSettingsRequest: orgDiagnostics,
-        foremanScheduleRequest: scheduleDiagnostics,
+        orgSettingsRequest: buildDiagnosticsView(
+          orgDiagnostics,
+          canExpandDebugDetails && showDebugDetails,
+        ),
+        foremanScheduleRequest: buildDiagnosticsView(
+          scheduleDiagnostics,
+          canExpandDebugDetails && showDebugDetails,
+        ),
       }
     : {
         orgSettingsRequest: { url: '(client-only)', status: null, errorBody: null },
@@ -358,8 +410,14 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
                     apiBaseUrl: API_BASE_URL || '(same-origin)',
                     timezoneUsed: companyTimezone,
                     timezoneError,
-                    orgSettingsRequest: orgDiagnostics,
-                    foremanScheduleRequest: scheduleDiagnostics,
+                    orgSettingsRequest: buildDiagnosticsView(
+                      orgDiagnostics,
+                      canExpandDebugDetails && showDebugDetails,
+                    ),
+                    foremanScheduleRequest: buildDiagnosticsView(
+                      scheduleDiagnostics,
+                      canExpandDebugDetails && showDebugDetails,
+                    ),
                   }
                 : {
                     foremanPersonId,

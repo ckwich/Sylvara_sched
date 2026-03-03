@@ -37,6 +37,7 @@ Use this when running the Scheduler from an always-on office host so coworkers c
 3. API access in LAN mode:
    - Browser still calls same-origin `/api/*` from the web app.
    - API requires `Authorization: Bearer <LAN_SHARED_SECRET>` on `/api/*`, except `GET /api/health`.
+   - API writes also require `X-LAN-USER` (set from the web UI "LAN User" field).
    - The web server proxy adds this header server-side in LAN mode.
 4. Windows Firewall:
    - Allow inbound TCP `3000` on the host machine
@@ -45,6 +46,10 @@ Use this when running the Scheduler from an always-on office host so coworkers c
    - Open `http://<host-machine-name>:3000/dispatch`
    - Example: `http://SCHED-HOST:3000/dispatch`
 6. Keep the shared secret internal. This is LAN-only guardrail, not SSO.
+7. LAN User attribution:
+   - Each coworker enters their own `LAN User` value on `/dispatch` or `/company`.
+   - The value is saved in browser localStorage and sent as `X-LAN-USER` on writes.
+   - It is recorded in `activity_logs.actor_display` for audit context only (not authorization).
 
 ## Integration Tests (Real Postgres)
 
