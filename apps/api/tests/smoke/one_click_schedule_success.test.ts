@@ -145,8 +145,8 @@ describe('A2 one-click schedule success', () => {
       payload: {
         jobId: 10,
         foremanPersonId: 77,
-        date: '2026-03-02',
-        requestedStartMinute: 1435,
+        date: '2026-03-03',
+        requestedStartMinute: 1410,
       },
     });
 
@@ -154,6 +154,134 @@ describe('A2 one-click schedule success', () => {
     const body = response.json();
     expect(body.result).toBe('REJECT');
     expect(body.rejections[0].code).toBe('CROSSES_MIDNIGHT');
+    await app.close();
+  });
+
+  test('places repeat attempts deterministically without overlap and reuses same roster link', async () => {
+    const createdLinks: Array<{ scheduleSegmentId: number; rosterId: number }> = [];
+    const createdSegments: Array<{ id: number; startDatetime: Date; endDatetime: Date }> = [];
+    let nextSegmentId = 200;
+
+    const fakePrisma = {
+      job: {
+        findUnique: async () => ({
+          id: 10,
+          estimateHoursCurrent: '2',
+          availabilityNotes: null,
+          requirements: [],
+          jobBlockers: [],
+        }),
+      },
+      foremanDayRoster: {
+        findFirst: async () => ({
+          id: 99,
+          preferredStartMinute: 420,
+          preferredStartTime: null,
+          homeBase: { openingMinute: 420, openingTime: null },
+        }),
+      },
+      travelSegment: { findMany: async () => [] },
+      scheduleSegment: {
+        findMany: async () => createdSegments,
+      },
+      orgSettings: {
+        findFirst: async () => ({
+          companyTimezone: 'America/New_York',
+          operatingStartMinute: 420,
+          operatingStartTime: null,
+        }),
+      },
+      segmentRosterLink: {
+        create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+          createdLinks.push(data);
+          return data;
+        },
+      },
+      jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
+      $transaction: async (
+        fn: (tx: {
+          scheduleSegment: {
+            create: (args: { data: { startDatetime: Date; endDatetime: Date } }) => Promise<{
+              id: number;
+              startDatetime: Date;
+              endDatetime: Date;
+            }>;
+          };
+          segmentRosterLink: {
+            create: (args: { data: { scheduleSegmentId: number; rosterId: number } }) => Promise<{
+              scheduleSegmentId: number;
+              rosterId: number;
+            }>;
+          };
+          activityLog: { create: () => Promise<void> };
+        }) => Promise<{ id: number; startDatetime: Date; endDatetime: Date }>,
+      ) =>
+        fn({
+          scheduleSegment: {
+            create: async ({ data }: { data: { startDatetime: Date; endDatetime: Date } }) => {
+              const created = {
+                id: nextSegmentId,
+                startDatetime: data.startDatetime,
+                endDatetime: data.endDatetime,
+              };
+              nextSegmentId += 1;
+              createdSegments.push(created);
+              return created;
+            },
+          },
+          segmentRosterLink: {
+            create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+              createdLinks.push(data);
+              return data;
+            },
+          },
+          activityLog: { create: async () => undefined },
+        }),
+    } as unknown as PrismaClient;
+
+    const app = buildServer({ prisma: fakePrisma });
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/schedule/one-click-attempt',
+      payload: {
+        jobId: 10,
+        foremanPersonId: 77,
+        date: '2026-03-03',
+        requestedStartMinute: 420,
+      },
+    });
+
+    const firstBody = first.json();
+    expect(first.statusCode).toBe(200);
+    expect(firstBody.result).toBe('ACCEPT');
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/schedule/one-click-attempt',
+      payload: {
+        jobId: 10,
+        foremanPersonId: 77,
+        date: '2026-03-03',
+      },
+    });
+
+    const secondBody = second.json();
+    expect(second.statusCode).toBe(200);
+    expect(secondBody.result).toBe('ACCEPT');
+
+    const firstEndMinute = new Date(firstBody.segment.endDatetime).getUTCHours() * 60 + new Date(firstBody.segment.endDatetime).getUTCMinutes();
+    const secondStartMinute =
+      new Date(secondBody.segment.startDatetime).getUTCHours() * 60 + new Date(secondBody.segment.startDatetime).getUTCMinutes();
+
+    expect(secondStartMinute).toBeGreaterThanOrEqual(firstEndMinute);
+    expect(secondStartMinute % 10).toBe(0);
+    expect(
+      createdLinks.some((link) => link.scheduleSegmentId === firstBody.segment.id && link.rosterId === 99),
+    ).toBe(true);
+    expect(
+      createdLinks.some((link) => link.scheduleSegmentId === secondBody.segment.id && link.rosterId === 99),
+    ).toBe(true);
     await app.close();
   });
 

@@ -117,11 +117,8 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 
 ### A6 — Customer availability parser + conflict enforcement
 **Arrange/Act/Assert**
-- `availabilityNotes="09:00-11:00"` with attempt `10:30-12:30` → conflict
-- `availabilityNotes="9am-11am"` with attempt `10:30-12:30` → conflict
-- `availabilityNotes="9-11am"` with attempt `10:30-12:30` → conflict
-- `availabilityNotes="9 to 11am"` with attempt `10:30-12:30` → conflict
-- `availabilityNotes="mornings only"` → no parsed window (no window-based reject)
+- One-click attempt rejects `CUSTOMER_WINDOW_CONFLICT` when parseable `availabilityNotes` window excludes the proposed segment
+- One-click attempt ACCEPTs with warning `CUSTOMER_WINDOW_NOT_CONFIGURED` when `availabilityNotes` is missing or unparseable
 
 **File:** `apps/api/tests/smoke/reject_customer_window.test.*`
 

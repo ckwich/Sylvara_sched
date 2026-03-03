@@ -2,12 +2,38 @@ import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
 
+const TEST_TZ = 'America/New_York';
+
 function makeUtcDate(iso: string): Date {
   return new Date(iso);
 }
 
+function localParts(iso: string, timeZone: string): { date: string; minute: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(iso));
+
+  const year = Number(parts.find((p) => p.type === 'year')?.value ?? '0');
+  const month = Number(parts.find((p) => p.type === 'month')?.value ?? '0');
+  const day = Number(parts.find((p) => p.type === 'day')?.value ?? '0');
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+
+  return {
+    date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    minute: hour * 60 + minute,
+  };
+}
+
 describe('A3 click-to-create snap and no-overlap', () => {
   test('floors 09:19 to 09:10 and places non-overlapping block', async () => {
+    const createdLinks: Array<{ scheduleSegmentId: number; rosterId: number }> = [];
     const fakePrisma = {
       job: {
         findUnique: async () => ({
@@ -37,20 +63,23 @@ describe('A3 click-to-create snap and no-overlap', () => {
       scheduleSegment: {
         findMany: async () => [
           {
-            startDatetime: makeUtcDate('2026-03-02T16:00:00.000Z'),
-            endDatetime: makeUtcDate('2026-03-02T17:00:00.000Z'),
+            startDatetime: makeUtcDate('2026-03-03T16:00:00.000Z'),
+            endDatetime: makeUtcDate('2026-03-03T17:00:00.000Z'),
           },
         ],
       },
       orgSettings: {
         findFirst: async () => ({
-          companyTimezone: 'America/New_York',
+          companyTimezone: TEST_TZ,
           operatingStartMinute: 300,
           operatingStartTime: null,
         }),
       },
       segmentRosterLink: {
-        create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => data,
+        create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+          createdLinks.push(data);
+          return data;
+        },
       },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
       $transaction: async (
@@ -73,12 +102,15 @@ describe('A3 click-to-create snap and no-overlap', () => {
           scheduleSegment: {
             create: async () => ({
               id: 123,
-              startDatetime: makeUtcDate('2026-03-02T14:10:00.000Z'),
-              endDatetime: makeUtcDate('2026-03-02T15:10:00.000Z'),
+              startDatetime: makeUtcDate('2026-03-03T14:10:00.000Z'),
+              endDatetime: makeUtcDate('2026-03-03T15:10:00.000Z'),
             }),
           },
           segmentRosterLink: {
-            create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => data,
+            create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+              createdLinks.push(data);
+              return data;
+            },
           },
           activityLog: {
             create: async () => undefined,
@@ -93,7 +125,7 @@ describe('A3 click-to-create snap and no-overlap', () => {
       payload: {
         jobId: 10,
         foremanPersonId: 77,
-        date: '2026-03-02',
+        date: '2026-03-03',
         requestedStartMinute: 559,
       },
     });
@@ -101,7 +133,12 @@ describe('A3 click-to-create snap and no-overlap', () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.result).toBe('ACCEPT');
-    expect(body.segment.startDatetime).toContain('2026-03-02T14:10:00.000Z');
+    const local = localParts(body.segment.startDatetime, TEST_TZ);
+    expect(local.date).toBe('2026-03-03');
+    expect(local.minute).toBe(550);
+    expect(
+      createdLinks.some((link) => link.scheduleSegmentId === 123 && link.rosterId === 99),
+    ).toBe(true);
     await app.close();
   });
 });
