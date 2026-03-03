@@ -209,6 +209,50 @@ async function getDerivedJobState(input: {
   };
 }
 
+async function hasActiveBookingConflict(input: {
+  prisma: PrismaClient;
+  foremanPersonId: number;
+  serviceDate: Date;
+  startDatetime: Date;
+  endDatetime: Date;
+  excludeScheduleSegmentId?: number;
+}): Promise<boolean> {
+  // Keep manual CRUD conflict semantics aligned with one-click availability:
+  // both roster-linked onsite segments and active travel segments block time.
+  const [overlappingSegment, overlappingTravel] = await Promise.all([
+    input.prisma.scheduleSegment.findFirst({
+      where: {
+        deletedAt: null,
+        ...(input.excludeScheduleSegmentId !== undefined
+          ? { id: { not: input.excludeScheduleSegmentId } }
+          : {}),
+        startDatetime: { lt: input.endDatetime },
+        endDatetime: { gt: input.startDatetime },
+        segmentRosterLink: {
+          is: {
+            roster: {
+              foremanPersonId: input.foremanPersonId,
+              date: input.serviceDate,
+            },
+          },
+        },
+      },
+      select: { id: true },
+    }),
+    input.prisma.travelSegment.findFirst({
+      where: {
+        foremanPersonId: input.foremanPersonId,
+        deletedAt: null,
+        startDatetime: { lt: input.endDatetime },
+        endDatetime: { gt: input.startDatetime },
+      },
+      select: { id: true },
+    }),
+  ]);
+
+  return overlappingSegment !== null || overlappingTravel !== null;
+}
+
 export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   app.get('/api/org-settings', async (_request, reply) => {
     const settings = await deps.prisma.orgSettings.findFirst({
@@ -892,7 +936,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       deps.prisma.job.findUnique({ where: { id: body.jobId }, select: { id: true } }),
       deps.prisma.foremanDayRoster.findUnique({
         where: { id: body.rosterId },
-        select: { id: true, date: true },
+        select: { id: true, date: true, foremanPersonId: true },
       }),
     ]);
     if (!job) {
@@ -921,6 +965,23 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
         error: {
           code: 'ROSTER_DATE_MISMATCH',
           message: 'Segment date must match roster date in company timezone.',
+          details: {},
+        },
+      });
+    }
+
+    const hasConflict = await hasActiveBookingConflict({
+      prisma: deps.prisma,
+      foremanPersonId: roster.foremanPersonId,
+      serviceDate: roster.date,
+      startDatetime,
+      endDatetime,
+    });
+    if (hasConflict) {
+      return reply.code(409).send({
+        error: {
+          code: 'SCHEDULE_CONFLICT',
+          message: 'Segment overlaps existing booking.',
           details: {},
         },
       });
@@ -1105,8 +1166,28 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           },
         });
       }
+
+      const hasConflict = await hasActiveBookingConflict({
+        prisma: deps.prisma,
+        foremanPersonId: existing.segmentRosterLink.roster.foremanPersonId,
+        serviceDate: existing.segmentRosterLink.roster.date,
+        startDatetime: nextStart,
+        endDatetime: nextEnd,
+        excludeScheduleSegmentId: existing.id,
+      });
+      if (hasConflict) {
+        return reply.code(409).send({
+          error: {
+            code: 'SCHEDULE_CONFLICT',
+            message: 'Segment overlaps existing booking.',
+            details: {},
+          },
+        });
+      }
     }
 
+    const startChanged = existing.startDatetime.getTime() !== nextStart.getTime();
+    const endChanged = existing.endDatetime.getTime() !== nextEnd.getTime();
     const previousDurationMinutes = Math.round(
       DateTime.fromJSDate(existing.endDatetime, { zone: 'utc' })
         .setZone(timezone)
@@ -1123,12 +1204,13 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
         existing.endDatetime.getTime() !== nextEnd.getTime());
 
     const eventType =
-      existing.startDatetime.getTime() === nextStart.getTime() &&
-      existing.endDatetime.getTime() === nextEnd.getTime()
+      !startChanged && !endChanged
         ? 'SEGMENT_UPDATED'
         : movedOnly
           ? 'SEGMENT_MOVED'
           : 'SEGMENT_RESIZED';
+    const eventFromAt = endChanged ? existing.endDatetime : existing.startDatetime;
+    const eventToAt = endChanged ? nextEnd : nextStart;
 
     const updated = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const segment = await tx.scheduleSegment.update({
@@ -1151,8 +1233,8 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           jobId: existing.jobId,
           eventType,
           source: 'USER_ACTION',
-          fromAt: existing.startDatetime,
-          toAt: nextStart,
+          fromAt: eventFromAt,
+          toAt: eventToAt,
           actorUserId,
           rawSnippet: JSON.stringify({
             segmentId: existing.id,

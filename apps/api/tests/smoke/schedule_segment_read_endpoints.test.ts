@@ -70,6 +70,7 @@ function buildReadPrisma() {
     },
     travelSegment: {
       findMany: async () => [],
+      findFirst: async () => null,
     },
     scheduleSegment: {
       findMany: async ({
@@ -128,14 +129,34 @@ function buildReadPrisma() {
           },
         }));
       },
-      findFirst: async ({ where }: { where: { id: number; deletedAt: null } }) => {
-        const found = segments.find((s) => s.id === where.id && s.deletedAt === null);
-        if (!found) {
-          return null;
-        }
-        return {
-          ...found,
+      findFirst: async ({
+        where,
+      }: {
+        where: {
+          id?: number | { not: number };
+          deletedAt?: null;
+          startDatetime?: { lt: Date };
+          endDatetime?: { gt: Date };
+          segmentRosterLink?: { is: { roster: { foremanPersonId: number; date: Date } } };
         };
+      }) => {
+        if (typeof where.id === 'number') {
+          const found = segments.find((s) => s.id === where.id && s.deletedAt === null);
+          return found ?? null;
+        }
+
+        const excludedId = typeof where.id === 'object' ? where.id.not : undefined;
+        const overlap = segments.find(
+          (segment) =>
+            segment.deletedAt === null &&
+            (excludedId === undefined || segment.id !== excludedId) &&
+            where.startDatetime !== undefined &&
+            where.endDatetime !== undefined &&
+            segment.startDatetime < where.startDatetime.lt &&
+            segment.endDatetime > where.endDatetime.gt &&
+            links.some((l) => l.scheduleSegmentId === segment.id),
+        );
+        return overlap ? { id: overlap.id } : null;
       },
     },
     $transaction: async (
@@ -291,4 +312,3 @@ describe('M2 schedule segment read/list endpoints', () => {
     await app.close();
   });
 });
-

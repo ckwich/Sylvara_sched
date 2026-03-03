@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { SegmentType } from '@prisma/client';
 import { buildServer } from '../../src/server';
-import { makePrisma, resetDb, seedBase } from './_helpers/db';
+import { createLinkedSegment, makePrisma, resetDb, seedBase } from './_helpers/db';
 
 const prisma = makePrisma();
 
@@ -110,6 +110,111 @@ describe('schedule segment integration (real postgres)', () => {
     expect(foremanAfterDelete.statusCode).toBe(200);
     expect(foremanAfterDelete.json().scheduleSegments).toHaveLength(0);
 
+    await app.close();
+  });
+
+  test('rejects overlapping create and update with 409 and leaves DB unchanged', async () => {
+    const { actor, job, roster } = await seedBase(prisma);
+    const app = buildServer({ prisma });
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': String(actor.id) },
+      payload: {
+        jobId: job.id,
+        rosterId: roster.id,
+        startDatetime: '2026-03-03T14:00:00.000Z',
+        endDatetime: '2026-03-03T15:00:00.000Z',
+      },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const overlapCreate = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': String(actor.id) },
+      payload: {
+        jobId: job.id,
+        rosterId: roster.id,
+        startDatetime: '2026-03-03T14:30:00.000Z',
+        endDatetime: '2026-03-03T15:30:00.000Z',
+      },
+    });
+    expect(overlapCreate.statusCode).toBe(409);
+    expect(overlapCreate.json().error.code).toBe('SCHEDULE_CONFLICT');
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': String(actor.id) },
+      payload: {
+        jobId: job.id,
+        rosterId: roster.id,
+        startDatetime: '2026-03-03T15:00:00.000Z',
+        endDatetime: '2026-03-03T16:00:00.000Z',
+      },
+    });
+    expect(second.statusCode).toBe(200);
+    const secondId = second.json().segment.id as number;
+
+    const overlapUpdate = await app.inject({
+      method: 'PATCH',
+      url: `/api/schedule-segments/${secondId}`,
+      headers: { 'x-actor-user-id': String(actor.id) },
+      payload: {
+        startDatetime: '2026-03-03T14:30:00.000Z',
+        endDatetime: '2026-03-03T15:30:00.000Z',
+      },
+    });
+    expect(overlapUpdate.statusCode).toBe(409);
+    expect(overlapUpdate.json().error.code).toBe('SCHEDULE_CONFLICT');
+
+    const secondDb = await prisma.scheduleSegment.findUnique({
+      where: { id: secondId },
+      select: { startDatetime: true, endDatetime: true },
+    });
+    expect(secondDb?.startDatetime.toISOString()).toBe('2026-03-03T15:00:00.000Z');
+    expect(secondDb?.endDatetime.toISOString()).toBe('2026-03-03T16:00:00.000Z');
+
+    const activeCount = await prisma.scheduleSegment.count({
+      where: { jobId: job.id, deletedAt: null },
+    });
+    expect(activeCount).toBe(2);
+    await app.close();
+  });
+
+  test('writes resize schedule_event using previous and new end datetimes', async () => {
+    const { actor, job, roster } = await seedBase(prisma);
+    const app = buildServer({ prisma });
+    const created = await createLinkedSegment(prisma, {
+      jobId: job.id,
+      rosterId: roster.id,
+      createdByUserId: actor.id,
+      startDatetime: new Date('2026-03-03T14:00:00.000Z'),
+      endDatetime: new Date('2026-03-03T15:00:00.000Z'),
+    });
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/api/schedule-segments/${created.id}`,
+      headers: { 'x-actor-user-id': String(actor.id) },
+      payload: {
+        endDatetime: '2026-03-03T16:00:00.000Z',
+      },
+    });
+    expect(patched.statusCode).toBe(200);
+
+    const event = await prisma.scheduleEvent.findFirst({
+      where: {
+        jobId: job.id,
+        eventType: 'SEGMENT_RESIZED',
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { fromAt: true, toAt: true },
+    });
+    expect(event?.fromAt?.toISOString()).toBe('2026-03-03T15:00:00.000Z');
+    expect(event?.toAt?.toISOString()).toBe('2026-03-03T16:00:00.000Z');
     await app.close();
   });
 });

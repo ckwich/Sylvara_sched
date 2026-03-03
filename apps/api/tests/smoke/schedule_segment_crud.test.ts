@@ -29,6 +29,7 @@ function localParts(iso: string, timeZone: string): { date: string; minute: numb
 
 function buildCrudPrisma(): PrismaClient {
   const rosterDate = new Date('2026-03-03T00:00:00.000Z');
+  const foremanPersonId = 77;
   const segments: Array<{
     id: number;
     jobId: number;
@@ -38,6 +39,7 @@ function buildCrudPrisma(): PrismaClient {
     scheduledHoursOverride: number | null;
   }> = [];
   const links: Array<{ scheduleSegmentId: number; rosterId: number }> = [];
+  const travelSegments: Array<{ id: number; startDatetime: Date; endDatetime: Date; deletedAt: Date | null }> = [];
   let nextSegmentId = 100;
 
   const fake = {
@@ -70,6 +72,7 @@ function buildCrudPrisma(): PrismaClient {
         return {
           id: 99,
           date: rosterDate,
+          foremanPersonId,
         };
       },
     },
@@ -81,21 +84,67 @@ function buildCrudPrisma(): PrismaClient {
             (where.deletedAt !== null || s.deletedAt === null) &&
             links.some((l) => l.scheduleSegmentId === s.id),
         ),
-      findFirst: async ({ where }: { where: { id: number; deletedAt: null } }) => {
-        const found = segments.find((s) => s.id === where.id && s.deletedAt === null);
-        if (!found) {
-          return null;
-        }
-        return {
-          ...found,
-          segmentRosterLink: {
-            roster: {
-              id: 99,
-              date: rosterDate,
-            },
-          },
+      findFirst: async ({
+        where,
+      }: {
+        where: {
+          id?: number | { not: number };
+          deletedAt?: null;
+          startDatetime?: { lt: Date };
+          endDatetime?: { gt: Date };
+          segmentRosterLink?: {
+            is: { roster: { foremanPersonId: number; date: Date } };
+          };
         };
+      }) => {
+        if (typeof where.id === 'number') {
+          const found = segments.find((s) => s.id === where.id && s.deletedAt === null);
+          if (!found) {
+            return null;
+          }
+          return {
+            ...found,
+            segmentRosterLink: {
+              roster: {
+                id: 99,
+                date: rosterDate,
+                foremanPersonId,
+              },
+            },
+          };
+        }
+
+        const excludedId = typeof where.id === 'object' ? where.id.not : undefined;
+        const overlap = segments.find(
+          (s) =>
+            s.deletedAt === null &&
+            (excludedId === undefined || s.id !== excludedId) &&
+            where.startDatetime !== undefined &&
+            where.endDatetime !== undefined &&
+            s.startDatetime < where.startDatetime.lt &&
+            s.endDatetime > where.endDatetime.gt &&
+            links.some((l) => l.scheduleSegmentId === s.id && l.rosterId === 99),
+        );
+        return overlap ? { id: overlap.id } : null;
       },
+    },
+    travelSegment: {
+      findFirst: async ({
+        where,
+      }: {
+        where: {
+          foremanPersonId: number;
+          deletedAt: null;
+          startDatetime: { lt: Date };
+          endDatetime: { gt: Date };
+        };
+      }) =>
+        travelSegments.find(
+          (s) =>
+            s.deletedAt === null &&
+            s.startDatetime < where.startDatetime.lt &&
+            s.endDatetime > where.endDatetime.gt,
+        ) ?? null,
     },
     $transaction: async (
       fn: (tx: {
@@ -304,5 +353,73 @@ describe('M2 schedule segment CRUD', () => {
     expect(deleteBody.jobState.state).toBe('TBS');
     await app.close();
   });
-});
 
+  test('rejects overlapping segment create', async () => {
+    const app = buildServer({ prisma: buildCrudPrisma() });
+    await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': '1' },
+      payload: {
+        jobId: 10,
+        rosterId: 99,
+        startDatetime: '2026-03-03T14:00:00.000Z',
+        endDatetime: '2026-03-03T15:00:00.000Z',
+      },
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': '1' },
+      payload: {
+        jobId: 10,
+        rosterId: 99,
+        startDatetime: '2026-03-03T14:30:00.000Z',
+        endDatetime: '2026-03-03T15:30:00.000Z',
+      },
+    });
+    expect(second.statusCode).toBe(409);
+    expect(second.json().error.code).toBe('SCHEDULE_CONFLICT');
+    await app.close();
+  });
+
+  test('rejects update that moves segment into overlap', async () => {
+    const app = buildServer({ prisma: buildCrudPrisma() });
+    await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': '1' },
+      payload: {
+        jobId: 10,
+        rosterId: 99,
+        startDatetime: '2026-03-03T14:00:00.000Z',
+        endDatetime: '2026-03-03T15:00:00.000Z',
+      },
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': '1' },
+      payload: {
+        jobId: 10,
+        rosterId: 99,
+        startDatetime: '2026-03-03T15:00:00.000Z',
+        endDatetime: '2026-03-03T16:00:00.000Z',
+      },
+    });
+    const secondId = second.json().segment.id as number;
+
+    const update = await app.inject({
+      method: 'PATCH',
+      url: `/api/schedule-segments/${secondId}`,
+      headers: { 'x-actor-user-id': '1' },
+      payload: {
+        startDatetime: '2026-03-03T14:30:00.000Z',
+        endDatetime: '2026-03-03T15:30:00.000Z',
+      },
+    });
+    expect(update.statusCode).toBe(409);
+    expect(update.json().error.code).toBe('SCHEDULE_CONFLICT');
+    await app.close();
+  });
+});
