@@ -197,6 +197,9 @@ function buildCrudPrisma(): PrismaClient {
         scheduleEvent: {
           create: () => Promise<void>;
         };
+        vacatedSlot: {
+          create: () => Promise<void>;
+        };
         activityLog: {
           create: () => Promise<void>;
         };
@@ -247,6 +250,7 @@ function buildCrudPrisma(): PrismaClient {
           },
         },
         scheduleEvent: { create: async () => undefined },
+        vacatedSlot: { create: async () => undefined },
         activityLog: { create: async () => undefined },
       }),
   } as unknown as PrismaClient;

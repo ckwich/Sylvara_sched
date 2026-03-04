@@ -246,6 +246,7 @@ function buildReadPrisma() {
           }>;
         };
         scheduleEvent: { create: () => Promise<void> };
+        vacatedSlot: { create: () => Promise<void> };
         activityLog: { create: () => Promise<void> };
       }) => Promise<unknown>,
     ) =>
@@ -282,6 +283,7 @@ function buildReadPrisma() {
           },
         },
         scheduleEvent: { create: async () => undefined },
+        vacatedSlot: { create: async () => undefined },
         activityLog: {
           create: async ({ data }) => {
             await fakePrisma.activityLog.create({ data });

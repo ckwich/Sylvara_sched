@@ -175,6 +175,113 @@ function extractNumericDiffValue(diff: Prisma.JsonValue | null, key: string): nu
   return typeof value === 'number' ? value : null;
 }
 
+type VacatedWindow = {
+  sourceAction: 'DELETED' | 'MOVED' | 'SHORTENED';
+  startDatetime: Date;
+  endDatetime: Date;
+};
+
+function computeWallClockHours(input: { startDatetime: Date; endDatetime: Date; timezone: string }): Prisma.Decimal {
+  return computeScheduledEffectiveHours({
+    timezone: input.timezone,
+    segments: [
+      {
+        startDatetime: input.startDatetime,
+        endDatetime: input.endDatetime,
+        scheduledHoursOverride: null,
+      },
+    ],
+  });
+}
+
+function deriveVacatedWindowsForPatch(input: {
+  previousStart: Date;
+  previousEnd: Date;
+  nextStart: Date;
+  nextEnd: Date;
+  timezone: string;
+}): VacatedWindow[] {
+  const startChanged = input.previousStart.getTime() !== input.nextStart.getTime();
+  const endChanged = input.previousEnd.getTime() !== input.nextEnd.getTime();
+  if (!startChanged && !endChanged) {
+    return [];
+  }
+
+  const previousDurationMinutes = Math.round(
+    DateTime.fromJSDate(input.previousEnd, { zone: 'utc' })
+      .setZone(input.timezone)
+      .diff(DateTime.fromJSDate(input.previousStart, { zone: 'utc' }).setZone(input.timezone), 'minutes').minutes,
+  );
+  const nextDurationMinutes = Math.round(
+    DateTime.fromJSDate(input.nextEnd, { zone: 'utc' })
+      .setZone(input.timezone)
+      .diff(DateTime.fromJSDate(input.nextStart, { zone: 'utc' }).setZone(input.timezone), 'minutes').minutes,
+  );
+  const movedOnly =
+    startChanged &&
+    endChanged &&
+    previousDurationMinutes === nextDurationMinutes &&
+    input.nextStart.getTime() - input.previousStart.getTime() ===
+      input.nextEnd.getTime() - input.previousEnd.getTime();
+  if (movedOnly) {
+    return [
+      {
+        sourceAction: 'MOVED',
+        startDatetime: input.previousStart,
+        endDatetime: input.previousEnd,
+      },
+    ];
+  }
+
+  const windows: VacatedWindow[] = [];
+  if (input.nextStart.getTime() > input.previousStart.getTime()) {
+    windows.push({
+      sourceAction: 'SHORTENED',
+      startDatetime: input.previousStart,
+      endDatetime: input.nextStart,
+    });
+  }
+  if (input.nextEnd.getTime() < input.previousEnd.getTime()) {
+    windows.push({
+      sourceAction: 'SHORTENED',
+      startDatetime: input.nextEnd,
+      endDatetime: input.previousEnd,
+    });
+  }
+  return windows;
+}
+
+async function createVacatedSlots(input: {
+  tx: Prisma.TransactionClient;
+  windows: VacatedWindow[];
+  sourceSegmentId: string;
+  equipmentType: 'CRANE' | 'BUCKET';
+  timezone: string;
+}) {
+  for (const window of input.windows) {
+    const slotHours = computeWallClockHours({
+      startDatetime: window.startDatetime,
+      endDatetime: window.endDatetime,
+      timezone: input.timezone,
+    });
+    if (slotHours.lte(0)) {
+      continue;
+    }
+
+    await input.tx.vacatedSlot.create({
+      data: {
+        sourceSegmentId: input.sourceSegmentId,
+        sourceAction: window.sourceAction,
+        startDatetime: window.startDatetime,
+        endDatetime: window.endDatetime,
+        slotHours,
+        equipmentType: input.equipmentType,
+        status: 'OPEN',
+      },
+    });
+  }
+}
+
 async function getDerivedJobState(input: {
   prisma: PrismaClient;
   jobId: string;
@@ -1309,6 +1416,25 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       }
     }
 
+    const jobForVacatedSlot = await deps.prisma.job.findUnique({
+      where: {
+        id: existing.jobId,
+      },
+      select: {
+        equipmentType: true,
+        deletedAt: true,
+      },
+    });
+    if (!jobForVacatedSlot || (jobForVacatedSlot.deletedAt ?? null) !== null) {
+      return reply.code(404).send({
+        error: {
+          code: 'JOB_NOT_FOUND',
+          message: 'Job not found.',
+          details: {},
+        },
+      });
+    }
+
     const startChanged = existing.startDatetime.getTime() !== nextStart.getTime();
     const endChanged = existing.endDatetime.getTime() !== nextEnd.getTime();
     const previousDurationMinutes = Math.round(
@@ -1334,6 +1460,13 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
           : 'SEGMENT_RESIZED';
     const eventFromAt = endChanged ? existing.endDatetime : existing.startDatetime;
     const eventToAt = endChanged ? nextEnd : nextStart;
+    const vacatedWindows = deriveVacatedWindowsForPatch({
+      previousStart: existing.startDatetime,
+      previousEnd: existing.endDatetime,
+      nextStart,
+      nextEnd,
+      timezone,
+    });
 
     const updated = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const segment = await tx.scheduleSegment.update({
@@ -1349,6 +1482,14 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
               : undefined,
           notes: parsed.data.notes !== undefined ? parsed.data.notes : undefined,
         },
+      });
+
+      await createVacatedSlots({
+        tx,
+        windows: vacatedWindows,
+        sourceSegmentId: existing.id,
+        equipmentType: jobForVacatedSlot.equipmentType,
+        timezone,
       });
 
       await tx.scheduleEvent.create({
@@ -1446,11 +1587,45 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
+    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
+    const jobForVacatedSlot = await deps.prisma.job.findUnique({
+      where: {
+        id: existing.jobId,
+      },
+      select: {
+        equipmentType: true,
+        deletedAt: true,
+      },
+    });
+    if (!jobForVacatedSlot || (jobForVacatedSlot.deletedAt ?? null) !== null) {
+      return reply.code(404).send({
+        error: {
+          code: 'JOB_NOT_FOUND',
+          message: 'Job not found.',
+          details: {},
+        },
+      });
+    }
     const deletedAt = new Date();
     await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.scheduleSegment.update({
         where: { id: existing.id },
         data: { deletedAt },
+      });
+
+      await createVacatedSlots({
+        tx,
+        windows: [
+          {
+            sourceAction: 'DELETED',
+            startDatetime: existing.startDatetime,
+            endDatetime: existing.endDatetime,
+          },
+        ],
+        sourceSegmentId: existing.id,
+        equipmentType: jobForVacatedSlot.equipmentType,
+        timezone,
       });
 
       await tx.scheduleEvent.create({
@@ -1482,8 +1657,6 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     });
 
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
-    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
     const jobState = await getDerivedJobState({
       prisma: deps.prisma,
       jobId: existing.jobId,
