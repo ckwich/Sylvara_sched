@@ -44,7 +44,7 @@ function spawnDetached(command, args, logPath, cwd = process.cwd()) {
     shell: false,
   });
   child.unref();
-  return child.pid;
+  return child;
 }
 
 function isProcessAlive(pid) {
@@ -53,6 +53,15 @@ function isProcessAlive(pid) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function tailLog(path, lines = 80) {
+  try {
+    const content = readFileSync(path, 'utf8');
+    return content.split(/\r?\n/).filter(Boolean).slice(-lines).join('\n');
+  } catch {
+    return '(log unavailable)';
   }
 }
 
@@ -103,7 +112,7 @@ function checkHealth(url) {
 }
 
 async function waitForHealth(input) {
-  const { timeoutMs, apiPid, webPid } = input;
+  const { timeoutMs, processes } = input;
   const startedAt = Date.now();
   let lastResults = [];
   let consecutivePasses = 0;
@@ -125,8 +134,8 @@ async function waitForHealth(input) {
     );
     lastResults = results;
 
-    const apiAlive = isProcessAlive(apiPid);
-    const webAlive = isProcessAlive(webPid);
+    const apiAlive = isProcessAlive(processes.api.pid);
+    const webAlive = isProcessAlive(processes.web.pid);
     if (!apiAlive || !webAlive) {
       return {
         ok: false,
@@ -149,7 +158,10 @@ async function waitForHealth(input) {
   return {
     ok: false,
     results: lastResults,
-    processAlive: { api: isProcessAlive(apiPid), web: isProcessAlive(webPid) },
+    processAlive: {
+      api: isProcessAlive(processes.api.pid),
+      web: isProcessAlive(processes.web.pid),
+    },
   };
 }
 
@@ -176,23 +188,67 @@ const webRequire = createRequire(join(process.cwd(), 'apps', 'web', 'package.jso
 const nextBin = webRequire.resolve('next/dist/bin/next');
 const webCwd = join(process.cwd(), 'apps', 'web');
 
-const apiPid = spawnDetached(process.execPath, [apiEntrypoint], apiLogPath);
-const webPid = spawnDetached(process.execPath, [nextBin, 'start', '-H', hostBind, '-p', webPort], webLogPath, webCwd);
+const apiCommand = process.execPath;
+const apiArgs = [apiEntrypoint];
+const webCommand = process.execPath;
+const webArgs = [nextBin, 'start', '-H', hostBind, '-p', webPort];
 
-if (!isProcessAlive(apiPid) || !isProcessAlive(webPid)) {
+console.log(`Launch API: ${apiCommand} ${apiArgs.join(' ')} (cwd=${process.cwd()})`);
+console.log(`Launch WEB: ${webCommand} ${webArgs.join(' ')} (cwd=${webCwd})`);
+
+const apiChild = spawnDetached(apiCommand, apiArgs, apiLogPath);
+const webChild = spawnDetached(webCommand, webArgs, webLogPath, webCwd);
+
+const processes = {
+  api: {
+    name: 'API',
+    pid: apiChild.pid,
+    command: apiCommand,
+    args: apiArgs,
+    cwd: process.cwd(),
+    logPath: apiLogPath,
+    exitCode: null,
+    signal: null,
+  },
+  web: {
+    name: 'WEB',
+    pid: webChild.pid,
+    command: webCommand,
+    args: webArgs,
+    cwd: webCwd,
+    logPath: webLogPath,
+    exitCode: null,
+    signal: null,
+  },
+};
+
+apiChild.on('exit', (code, signal) => {
+  processes.api.exitCode = code;
+  processes.api.signal = signal;
+});
+webChild.on('exit', (code, signal) => {
+  processes.web.exitCode = code;
+  processes.web.signal = signal;
+});
+
+if (!isProcessAlive(processes.api.pid) || !isProcessAlive(processes.web.pid)) {
   console.error('LAN services exited immediately. Check .lan/*.log files for startup errors.');
+  console.error(`API alive=${isProcessAlive(processes.api.pid)} pid=${processes.api.pid}`);
+  console.error(`WEB alive=${isProcessAlive(processes.web.pid)} pid=${processes.web.pid}`);
+  console.error(`[API log tail]\n${tailLog(apiLogPath, 80)}`);
+  console.error(`[WEB log tail]\n${tailLog(webLogPath, 80)}`);
   process.exit(1);
 }
 
-writeFileSync(apiPidPath, `${apiPid}\n`);
-writeFileSync(webPidPath, `${webPid}\n`);
+writeFileSync(apiPidPath, `${processes.api.pid}\n`);
+writeFileSync(webPidPath, `${processes.web.pid}\n`);
 
 console.log(`Health targets:`);
 console.log(`- webHealthUrl=${webHealthUrl}`);
 console.log(`- apiHealthViaWebProxyUrl=${apiHealthViaWebProxyUrl}`);
 console.log(`- rawApiHealthUrl=${rawApiHealthUrl}`);
 
-const ready = await waitForHealth({ timeoutMs: 15000, apiPid, webPid });
+const ready = await waitForHealth({ timeoutMs: 15000, processes });
 if (!ready.ok) {
   console.error('LAN services failed health checks within 15s.');
   for (const result of ready.results) {
@@ -202,13 +258,28 @@ if (!ready.ok) {
     const reason = result.status !== null ? `HTTP ${result.status}` : result.error ?? 'unknown';
     console.error(`- FAIL ${result.label}: ${reason} (${result.url})`);
   }
-  const apiAlive = ready.processAlive?.api ?? isProcessAlive(apiPid);
-  const webAlive = ready.processAlive?.web ?? isProcessAlive(webPid);
-  console.error(`Process status: api pid ${apiPid} alive=${apiAlive}`);
-  console.error(`Process status: web pid ${webPid} alive=${webAlive}`);
+  const apiAlive = ready.processAlive?.api ?? isProcessAlive(processes.api.pid);
+  const webAlive = ready.processAlive?.web ?? isProcessAlive(processes.web.pid);
+  if (!apiAlive) {
+    console.error(
+      `API exited (code ${processes.api.exitCode ?? 'unknown'}, signal ${processes.api.signal ?? 'none'})`,
+    );
+    console.error(`[API log tail]\n${tailLog(apiLogPath, 80)}`);
+  }
+  if (!webAlive) {
+    console.error(
+      `WEB exited (code ${processes.web.exitCode ?? 'unknown'}, signal ${processes.web.signal ?? 'none'})`,
+    );
+    console.error(`[WEB log tail]\n${tailLog(webLogPath, 80)}`);
+  }
+  console.error(`Process status: api pid ${processes.api.pid} alive=${apiAlive}`);
+  console.error(`Process status: web pid ${processes.web.pid} alive=${webAlive}`);
+  if ((ready.results ?? []).some((result) => result.error?.includes('EADDRINUSE'))) {
+    console.error('Port may be in use. Try: netstat -ano | findstr :3000');
+  }
   console.error(`Logs: ${apiLogPath} and ${webLogPath}`);
   process.exit(1);
 }
 
-console.log(`LAN services started and healthy (API PID ${apiPid}, WEB PID ${webPid}).`);
+console.log(`LAN services started and healthy (API PID ${processes.api.pid}, WEB PID ${processes.web.pid}).`);
 console.log(`Logs: ${apiLogPath} and ${webLogPath}`);
