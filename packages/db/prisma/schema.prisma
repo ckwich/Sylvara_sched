@@ -139,6 +139,9 @@ model User {
   segmentRosterLinksCreated SegmentRosterLink[] @relation("segment_roster_link_created_by")
   activityLogsActed         ActivityLog[]       @relation("activity_log_actor")
   importRunsStarted         ImportRun[]         @relation("import_run_by_user")
+  seasonalFreezeWindowsCreated SeasonalFreezeWindow[] @relation("seasonal_freeze_window_created_by")
+  schedulingConflictDismissals SchedulingConflictDismissal[] @relation("scheduling_conflict_dismissal_by_user")
+  scheduleNotificationLogsSent ScheduleNotificationLog[] @relation("schedule_notification_sent_by_user")
 
   @@map("users")
 }
@@ -208,6 +211,7 @@ model Job {
   customerId            String                 @map("customer_id") @db.Uuid
   equipmentType         EquipmentType          @map("equipment_type")
   salesRepCode          String                 @map("sales_rep_code")
+  estimateId            String?                @map("estimate_id") @db.Uuid
   jobSiteAddress        String                 @map("job_site_address")
   town                  String
   completedDate         DateTime?              @map("completed_date") @db.Date
@@ -254,6 +258,7 @@ model Job {
   scheduleEvents     ScheduleEvent[]
   vacatedSlotsChosen VacatedSlot[]         @relation("vacated_slot_chosen_job")
   jobBlockers        JobBlocker[]
+  scheduleNotifications ScheduleNotificationLog[]
   preferredChannels  JobPreferredChannel[]
   accessConstraints  JobAccessConstraint[]
   travelSegments     TravelSegment[]
@@ -303,6 +308,8 @@ model Requirement {
   requirementTypeId String            @map("requirement_type_id") @db.Uuid
   status            RequirementStatus
   notes             String?
+  source            String?           @map("source")
+  rawSnippet        String?           @map("raw_snippet") @db.Text
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt         DateTime?         @map("deleted_at") @db.Timestamptz(6)
@@ -335,6 +342,7 @@ model ScheduleSegment {
   segmentRosterLink    SegmentRosterLink?
   vacatedSlotsSource   VacatedSlot[]         @relation("vacated_slot_source_segment")
   vacatedSlotsChosen   VacatedSlot[]         @relation("vacated_slot_chosen_segment")
+  scheduleNotifications ScheduleNotificationLog[]
 
   @@index([startDatetime], map: "idx_schedule_segments_start_datetime")
   @@index([endDatetime], map: "idx_schedule_segments_end_datetime")
@@ -594,6 +602,57 @@ model JobPreferredChannel {
 
   @@unique([jobId, channel], map: "uq_job_preferred_channel")
   @@map("job_preferred_channels")
+}
+
+model SeasonalFreezeWindow {
+  id              String    @id @default(uuid()) @db.Uuid
+  label           String
+  startDate       DateTime  @map("start_date") @db.Date
+  endDate         DateTime  @map("end_date") @db.Date
+  notes           String?
+  active          Boolean   @default(true)
+  createdByUserId String?   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  createdByUser User? @relation("seasonal_freeze_window_created_by", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@map("seasonal_freeze_windows")
+}
+
+model SchedulingConflictDismissal {
+  id                String    @id @default(uuid()) @db.Uuid
+  dismissedByUserId String    @map("dismissed_by_user_id") @db.Uuid
+  conflictDate      DateTime  @map("conflict_date") @db.Date
+  conflictType      String    @map("conflict_type")
+  conflictKey       String    @map("conflict_key") @db.Text
+  dismissedAt       DateTime  @default(now()) @map("dismissed_at") @db.Timestamptz(6)
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  dismissedByUser User @relation("scheduling_conflict_dismissal_by_user", fields: [dismissedByUserId], references: [id], onDelete: Cascade)
+
+  @@unique([dismissedByUserId, conflictDate, conflictType, conflictKey])
+  @@map("scheduling_conflict_dismissals")
+}
+
+model ScheduleNotificationLog {
+  id                  String    @id @default(uuid()) @db.Uuid
+  jobId               String    @map("job_id") @db.Uuid
+  scheduleSegmentId   String?   @map("schedule_segment_id") @db.Uuid
+  notificationType    String    @map("notification_type")
+  sentByUserId        String    @map("sent_by_user_id") @db.Uuid
+  channelsSent        Json      @default("[]") @map("channels_sent")
+  channelsSuppressed  Json?     @map("channels_suppressed")
+  customerResponse    String?   @map("customer_response")
+  customerRespondedAt DateTime? @map("customer_responded_at") @db.Timestamptz(6)
+  sentAt              DateTime  @default(now()) @map("sent_at") @db.Timestamptz(6)
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  job             Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  scheduleSegment ScheduleSegment? @relation(fields: [scheduleSegmentId], references: [id], onDelete: SetNull)
+  sentByUser      User             @relation("schedule_notification_sent_by_user", fields: [sentByUserId], references: [id], onDelete: Restrict)
+
+  @@map("schedule_notification_logs")
 }
 
 model ActivityLog {
