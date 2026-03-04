@@ -5,11 +5,18 @@ export function placeholder() {
 export {
   MINUTES_PER_DAY,
   formatMinuteToHHMM,
+  isUtcOnLocalTenMinuteBoundary,
   isValidMinuteOfDay,
+  localDateBoundsToUtc,
+  localDateMinuteToUtc,
   minuteFieldUpdate,
   minuteFromLegacyTime,
+  parseIsoToUtcDate,
   parseHHMMToMinute,
   resolveAnchorMinute,
+  utcToLocalDateStr,
+  utcToLocalParts,
+  wallClockHoursBetween,
 } from './time-of-day.js';
 
 export type {

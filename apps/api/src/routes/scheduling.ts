@@ -7,6 +7,15 @@ import {
   type PrismaClient,
 } from '@prisma/client';
 import { resolveAnchorMinute } from '@sylvara/db';
+import {
+  isUtcOnLocalTenMinuteBoundary,
+  localDateBoundsToUtc,
+  localDateMinuteToUtc,
+  parseIsoToUtcDate,
+  utcToLocalDateStr,
+  utcToLocalParts,
+  wallClockHoursBetween,
+} from '@sylvara/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
@@ -28,7 +37,6 @@ import {
 } from '../scheduling/customer-window.js';
 import { computeScheduledEffectiveHours, deriveJobState } from '../scheduling/job-state.js';
 import type { MinuteWindow } from '../scheduling/types.js';
-import { DateTime } from 'luxon';
 
 const uuidSchema = z.string().uuid();
 const ORG_SETTINGS_ID = '11111111-1111-4111-8111-111111111111';
@@ -91,13 +99,11 @@ function dateOnlyToUtc(date: string): Date {
 }
 
 function localDayBoundsUtc(localDate: string, timezone: string): { startUtc: Date; endUtc: Date } {
-  const start = DateTime.fromISO(localDate, { zone: timezone }).startOf('day');
-  const end = start.plus({ days: 1 });
-  return { startUtc: start.toUTC().toJSDate(), endUtc: end.toUTC().toJSDate() };
+  return localDateBoundsToUtc(localDate, timezone);
 }
 
 function minuteOfLocalDate(value: Date, timezone: string): number {
-  const local = DateTime.fromJSDate(value, { zone: 'utc' }).setZone(timezone);
+  const local = utcToLocalParts(value, timezone);
   return local.hour * 60 + local.minute;
 }
 
@@ -138,33 +144,23 @@ function splitToLocalDayIntervals(input: {
 }
 
 function localDateAtMinute(date: string, minute: number, timezone: string): Date {
-  const local = DateTime.fromISO(date, { zone: timezone })
-    .startOf('day')
-    .plus({ minutes: minute });
-  return local.toUTC().toJSDate();
+  return localDateMinuteToUtc(date, minute, timezone);
 }
 
 function crossesLocalMidnight(start: Date, end: Date, timezone: string): boolean {
-  const localStart = DateTime.fromJSDate(start, { zone: 'utc' }).setZone(timezone);
-  const localEnd = DateTime.fromJSDate(end, { zone: 'utc' }).setZone(timezone);
-  return localStart.toISODate() !== localEnd.toISODate();
+  return utcToLocalDateStr(start, timezone) !== utcToLocalDateStr(end, timezone);
 }
 
 function localDateIso(value: Date, timezone: string): string {
-  return DateTime.fromJSDate(value, { zone: 'utc' }).setZone(timezone).toISODate() ?? '';
+  return utcToLocalDateStr(value, timezone);
 }
 
 function isTenMinuteBoundary(value: Date, timezone: string): boolean {
-  const local = DateTime.fromJSDate(value, { zone: 'utc' }).setZone(timezone);
-  return local.minute % 10 === 0 && local.second === 0 && local.millisecond === 0;
+  return isUtcOnLocalTenMinuteBoundary(value, timezone);
 }
 
 function parseIsoDatetime(value: string): Date | null {
-  const parsed = DateTime.fromISO(value, { setZone: true });
-  if (!parsed.isValid) {
-    return null;
-  }
-  return parsed.toUTC().toJSDate();
+  return parseIsoToUtcDate(value);
 }
 
 function extractNumericDiffValue(diff: Prisma.JsonValue | null, key: string): number | null {
@@ -208,14 +204,10 @@ function deriveVacatedWindowsForPatch(input: {
   }
 
   const previousDurationMinutes = Math.round(
-    DateTime.fromJSDate(input.previousEnd, { zone: 'utc' })
-      .setZone(input.timezone)
-      .diff(DateTime.fromJSDate(input.previousStart, { zone: 'utc' }).setZone(input.timezone), 'minutes').minutes,
+    wallClockHoursBetween(input.previousStart, input.previousEnd, input.timezone) * 60,
   );
   const nextDurationMinutes = Math.round(
-    DateTime.fromJSDate(input.nextEnd, { zone: 'utc' })
-      .setZone(input.timezone)
-      .diff(DateTime.fromJSDate(input.nextStart, { zone: 'utc' }).setZone(input.timezone), 'minutes').minutes,
+    wallClockHoursBetween(input.nextStart, input.nextEnd, input.timezone) * 60,
   );
   const movedOnly =
     startChanged &&
@@ -1186,7 +1178,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const rosterLocalDate = DateTime.fromJSDate(roster.date, { zone: 'utc' }).toISODate();
+    const rosterLocalDate = utcToLocalDateStr(roster.date, 'UTC');
     const segmentLocalDate = localDateIso(startDatetime, timezone);
     if (rosterLocalDate !== segmentLocalDate) {
       return reply.code(400).send({
@@ -1385,7 +1377,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     }
 
     if (existing.segmentRosterLink) {
-      const rosterLocalDate = DateTime.fromJSDate(existing.segmentRosterLink.roster.date, { zone: 'utc' }).toISODate();
+      const rosterLocalDate = utcToLocalDateStr(existing.segmentRosterLink.roster.date, 'UTC');
       const segmentLocalDate = localDateIso(nextStart, timezone);
       if (rosterLocalDate !== segmentLocalDate) {
         return reply.code(400).send({
@@ -1438,14 +1430,10 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     const startChanged = existing.startDatetime.getTime() !== nextStart.getTime();
     const endChanged = existing.endDatetime.getTime() !== nextEnd.getTime();
     const previousDurationMinutes = Math.round(
-      DateTime.fromJSDate(existing.endDatetime, { zone: 'utc' })
-        .setZone(timezone)
-        .diff(DateTime.fromJSDate(existing.startDatetime, { zone: 'utc' }).setZone(timezone), 'minutes').minutes,
+      wallClockHoursBetween(existing.startDatetime, existing.endDatetime, timezone) * 60,
     );
     const nextDurationMinutes = Math.round(
-      DateTime.fromJSDate(nextEnd, { zone: 'utc' })
-        .setZone(timezone)
-        .diff(DateTime.fromJSDate(nextStart, { zone: 'utc' }).setZone(timezone), 'minutes').minutes,
+      wallClockHoursBetween(nextStart, nextEnd, timezone) * 60,
     );
     const movedOnly =
       previousDurationMinutes === nextDurationMinutes &&

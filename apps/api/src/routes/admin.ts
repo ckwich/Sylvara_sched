@@ -358,7 +358,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
           actionType: 'UPDATED',
           actorUserId: actor.actorUserId,
           actorDisplay: actor.actorDisplay,
-          diff,
+          diff: diff as Prisma.InputJsonValue,
         },
       });
       return updated;
@@ -529,7 +529,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
           actionType: 'UPDATED',
           actorUserId: actor.actorUserId,
           actorDisplay: actor.actorDisplay,
-          diff,
+          diff: diff as Prisma.InputJsonValue,
         },
       });
       return updated;

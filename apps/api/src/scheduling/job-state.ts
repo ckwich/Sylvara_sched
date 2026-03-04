@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { DateTime } from 'luxon';
+import { wallClockHoursBetween } from '@sylvara/shared';
 
 export type DerivedJobState = 'TBS' | 'PARTIALLY_SCHEDULED' | 'FULLY_SCHEDULED' | 'COMPLETED';
 
@@ -19,9 +19,9 @@ export function computeScheduledEffectiveHours(input: {
       continue;
     }
 
-    const startLocal = DateTime.fromJSDate(segment.startDatetime, { zone: 'utc' }).setZone(input.timezone);
-    const endLocal = DateTime.fromJSDate(segment.endDatetime, { zone: 'utc' }).setZone(input.timezone);
-    const durationMinutes = Math.round(endLocal.diff(startLocal, 'minutes').minutes);
+    const durationMinutes = Math.round(
+      wallClockHoursBetween(segment.startDatetime, segment.endDatetime, input.timezone) * 60,
+    );
     total = total.add(new Prisma.Decimal(durationMinutes).div(60));
   }
 
@@ -52,4 +52,3 @@ export function deriveJobState(input: {
 
   return 'FULLY_SCHEDULED';
 }
-

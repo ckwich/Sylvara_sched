@@ -893,7 +893,7 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
           actionType: 'UPDATED',
           actorUserId: actor.actorUserId,
           actorDisplay: actor.actorDisplay,
-          diff,
+          diff: diff as Prisma.InputJsonValue,
         },
       });
       return updated;

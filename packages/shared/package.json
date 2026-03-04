@@ -9,9 +9,11 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
+    "luxon": "^3.5.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@types/luxon": "^3.4.2",
     "eslint": "^9.22.0",
     "typescript": "^5.8.2"
   }
