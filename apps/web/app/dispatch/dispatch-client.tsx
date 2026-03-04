@@ -11,6 +11,7 @@ import {
   getOrgSettings,
   type ForemanScheduleResponse,
 } from '../../lib/api';
+import { browserTimezoneDiffers, companyLocalInputToUtcIso } from '../../lib/company-time';
 
 const FALLBACK_TIMEZONE = 'UTC';
 const DISPATCH_PREFS_STORAGE_KEY = 'sylvara.dispatchPrefs';
@@ -57,10 +58,6 @@ function isTenMinuteAligned(value: string): boolean {
   }
   const minute = Number(value.split(':')[1]);
   return Number.isInteger(minute) && minute % 10 === 0;
-}
-
-function toIsoFromLocalInput(value: string): string {
-  return new Date(value).toISOString();
 }
 
 type RequestDiagnostics = {
@@ -185,6 +182,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
   const [showDebugDetails, setShowDebugDetails] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(!lanModeEnabled);
   const [hasStoredDatePreference, setHasStoredDatePreference] = useState(false);
+  const [timezoneDriftWarning, setTimezoneDriftWarning] = useState<string | null>(null);
 
   const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
   const canExpandDebugDetails = process.env.NODE_ENV !== 'production' && !lanModeEnabled;
@@ -402,8 +400,8 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
         {
           jobId: parsedJobId,
           rosterId: parsedRosterId,
-          startDatetime: toIsoFromLocalInput(startDatetime),
-          endDatetime: toIsoFromLocalInput(endDatetime),
+          startDatetime: companyLocalInputToUtcIso(startDatetime, companyTimezone),
+          endDatetime: companyLocalInputToUtcIso(endDatetime, companyTimezone),
         },
         actorUserId,
         normalizedLanUser || undefined,
@@ -430,6 +428,20 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
     event.preventDefault();
     void loadSchedule();
   }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (browserTimezoneDiffers(companyTimezone)) {
+      const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      setTimezoneDriftWarning(
+        `Browser timezone (${browserTimezone}) differs from company timezone (${companyTimezone}). Datetime inputs are interpreted in company timezone.`,
+      );
+      return;
+    }
+    setTimezoneDriftWarning(null);
+  }, [companyTimezone]);
 
   return (
     <main style={{ padding: 16, fontFamily: 'sans-serif', maxWidth: 960 }}>
@@ -476,6 +488,9 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
         <p style={{ color: 'crimson', marginTop: 12 }}>
           Company timezone unavailable. Showing UTC. {timezoneError}
         </p>
+      ) : null}
+      {timezoneDriftWarning ? (
+        <p style={{ color: '#8a4b00', marginTop: 8 }}>{timezoneDriftWarning}</p>
       ) : null}
       {createBanner ? (
         <div
@@ -641,6 +656,9 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
           {createFieldErrors.rosterId ? <p style={{ color: '#8a4b00' }}>{createFieldErrors.rosterId}</p> : null}
           <label>
             Start Datetime
+            <span style={{ display: 'block', color: '#666', fontSize: 12 }}>
+              Interpreted as {companyTimezone}
+            </span>
             <input
               type="datetime-local"
               value={startDatetime}
@@ -650,6 +668,9 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
           {createFieldErrors.startDatetime ? <p style={{ color: '#8a4b00' }}>{createFieldErrors.startDatetime}</p> : null}
           <label>
             End Datetime
+            <span style={{ display: 'block', color: '#666', fontSize: 12 }}>
+              Interpreted as {companyTimezone}
+            </span>
             <input
               type="datetime-local"
               value={endDatetime}
