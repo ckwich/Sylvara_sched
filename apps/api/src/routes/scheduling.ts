@@ -1493,6 +1493,108 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     });
   });
 
+  app.patch('/api/schedule-segments/:segmentId/restore', async (request, reply) => {
+    let actorUserId: number;
+    try {
+      actorUserId = await requireActorUserId(deps.prisma, request);
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        return reply.code(401).send(UNAUTHENTICATED_ERROR);
+      }
+      throw error;
+    }
+    const actorDisplay = getActorDisplay(request);
+
+    const paramsSchema = z.object({ segmentId: z.coerce.number().int().positive() });
+    const params = paramsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid segment id.',
+          details: params.error.flatten(),
+        },
+      });
+    }
+
+    const existing = await deps.prisma.scheduleSegment.findUnique({
+      where: { id: params.data.segmentId },
+      select: {
+        id: true,
+        jobId: true,
+        startDatetime: true,
+        endDatetime: true,
+        deletedAt: true,
+      },
+    });
+    if (!existing) {
+      return reply.code(404).send({
+        error: {
+          code: 'SEGMENT_NOT_FOUND',
+          message: 'Schedule segment not found.',
+          details: {},
+        },
+      });
+    }
+    if (!existing.deletedAt) {
+      return reply.code(409).send({
+        error: {
+          code: 'SEGMENT_NOT_DELETED',
+          message: 'Schedule segment is already active.',
+          details: {},
+        },
+      });
+    }
+
+    await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.scheduleSegment.update({
+        where: { id: existing.id },
+        data: { deletedAt: null },
+      });
+
+      await tx.scheduleEvent.create({
+        data: {
+          jobId: existing.jobId,
+          eventType: 'SEGMENT_UPDATED',
+          source: 'USER_ACTION',
+          fromAt: existing.deletedAt,
+          toAt: new Date(),
+          actorUserId,
+          rawSnippet: JSON.stringify({
+            segmentId: existing.id,
+            restored: true,
+          }),
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'ScheduleSegment',
+          entityId: existing.id,
+          actionType: 'SEGMENT_RESTORED',
+          actorUserId,
+          actorDisplay,
+          diff: {
+            restored: true,
+          },
+        },
+      });
+    });
+
+    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
+    const jobState = await getDerivedJobState({
+      prisma: deps.prisma,
+      jobId: existing.jobId,
+      timezone,
+    });
+
+    return reply.code(200).send({
+      ok: true,
+      jobState,
+    });
+  });
+
   app.post('/api/jobs/:jobId/preferred-channels', async (request, reply) => {
     let actorUserId: number;
     try {

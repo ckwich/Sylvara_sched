@@ -275,4 +275,46 @@ describe('schedule segment integration (real postgres)', () => {
 
     await app.close();
   });
+
+  test('supports delete then restore undo path for a schedule segment', async () => {
+    const { actor, job, roster, foreman } = await seedBase(prisma);
+    const app = buildServer({ prisma });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': String(actor.id) },
+      payload: {
+        jobId: job.id,
+        rosterId: roster.id,
+        startDatetime: '2026-03-03T14:00:00.000Z',
+        endDatetime: '2026-03-03T16:00:00.000Z',
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const segmentId = created.json().segment.id as number;
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/schedule-segments/${segmentId}`,
+      headers: { 'x-actor-user-id': String(actor.id) },
+    });
+    expect(deleted.statusCode).toBe(200);
+
+    const restored = await app.inject({
+      method: 'PATCH',
+      url: `/api/schedule-segments/${segmentId}/restore`,
+      headers: { 'x-actor-user-id': String(actor.id) },
+    });
+    expect(restored.statusCode).toBe(200);
+
+    const foremanRead = await app.inject({
+      method: 'GET',
+      url: `/api/foremen/${foreman.id}/schedule?date=2026-03-03`,
+    });
+    expect(foremanRead.statusCode).toBe(200);
+    expect(foremanRead.json().scheduleSegments).toHaveLength(1);
+
+    await app.close();
+  });
 });

@@ -194,6 +194,9 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 - Delete segment:
   - soft-delete path returns success
   - derived state updates (e.g., from `FULLY_SCHEDULED` to `TBS` when no active segments remain)
+- Restore segment (undo path):
+  - `PATCH /api/schedule-segments/:segmentId/restore` reactivates a soft-deleted segment
+  - returns `409 SEGMENT_NOT_DELETED` if the segment is already active
 
 **File:** `apps/api/tests/smoke/schedule_segment_crud.test.*`
 
@@ -210,6 +213,7 @@ This file defines the **authoritative smoke test checklist** for the Sylvara Sch
 - `GET /api/foremen/:foremanPersonId/schedule?date=YYYY-MM-DD` returns the linked segment and excludes orphan rows
 - Soft-delete the segment and verify foreman schedule list becomes empty
 - `GET /api/jobs/:jobId/schedule-segments` returns only linked active segments and includes derived job state
+- `GET /api/foremen/:foremanPersonId/activity?date=YYYY-MM-DD` returns newest-first foreman/day activity entries scoped to the roster-linked day context
 
 **File:** `apps/api/tests/smoke/schedule_segment_read_endpoints.test.*`
 

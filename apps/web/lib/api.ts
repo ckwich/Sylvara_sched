@@ -195,6 +195,76 @@ export async function createScheduleSegment(
   }
 }
 
+export async function deleteScheduleSegment(
+  segmentId: number,
+  actorUserId: string | undefined,
+  lanUser: string | undefined,
+): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (actorUserId) {
+    headers['x-actor-user-id'] = actorUserId;
+  }
+  if (lanUser) {
+    headers['x-lan-user'] = lanUser;
+  }
+
+  const url = `${API_BASE_URL}/api/schedule-segments/${segmentId}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'DELETE',
+      headers,
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, body ?? {});
+  }
+}
+
+export async function restoreScheduleSegment(
+  segmentId: number,
+  actorUserId: string | undefined,
+  lanUser: string | undefined,
+): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (actorUserId) {
+    headers['x-actor-user-id'] = actorUserId;
+  }
+  if (lanUser) {
+    headers['x-lan-user'] = lanUser;
+  }
+
+  const url = `${API_BASE_URL}/api/schedule-segments/${segmentId}/restore`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'PATCH',
+      headers,
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, body ?? {});
+  }
+}
+
 export async function getOrgSettings(): Promise<OrgSettingsResponse> {
   const url = buildOrgSettingsUrl();
   let response: Response;

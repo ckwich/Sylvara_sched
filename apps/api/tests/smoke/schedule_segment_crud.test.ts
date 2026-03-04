@@ -127,6 +127,10 @@ function buildCrudPrisma(): PrismaClient {
         );
         return overlap ? { id: overlap.id } : null;
       },
+      findUnique: async ({ where }: { where: { id: number } }) => {
+        const found = segments.find((s) => s.id === where.id);
+        return found ?? null;
+      },
     },
     travelSegment: {
       findFirst: async ({
@@ -222,6 +226,9 @@ function buildCrudPrisma(): PrismaClient {
             }
             if (data.deletedAt) {
               found.deletedAt = data.deletedAt;
+            }
+            if (data.deletedAt === null) {
+              found.deletedAt = null;
             }
             if (data.scheduledHoursOverride !== undefined) {
               found.scheduledHoursOverride = data.scheduledHoursOverride;
@@ -351,6 +358,38 @@ describe('M2 schedule segment CRUD', () => {
     });
     const deleteBody = deleted.json();
     expect(deleteBody.jobState.state).toBe('TBS');
+    await app.close();
+  });
+
+  test('restores soft-deleted segment for undo path', async () => {
+    const app = buildServer({ prisma: buildCrudPrisma() });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': '1' },
+      payload: {
+        jobId: 10,
+        rosterId: 99,
+        startDatetime: '2026-03-03T14:00:00.000Z',
+        endDatetime: '2026-03-03T16:00:00.000Z',
+      },
+    });
+    const segmentId = created.json().segment.id as number;
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/schedule-segments/${segmentId}`,
+      headers: { 'x-actor-user-id': '1' },
+    });
+    expect(deleted.statusCode).toBe(200);
+
+    const restored = await app.inject({
+      method: 'PATCH',
+      url: `/api/schedule-segments/${segmentId}/restore`,
+      headers: { 'x-actor-user-id': '1' },
+    });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().ok).toBe(true);
     await app.close();
   });
 

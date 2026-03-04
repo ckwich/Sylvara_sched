@@ -120,3 +120,4 @@ Warning: this command is destructive and intended for local dev/test use only. I
 - Stack is locked to Next.js + TypeScript monorepo with pnpm + Turborepo.
 - Database is PostgreSQL via Prisma.
 - Timezone and scheduling logic must use Luxon.
+- Schedule segment restore API: `PATCH /api/schedule-segments/:segmentId/restore` returns `409 SEGMENT_NOT_DELETED` when the target segment is already active.

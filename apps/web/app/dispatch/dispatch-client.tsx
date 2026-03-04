@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   API_BASE_URL,
   ApiRequestError,
@@ -8,9 +8,11 @@ import {
   buildForemanScheduleUrl,
   buildOrgSettingsUrl,
   createScheduleSegment,
+  deleteScheduleSegment,
   getForemanActivity,
   getForemanSchedule,
   getOrgSettings,
+  restoreScheduleSegment,
   type ForemanActivityEntry,
   type ForemanScheduleResponse,
 } from '../../lib/api';
@@ -203,6 +205,11 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
   const [devResetForemanId, setDevResetForemanId] = useState('4');
   const [devResetJobId, setDevResetJobId] = useState('');
   const [devSeedDate, setDevSeedDate] = useState('2026-03-03');
+  const [deleteBanner, setDeleteBanner] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteUndoSegmentId, setDeleteUndoSegmentId] = useState<number | null>(null);
+  const [undoActive, setUndoActive] = useState(false);
+  const undoTimerRef = useRef<number | null>(null);
 
   const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
   const canExpandDebugDetails = process.env.NODE_ENV !== 'production' && !lanModeEnabled;
@@ -455,6 +462,14 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
     };
   }, [autoRefreshChanges, foremanPersonId, date]);
 
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current !== null) {
+        window.clearTimeout(undoTimerRef.current);
+      }
+    };
+  }, []);
+
   async function submitCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreateError(null);
@@ -525,6 +540,71 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
       setCreateBanner(`Could not save: ${errorCode} ${described.message}`);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleDeleteSegment(segmentId: number, segmentJobId: number) {
+    setDeleteError(null);
+    setDeleteBanner(null);
+    const confirmMessage =
+      `Delete segment ${segmentId} for job ${segmentJobId} on foreman ${foremanPersonId} date ${date}?\n\n` +
+      'This will soft-delete the segment from the day schedule.';
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      const normalizedLanUser = lanModeEnabled ? lanUser.trim() : '';
+      if (lanModeEnabled && !normalizedLanUser) {
+        setDeleteError('UNAUTHENTICATED: LAN User is required in LAN mode.');
+        return;
+      }
+      await deleteScheduleSegment(segmentId, actorUserId, normalizedLanUser || undefined);
+      if (lanModeEnabled) {
+        window.localStorage.setItem(LAN_USER_STORAGE_KEY, normalizedLanUser);
+      }
+      await loadSchedule();
+      setDeleteBanner('Segment deleted. Undo available for 10 seconds.');
+      setDeleteUndoSegmentId(segmentId);
+      setUndoActive(true);
+      if (undoTimerRef.current !== null) {
+        window.clearTimeout(undoTimerRef.current);
+      }
+      undoTimerRef.current = window.setTimeout(() => {
+        setUndoActive(false);
+        setDeleteUndoSegmentId(null);
+        setDeleteBanner(null);
+      }, 10_000);
+    } catch (error) {
+      const described = describeError(error);
+      setDeleteError(described.message);
+    }
+  }
+
+  async function handleUndoDelete() {
+    if (!deleteUndoSegmentId) {
+      return;
+    }
+    try {
+      const normalizedLanUser = lanModeEnabled ? lanUser.trim() : '';
+      if (lanModeEnabled && !normalizedLanUser) {
+        setDeleteError('UNAUTHENTICATED: LAN User is required in LAN mode.');
+        return;
+      }
+      await restoreScheduleSegment(deleteUndoSegmentId, actorUserId, normalizedLanUser || undefined);
+      if (lanModeEnabled) {
+        window.localStorage.setItem(LAN_USER_STORAGE_KEY, normalizedLanUser);
+      }
+      if (undoTimerRef.current !== null) {
+        window.clearTimeout(undoTimerRef.current);
+      }
+      setUndoActive(false);
+      setDeleteUndoSegmentId(null);
+      setDeleteBanner('Segment restore complete.');
+      await loadSchedule();
+    } catch (error) {
+      const described = describeError(error);
+      setDeleteError(described.message);
     }
   }
 
@@ -660,6 +740,25 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
           {createBanner}
         </div>
       ) : null}
+      {deleteBanner ? (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 10,
+            border: '1px solid #b54708',
+            background: '#fffaeb',
+            color: '#b54708',
+          }}
+        >
+          {deleteBanner}{' '}
+          {undoActive && deleteUndoSegmentId ? (
+            <button type="button" onClick={() => void handleUndoDelete()} style={{ marginLeft: 8 }}>
+              Undo
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {deleteError ? <p style={{ color: 'crimson', marginTop: 8 }}>{deleteError}</p> : null}
 
       <section style={{ marginTop: 16 }}>
         <h2>Roster</h2>
@@ -686,7 +785,15 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
             {data.scheduleSegments.map((segment) => (
               <li key={segment.id} data-testid="dispatch-segment-item">
                 #{segment.id} job {segment.jobId} [{segment.segmentType}] {formatDateTime(segment.startDatetime, companyTimezone)} -{' '}
-                {formatDateTime(segment.endDatetime, companyTimezone)}
+                {formatDateTime(segment.endDatetime, companyTimezone)}{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleDeleteSegment(segment.id, segment.jobId);
+                  }}
+                >
+                  Delete
+                </button>
               </li>
             ))}
           </ul>
@@ -952,6 +1059,13 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
               type="button"
               disabled={devToolRunning}
               onClick={() => {
+                const confirmed = window.confirm(
+                  `Reset schedule day for foreman ${devResetForemanId} on ${devResetDate}?` +
+                    '\n\nThis removes linked schedule segments for that day.',
+                );
+                if (!confirmed) {
+                  return;
+                }
                 void runDevTool('/api/dev/reset-schedule-day', {
                   date: devResetDate,
                   foremanPersonId: Number(devResetForemanId),
