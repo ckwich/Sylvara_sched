@@ -78,6 +78,32 @@ export type ForemanActivityResponse = {
   entries: ForemanActivityEntry[];
 };
 
+export type JobDerivedState = 'TBS' | 'PARTIALLY_SCHEDULED' | 'FULLY_SCHEDULED' | 'COMPLETED';
+
+export type JobSummary = {
+  id: string;
+  customerId: string;
+  customerName: string;
+  equipmentType: 'CRANE' | 'BUCKET';
+  salesRepCode: string;
+  jobSiteAddress: string;
+  town: string;
+  amountDollars: string | null;
+  estimateHoursCurrent: string | null;
+  scheduledEffectiveHours: string;
+  remainingHours: string | null;
+  derivedState: JobDerivedState;
+  completedDate: string | null;
+  pushUpIfPossible: boolean;
+  activeBlockerCount: number;
+  unmetRequirementCount: number;
+};
+
+export type JobsResponse = {
+  jobs: JobSummary[];
+  total: number;
+};
+
 export function buildOrgSettingsUrl(): string {
   return `${API_BASE_URL}/api/org-settings`;
 }
@@ -88,6 +114,14 @@ export function buildForemanScheduleUrl(foremanPersonId: number, date: string): 
 
 export function buildForemanActivityUrl(foremanPersonId: number, date: string): string {
   return `${API_BASE_URL}/api/foremen/${foremanPersonId}/activity?date=${encodeURIComponent(date)}`;
+}
+
+export function buildJobsUrl(state?: JobDerivedState): string {
+  const base = `${API_BASE_URL}/api/jobs`;
+  if (!state) {
+    return base;
+  }
+  return `${base}?state=${encodeURIComponent(state)}`;
 }
 
 async function parseJsonSafe(response: Response): Promise<unknown> {
@@ -326,4 +360,26 @@ export async function patchOrgSettingsTimezone(
     throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as OrgSettingsResponse;
+}
+
+export async function getJobs(state?: JobDerivedState): Promise<JobsResponse> {
+  const url = buildJobsUrl(state);
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const body = (await parseJsonSafe(response)) as JobsResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as JobsResponse;
 }
