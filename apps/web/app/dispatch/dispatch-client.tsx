@@ -159,6 +159,13 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
   const [endDatetime, setEndDatetime] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [createErrorHint, setCreateErrorHint] = useState<string | null>(null);
+  const [createBanner, setCreateBanner] = useState<string | null>(null);
+  const [createFieldErrors, setCreateFieldErrors] = useState<{
+    jobId?: string;
+    rosterId?: string;
+    startDatetime?: string;
+    endDatetime?: string;
+  }>({});
   const [creating, setCreating] = useState(false);
   const [companyTimezone, setCompanyTimezone] = useState(FALLBACK_TIMEZONE);
   const [timezoneError, setTimezoneError] = useState<string | null>(null);
@@ -176,6 +183,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
   });
   const [lanUser, setLanUser] = useState('');
   const [showDebugDetails, setShowDebugDetails] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(!lanModeEnabled);
   const [hasStoredDatePreference, setHasStoredDatePreference] = useState(false);
 
   const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
@@ -190,6 +198,10 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
     }
     return null;
   }, [startDatetime, endDatetime]);
+
+  useEffect(() => {
+    setShowDiagnostics(!lanModeEnabled);
+  }, [lanModeEnabled]);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -345,9 +357,15 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
     event.preventDefault();
     setCreateError(null);
     setCreateErrorHint(null);
+    setCreateBanner(null);
+    setCreateFieldErrors({});
 
     if (createValidationError) {
       setCreateError(createValidationError);
+      setCreateFieldErrors({
+        startDatetime: 'Must be on a 10-minute boundary.',
+        endDatetime: 'Must be on a 10-minute boundary.',
+      });
       return;
     }
 
@@ -355,14 +373,20 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
     const parsedRosterId = Number(rosterId);
     if (!Number.isInteger(parsedJobId) || parsedJobId <= 0) {
       setCreateError('VALIDATION_ERROR: jobId must be a positive integer.');
+      setCreateFieldErrors({ jobId: 'Enter a positive Job ID.' });
       return;
     }
     if (!Number.isInteger(parsedRosterId) || parsedRosterId <= 0) {
       setCreateError('VALIDATION_ERROR: rosterId must be a positive integer.');
+      setCreateFieldErrors({ rosterId: 'Enter a positive Roster ID.' });
       return;
     }
     if (!startDatetime || !endDatetime) {
       setCreateError('VALIDATION_ERROR: startDatetime and endDatetime are required.');
+      setCreateFieldErrors({
+        ...(startDatetime ? {} : { startDatetime: 'Start datetime is required.' }),
+        ...(endDatetime ? {} : { endDatetime: 'End datetime is required.' }),
+      });
       return;
     }
 
@@ -371,6 +395,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
       const normalizedLanUser = lanModeEnabled ? lanUser.trim() : '';
       if (lanModeEnabled && !normalizedLanUser) {
         setCreateError('UNAUTHENTICATED: LAN User is required in LAN mode.');
+        setCreateBanner('Could not save: UNAUTHENTICATED Authentication required.');
         return;
       }
       await createScheduleSegment(
@@ -394,6 +419,8 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
       const described = describeError(submitError);
       setCreateError(described.message);
       setCreateErrorHint(described.hint);
+      const errorCode = /^([A-Z0-9_]+):/.exec(described.message)?.[1] ?? 'REQUEST_FAILED';
+      setCreateBanner(`Could not save: ${errorCode} ${described.message}`);
     } finally {
       setCreating(false);
     }
@@ -450,16 +477,35 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
           Company timezone unavailable. Showing UTC. {timezoneError}
         </p>
       ) : null}
+      {createBanner ? (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 10,
+            border: '1px solid #b42318',
+            background: '#fef3f2',
+            color: '#b42318',
+          }}
+        >
+          {createBanner}
+        </div>
+      ) : null}
 
       <section style={{ marginTop: 16 }}>
         <h2>Roster</h2>
         {data?.roster ? (
           <pre>{JSON.stringify(data.roster, null, 2)}</pre>
         ) : (
-          <p>
-            No roster found for this foreman/date. Schedule is roster-linked, so segments will
-            not appear without a roster + link.
-          </p>
+          <div>
+            <p>
+              No roster found for this foreman/date. Schedule is roster-linked, so segments will
+              not appear until a roster exists and segments are linked to it.
+            </p>
+            <p style={{ marginTop: 4 }}>
+              Next step: create a roster for this foreman/day first (or seed a demo fixture), then
+              load the day again.
+            </p>
+          </div>
         )}
       </section>
 
@@ -477,7 +523,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
         ) : (
           <p>
             {data?.roster
-              ? 'Roster exists, but there are no active linked segments. Create a segment or verify segment-roster links.'
+              ? 'No segments scheduled for this day.'
               : 'No active linked segments.'}
           </p>
         )}
@@ -485,6 +531,19 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
 
       <section style={{ marginTop: 20 }}>
         <h2>Diagnostics</h2>
+        {lanModeEnabled ? (
+          <button
+            type="button"
+            onClick={() => setShowDiagnostics((value) => !value)}
+            style={{ marginBottom: 8 }}
+          >
+            {showDiagnostics ? 'Hide Diagnostics' : 'Show Diagnostics'}
+          </button>
+        ) : null}
+        {!showDiagnostics ? (
+          <p>Diagnostics are hidden in LAN mode by default.</p>
+        ) : (
+          <>
         <p>Request mode: {isHydrated ? '/api/* (same-origin rewrite proxy)' : '(client-only)'}</p>
         <p>API base URL: {isHydrated ? (API_BASE_URL || '(browser uses relative /api)') : '(client-only)'}</p>
         <p>Timezone used for display: {companyTimezone}</p>
@@ -558,6 +617,8 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
             style={{ width: '100%', fontFamily: 'monospace' }}
           />
         </label>
+          </>
+        )}
       </section>
 
       <section style={{ marginTop: 20 }}>
@@ -567,6 +628,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
             Job ID
             <input type="number" min={1} value={jobId} onChange={(event) => setJobId(event.target.value)} />
           </label>
+          {createFieldErrors.jobId ? <p style={{ color: '#8a4b00' }}>{createFieldErrors.jobId}</p> : null}
           <label>
             Roster ID
             <input
@@ -576,6 +638,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
               onChange={(event) => setRosterId(event.target.value)}
             />
           </label>
+          {createFieldErrors.rosterId ? <p style={{ color: '#8a4b00' }}>{createFieldErrors.rosterId}</p> : null}
           <label>
             Start Datetime
             <input
@@ -584,6 +647,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
               onChange={(event) => setStartDatetime(event.target.value)}
             />
           </label>
+          {createFieldErrors.startDatetime ? <p style={{ color: '#8a4b00' }}>{createFieldErrors.startDatetime}</p> : null}
           <label>
             End Datetime
             <input
@@ -592,6 +656,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
               onChange={(event) => setEndDatetime(event.target.value)}
             />
           </label>
+          {createFieldErrors.endDatetime ? <p style={{ color: '#8a4b00' }}>{createFieldErrors.endDatetime}</p> : null}
           {createError ? <p style={{ color: 'crimson' }}>{createError}</p> : null}
           {createErrorHint ? <p style={{ color: '#8a4b00' }}>{createErrorHint}</p> : null}
           <button type="submit" disabled={creating}>
