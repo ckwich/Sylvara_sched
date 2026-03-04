@@ -17,12 +17,12 @@ export {
   utcToLocalDateStr,
   utcToLocalParts,
   wallClockHoursBetween,
-} from './time-of-day.js';
+} from './time-of-day';
 
 export type {
   DetectedRequirement,
   DetectedScheduleEvent,
   ParsedNotes,
   ParsedNotesConfidence,
-} from './notes-parser.js';
-export { parseNotes } from './notes-parser.js';
+} from './notes-parser';
+export { parseNotes } from './notes-parser';
