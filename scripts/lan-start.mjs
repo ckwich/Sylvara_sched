@@ -59,6 +59,7 @@ function isProcessAlive(pid) {
 function checkHealth(url) {
   const parsedUrl = new URL(url);
   return new Promise((resolve) => {
+    let settled = false;
     const request = http.request(
       {
         host: parsedUrl.hostname,
@@ -69,28 +70,87 @@ function checkHealth(url) {
       (response) => {
         response.resume();
         response.on('end', () => {
-          resolve((response.statusCode ?? 500) >= 200 && (response.statusCode ?? 500) < 300);
+          if (settled) {
+            return;
+          }
+          settled = true;
+          const status = response.statusCode ?? 500;
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            error: null,
+          });
         });
       },
     );
-    request.on('error', () => resolve(false));
+    request.setTimeout(5000, () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      request.destroy(new Error('timeout'));
+      resolve({ ok: false, status: null, error: 'timeout' });
+    });
+    request.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve({ ok: false, status: null, error: error.message });
+    });
     request.end();
   });
 }
 
-async function waitForHealth(timeoutMs) {
+async function waitForHealth(input) {
+  const { timeoutMs, apiPid, webPid } = input;
   const startedAt = Date.now();
+  let lastResults = [];
+  let consecutivePasses = 0;
+  const requiredConsecutivePasses = 20;
+
   while (Date.now() - startedAt < timeoutMs) {
-    const [webOk, apiOk] = await Promise.all([
-      checkHealth(webHealthUrl),
-      checkHealth(apiHealthViaWebProxyUrl),
-    ]);
-    if (webOk && apiOk) {
-      return true;
+    const checks = [
+      { label: 'web health', url: webHealthUrl },
+      { label: 'api health via web proxy', url: apiHealthViaWebProxyUrl },
+      { label: 'raw api health', url: rawApiHealthUrl },
+    ];
+
+    const results = await Promise.all(
+      checks.map(async (check) => ({
+        label: check.label,
+        url: check.url,
+        ...(await checkHealth(check.url)),
+      })),
+    );
+    lastResults = results;
+
+    const apiAlive = isProcessAlive(apiPid);
+    const webAlive = isProcessAlive(webPid);
+    if (!apiAlive || !webAlive) {
+      return {
+        ok: false,
+        results,
+        processAlive: { api: apiAlive, web: webAlive },
+      };
+    }
+
+    if (results.every((result) => result.ok)) {
+      consecutivePasses += 1;
+    } else {
+      consecutivePasses = 0;
+    }
+
+    if (consecutivePasses >= requiredConsecutivePasses) {
+      return { ok: true, results };
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  return false;
+  return {
+    ok: false,
+    results: lastResults,
+    processAlive: { api: isProcessAlive(apiPid), web: isProcessAlive(webPid) },
+  };
 }
 
 function readExistingPid(path) {
@@ -132,9 +192,21 @@ console.log(`- webHealthUrl=${webHealthUrl}`);
 console.log(`- apiHealthViaWebProxyUrl=${apiHealthViaWebProxyUrl}`);
 console.log(`- rawApiHealthUrl=${rawApiHealthUrl}`);
 
-const ready = await waitForHealth(15000);
-if (!ready) {
-  console.error('LAN services failed health checks within 15s. Check .lan/*.log files.');
+const ready = await waitForHealth({ timeoutMs: 15000, apiPid, webPid });
+if (!ready.ok) {
+  console.error('LAN services failed health checks within 15s.');
+  for (const result of ready.results) {
+    if (result.ok) {
+      continue;
+    }
+    const reason = result.status !== null ? `HTTP ${result.status}` : result.error ?? 'unknown';
+    console.error(`- FAIL ${result.label}: ${reason} (${result.url})`);
+  }
+  const apiAlive = ready.processAlive?.api ?? isProcessAlive(apiPid);
+  const webAlive = ready.processAlive?.web ?? isProcessAlive(webPid);
+  console.error(`Process status: api pid ${apiPid} alive=${apiAlive}`);
+  console.error(`Process status: web pid ${webPid} alive=${webAlive}`);
+  console.error(`Logs: ${apiLogPath} and ${webLogPath}`);
   process.exit(1);
 }
 
