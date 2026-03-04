@@ -3,12 +3,14 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import http from 'node:http';
+import { getLanHealthTargets } from './lan-health-targets.mjs';
 
 const hostBind = process.env.HOST_BIND ?? '0.0.0.0';
 const webPort = process.env.WEB_PORT ?? '3000';
 const apiPort = process.env.API_PORT ?? '4000';
 const lanSharedSecret = process.env.LAN_SHARED_SECRET;
 const minSharedSecretLength = 24;
+const { webHealthUrl, apiHealthViaWebProxyUrl, rawApiHealthUrl } = getLanHealthTargets();
 
 if (!lanSharedSecret || lanSharedSecret.trim().length < minSharedSecretLength) {
   console.error(`LAN_SHARED_SECRET is required and must be at least ${minSharedSecretLength} characters for LAN mode.`);
@@ -54,13 +56,14 @@ function isProcessAlive(pid) {
   }
 }
 
-function checkHealth(pathname, webPort) {
+function checkHealth(url) {
+  const parsedUrl = new URL(url);
   return new Promise((resolve) => {
     const request = http.request(
       {
-        host: '127.0.0.1',
-        port: Number(webPort),
-        path: pathname,
+        host: parsedUrl.hostname,
+        port: Number(parsedUrl.port || 80),
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
         method: 'GET',
       },
       (response) => {
@@ -75,12 +78,12 @@ function checkHealth(pathname, webPort) {
   });
 }
 
-async function waitForHealth(webPort, timeoutMs) {
+async function waitForHealth(timeoutMs) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const [webOk, apiOk] = await Promise.all([
-      checkHealth('/api/web-health', webPort),
-      checkHealth('/api/health', webPort),
+      checkHealth(webHealthUrl),
+      checkHealth(apiHealthViaWebProxyUrl),
     ]);
     if (webOk && apiOk) {
       return true;
@@ -124,7 +127,12 @@ if (!isProcessAlive(apiPid) || !isProcessAlive(webPid)) {
 writeFileSync(apiPidPath, `${apiPid}\n`);
 writeFileSync(webPidPath, `${webPid}\n`);
 
-const ready = await waitForHealth(webPort, 15000);
+console.log(`Health targets:`);
+console.log(`- webHealthUrl=${webHealthUrl}`);
+console.log(`- apiHealthViaWebProxyUrl=${apiHealthViaWebProxyUrl}`);
+console.log(`- rawApiHealthUrl=${rawApiHealthUrl}`);
+
+const ready = await waitForHealth(15000);
 if (!ready) {
   console.error('LAN services failed health checks within 15s. Check .lan/*.log files.');
   process.exit(1);

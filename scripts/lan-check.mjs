@@ -1,17 +1,17 @@
 import http from 'node:http';
+import { getLanHealthTargets } from './lan-health-targets.mjs';
 
-const webPort = process.env.WEB_PORT ?? '3000';
-const baseHost = '127.0.0.1';
+const { webHealthUrl, apiHealthViaWebProxyUrl, rawApiHealthUrl } = getLanHealthTargets();
 
 async function check(url, label) {
-  const { path } = new URL(url);
+  const parsedUrl = new URL(url);
   return new Promise((resolve) => {
     let settled = false;
     const request = http.request(
       {
-        host: baseHost,
-        port: Number(webPort),
-        path,
+        host: parsedUrl.hostname,
+        port: Number(parsedUrl.port || 80),
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
         method: 'GET',
       },
       (response) => {
@@ -56,13 +56,19 @@ async function check(url, label) {
 }
 
 async function main() {
-  const webHealthOk = await check(`http://${baseHost}:${webPort}/api/web-health`, 'web health');
-  const apiHealthOk = await check(
-    `http://${baseHost}:${webPort}/api/health`,
+  console.log(`Health targets:`);
+  console.log(`- webHealthUrl=${webHealthUrl}`);
+  console.log(`- apiHealthViaWebProxyUrl=${apiHealthViaWebProxyUrl}`);
+  console.log(`- rawApiHealthUrl=${rawApiHealthUrl}`);
+
+  const webHealthOk = await check(webHealthUrl, 'web health');
+  const apiHealthViaProxyOk = await check(
+    apiHealthViaWebProxyUrl,
     'api health via web proxy',
   );
+  const rawApiHealthOk = await check(rawApiHealthUrl, 'raw api health');
 
-  if (webHealthOk && apiHealthOk) {
+  if (webHealthOk && apiHealthViaProxyOk && rawApiHealthOk) {
     console.log('LAN check passed.');
     process.exitCode = 0;
     return;
