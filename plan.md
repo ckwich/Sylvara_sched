@@ -16,7 +16,7 @@ Replace the existing backlog tracking workbook with a multi-user app that:
 - Bucket "Lift" means **Spider Lift**.
 - Seasonal/ground flags:
   - **Winter** = should be done in winter for tree health.
-  - **Frozen** = must wait for frozen ground to prevent lawn damage.
+  - **Frozen** = must wait for frozen ground to prevent lawn damage. Triggers a non-blocking `FROZEN_GROUND_REQUIRED` reminder on scheduling attempt. No weather API; scheduler decides.
 - Pipeline states: **TBS → PARTIALLY_SCHEDULED → FULLY_SCHEDULED → COMPLETED**
   - Winter/Frozen/Unable/requirements are constraints inside **TBS**.
 - Notes abbreviations:
@@ -34,12 +34,12 @@ Replace the existing backlog tracking workbook with a multi-user app that:
 UX is a first-class priority for this scheduler module. The goal is **low-friction dispatch work** (fast, obvious, hard to misuse) and **low-ops burden** (easy to start/stop, diagnose, and recover).
 
 **UX principles (apply to every UI change):**
-- **Make the “happy path” obvious**: schedule view loads with minimal inputs; clear primary CTA; sensible defaults.
+- **Make the "happy path" obvious**: schedule view loads with minimal inputs; clear primary CTA; sensible defaults.
 - **Progressive disclosure**: keep advanced controls (filters, diagnostics, admin settings) out of the primary flow.
 - **Guardrails over cleverness**: validate early, explain *why* a write is blocked (conflict windows, overlap, midnight, missing roster) and how to fix it.
 - **Fast feedback**: optimistic UI only when safe; otherwise show immediate status, errors, and next action.
 - **Keyboard-first and accessibility-minded**: tab order, visible focus, ARIA where appropriate; avoid UI patterns that require precision mouse work.
-- **Operational clarity**: surface “system state” minimally (API reachable, timezone in use, roster-linked semantics) without leaking sensitive internals.
+- **Operational clarity**: surface "system state" minimally (API reachable, timezone in use, roster-linked semantics) without leaking sensitive internals.
 
 **Definition of Done for any user-facing change:**
 - Adds/updates smoke coverage where feasible (API) and/or integration coverage when correctness is at risk.
@@ -57,11 +57,16 @@ UX is a first-class priority for this scheduler module. The goal is **low-fricti
 - Schedule history (structured going forward; legacy RS/TBRS parsed from Notes with source tags).
 - Reports equivalent to current "SUMM" plus weekly comparison value ("previous week backlog $").
 - Notes extraction with suggested structured fields + manual overrides.
+- Customer scheduling notifications (SMS + email; scheduler-triggered, not automatic).
+- Dispatch board multi-foreman conflict visibility (equipment double-booking, person conflicts, capacity warnings, job overlap detection).
+- Seasonal freeze window calendar overlay (admin-managed historical bands; display only).
 
 ### Explicitly out of scope (Beta)
-- Full-feature crew mobile app / crew confirmation workflow automation (Completion remains scheduler/manager marked).
+- Full-feature crew mobile app / crew confirmation workflow automation — **post-v1, native app**. See §5.8.
 - Automated external permit integration.
 - Perfect historical reconstruction of every note nuance (we keep `notes_raw` always).
+- Notes parsing expansion beyond tree service vocabulary — post-v1. See §3.2.
+- BETWEEN_JOBS travel automation (AUTO source) — post-v1.
 
 ---
 
@@ -83,6 +88,7 @@ UX is a first-class priority for this scheduler module. The goal is **low-fricti
 - name (primary)
 - optional: phone/email fields (beta optional)
 - unhappy/risk flags live here (customer-level)
+- deleted_at (nullable; soft delete — required for Sylvara merge compatibility)
 
 **CustomerRisk (Unhappy Customer)**
 - id, customer_id
@@ -97,9 +103,10 @@ UX is a first-class priority for this scheduler module. The goal is **low-fricti
 **Job**
 - id, customer_id
 - equipment_type: `CRANE | BUCKET`
-- sales_rep_code (text for now; can map to User later)
+- sales_rep_code (text; normalized to uppercase-trimmed at import and on entry — see §11)
 - job_site_address (text)
 - town (text)
+- estimate_id (nullable UUID FK → estimates) *(NULL for all legacy/import/standalone-era jobs; populated in the integrated era when a job is created from an approved Sylvara estimate — see §12.2)*
 
 **Workflow state**
 - `state` is a **derived property, not a stored column.** Do not add a `state` column to the jobs table. Derive it at query time using the algorithm in §2.5.
@@ -134,7 +141,7 @@ UX is a first-class priority for this scheduler module. The goal is **low-fricti
 - crane_model_suitability: `1090 | 1060 | EITHER | NULL` (for crane jobs; can be per segment later)
 - requires_spider_lift (bool) (for bucket jobs)
 - winter_flag (bool)
-- frozen_ground_flag (bool)
+- frozen_ground_flag (bool) *(triggers non-blocking `FROZEN_GROUND_REQUIRED` warning on scheduling attempt; no weather API; scheduler decides)*
 
 **Notes**
 - notes_raw (long text; preserved forever)
@@ -155,6 +162,9 @@ UX is a first-class priority for this scheduler module. The goal is **low-fricti
 - access_constraints (join table: **JobAccessConstraint** — job_id, access_constraint_id FK to AccessConstraint admin list)
 - access_notes (text)
 
+**Soft delete**
+- deleted_at (nullable timestamptz) *(required for Sylvara merge compatibility; use `deleted_at IS NULL` in all queries; never hard-delete job rows)*
+
 ### 2.4 Requirements (Permits / Police Detail / etc.)
 Use one unified entity for regulatory/dependency requirements.
 
@@ -163,6 +173,9 @@ Use one unified entity for regulatory/dependency requirements.
 - requirement_type_id (FK to admin-managed list)
 - status: `REQUIRED | REQUESTED | APPROVED | DENIED | NOT_REQUIRED`
 - notes (text)
+- source: `LEGACY_PARSE | USER_ACTION` *(how this requirement was created — parsed from notes_raw vs. manually entered)*
+- raw_snippet (text, nullable) *(original notes text that triggered this requirement; preserved for traceability when source=LEGACY_PARSE)*
+- deleted_at (nullable timestamptz; soft delete)
 - created_at, updated_at
 
 **RequirementType (admin-managed)**
@@ -179,8 +192,8 @@ Because jobs can be scheduled in pieces, scheduling is segment-based.
 - id, job_id
 - segment_group_id (uuid, nullable; links split-across-midnight segments so paired operations are possible)
 - segment_type: `PRIMARY | RETURN_VISIT`
-- start_datetime (required)
-- end_datetime (required)
+- start_datetime (required; timestamptz, UTC-stored)
+- end_datetime (required; timestamptz, UTC-stored; must be same local calendar day as start_datetime)
 - scheduled_hours_override (numeric, nullable; rare; if set, overrides derived hours for reporting/state math)
 - deleted_at (nullable; soft delete — required so vacated-slot detection can trigger the push-up recommender)
 - notes (text)
@@ -190,20 +203,19 @@ Because jobs can be scheduled in pieces, scheduling is segment-based.
 - id
 - foreman_person_id (FK to Resource type PERSON; must have is_foreman=true)
 - related_job_id (nullable)
-- start_datetime, end_datetime (required)
-- travel_type: `START_OF_DAY | END_OF_DAY | BETWEEN_JOBS` *(beta uses START_OF_DAY and END_OF_DAY only)*
-- source: `MANUAL | AUTO` (AUTO is post-beta)
+- start_datetime, end_datetime (required; timestamptz, UTC-stored)
+- travel_type: `START_OF_DAY | END_OF_DAY | BETWEEN_JOBS` *(beta uses START_OF_DAY and END_OF_DAY only; BETWEEN_JOBS / AUTO source is post-v1)*
+- source: `MANUAL | AUTO` (AUTO is post-v1)
 - locked (bool, default false) *(AUTO must not override locked travel blocks)*
 - notes (text)
 - created_by_user_id, created_at, updated_at
-- deleted_at (nullable; soft delete only)
-
+- deleted_at (nullable; soft delete only — never hard-delete)
 
 **Segment scope rule:** one ScheduleSegment = one calendar day. Multi-day jobs use multiple segments. This keeps crew assignment unambiguous (one crew per segment) and simplifies the calendar view. Segments may be partial-day (e.g., 9:00–13:00 is valid). Segments must not cross midnight local time — a segment that would run from 8pm to 2am must be split at midnight into two segments on consecutive days.
 
-**Midnight split linkage (beta):** When a segment is split at midnight, create two ScheduleSegments and set both to the same `segment_group_id`. UI must treat them as “linked halves”: on move/resize/delete of one half, prompt “Apply to linked half too?” (default **No**). If the user chooses Yes, apply the same operation to the other half in the same database transaction.
+**Midnight split linkage (beta):** When a segment is split at midnight, create two ScheduleSegments and set both to the same `segment_group_id`. UI must treat them as "linked halves": on move/resize/delete of one half, prompt "Apply to linked half too?" (default **No**). If the user chooses Yes, apply the same operation to the other half in the same database transaction.
 
-**Linked-half move semantics (authoritative):** If the user chooses “Apply to linked half too?” on a move/resize, preserve the midnight boundary (each half stays within its own local date). Apply the analogous delta within each day; if either half would cross midnight, reject with `CROSSES_MIDNIGHT`.
+**Linked-half move semantics (authoritative):** If the user chooses "Apply to linked half too?" on a move/resize, preserve the midnight boundary (each half stays within its own local date). Apply the analogous delta within each day; if either half would cross midnight, reject with `CROSSES_MIDNIGHT`.
 
 **State derivation (authoritative algorithm)**
 Compute `scheduled_effective_hours` = sum over all non-deleted segments:
@@ -231,7 +243,7 @@ Then derive state:
 - created_at
 
 **VacatedSlot**
-A dedicated record created whenever a time window is freed. Drives the push-up recommender. Create it in the **same database transaction** as the segment mutation, inside the scheduling service, using the segment’s **pre-change** start/end values. Do not derive this from ActivityLog diffs — an explicit table makes the recommender straightforward to build, test, and extend.
+A dedicated record created whenever a time window is freed. Drives the push-up recommender. Create it in the **same database transaction** as the segment mutation, inside the scheduling service, using the segment's **pre-change** start/end values. Do not derive this from ActivityLog diffs — an explicit table makes the recommender straightforward to build, test, and extend.
 - id
 - source_segment_id (FK to ScheduleSegment; the segment that was deleted/moved/shortened)
 - source_action: `DELETED | MOVED | SHORTENED`
@@ -243,6 +255,15 @@ A dedicated record created whenever a time window is freed. Drives the push-up r
 - chosen_segment_id (nullable FK; set when a new segment is created from this slot)
 - created_at
 - dismissed_at (nullable), dismissed_by_user_id (nullable)
+
+**SchedulingConflictDismissal**
+Tracks dismissed conflict notices per date per user — prevents re-surfacing dismissed items on the dispatch board conflict summary panel.
+- id
+- user_id (FK → users)
+- conflict_date (date)
+- conflict_type: `EQUIPMENT_OVERCOMMIT | PERSON_CONFLICT | CAPACITY_WARNING | JOB_OVERLAP`
+- conflict_key (varchar; identifies the specific conflict, e.g. resource_id for equipment conflicts)
+- dismissed_at (timestamptz)
 
 ### 2.6 Job Blockers (TBS constraints)
 Some jobs are "TBS" specifically because something blocks scheduling. Track blockers explicitly (not buried in notes).
@@ -256,6 +277,7 @@ Some jobs are "TBS" specifically because something blocks scheduling. Track bloc
 - notes (text)
 - created_by_user_id (nullable for legacy import)
 - created_at, cleared_at (nullable), cleared_by_user_id (nullable)
+- deleted_at (nullable timestamptz; soft delete)
 
 **BlockerReason (admin-managed)**
 - id
@@ -271,19 +293,20 @@ Start count-based; keep path to named units later.
 - resource_type: `EQUIPMENT | PERSON`
 - name
 - inventory_quantity (int; editable for EQUIPMENT; for PERSON must be 1 — UI must hide/disable editing when resource_type=PERSON, and backend must enforce = 1)
-- is_foreman
-  - **PERSON resources are unique individuals** (inventory_quantity must be 1; do not decrement “inventory” when staffing rosters — exclusivity is enforced via roster membership uniqueness).
- (bool, default false) *(only meaningful when resource_type=PERSON)*
+- is_foreman (bool, default false) *(only meaningful when resource_type=PERSON)*
+  - **PERSON resources are unique individuals** (inventory_quantity must be 1; do not decrement "inventory" when staffing rosters — exclusivity is enforced via roster membership uniqueness).
 - active (bool)
+- deleted_at (nullable timestamptz; soft delete)
 
 **ResourceReservation**
 - id, schedule_segment_id, resource_id
 - quantity (int; default 1)
 - notes (text)
-- Unique constraint on (schedule_segment_id, resource_id) — prevents double-booking the same resource on the same segment.
+- deleted_at (nullable timestamptz; soft delete)
+- Unique constraint on (schedule_segment_id, resource_id) WHERE deleted_at IS NULL — prevents double-booking the same resource on the same segment.
 
 ### 2.8 Home Bases (manager-managed)
-Dump sites function as “home base.” Managers can add/remove home bases over time. Home bases include addresses for future routing integrations.
+Dump sites function as "home base." Managers can add/remove home bases over time. Home bases include addresses for future routing integrations.
 
 **HomeBase**
 - id
@@ -292,6 +315,7 @@ Dump sites function as “home base.” Managers can add/remove home bases over 
 - opening_time (time, nullable) *(soft anchor used when a day has no events; falls back to company operating hours if unset)*
 - closing_time (time, nullable) *(UI display preference only; not a hard scheduling boundary)*
 - active (bool)
+- deleted_at (nullable timestamptz; soft delete)
 - created_at, updated_at
 
 ### 2.9 Foreman Day Rosters (authoritative staffing; day-exclusive members)
@@ -301,11 +325,12 @@ Crews are composed per-day under a foreman. A non-foreman crew member may be on 
 - id
 - date (local company timezone date)
 - foreman_person_id (FK to Resource of type PERSON; is_foreman=true)
-- home_base_id (FK HomeBase)
+- home_base_id (FK HomeBase) *(required at roster creation; used as travel anchor and scheduling availability anchor)*
 - preferred_start_time (time, nullable) *(soft anchor only; not a hard boundary)*
 - preferred_end_time (time, nullable) *(soft anchor only; not a hard boundary)*
 - notes (text)
 - created_by_user_id, created_at, updated_at
+- deleted_at (nullable timestamptz; soft delete)
 
 **ForemanDayRosterMember**
 - id
@@ -314,17 +339,51 @@ Crews are composed per-day under a foreman. A non-foreman crew member may be on 
 - person_resource_id (FK Resource type PERSON)
 - role: `CLIMBER | GROUND | OPERATOR | OTHER`
 - created_at
-- Unique (day-exclusive): (date, person_resource_id)
+- Unique (day-exclusive): (tenant_id, date, person_resource_id) WHERE deleted_at IS NULL — a crew member cannot appear on two rosters on the same day.
 
 ### 2.10 Segment Staffing Link (roster-backed)
 Schedule segments reference the roster for that day; staffing defaults from the roster.
 
 **SegmentRosterLink**
 - id
-- schedule_segment_id (FK; one per segment)
+- schedule_segment_id (FK; one per segment; UNIQUE)
 - roster_id (FK ForemanDayRoster)
 - created_by_user_id, created_at
 - Unique: (schedule_segment_id)
+
+A ScheduleSegment **without** a corresponding SegmentRosterLink is **not** considered scheduled for any foreman or day. All scheduling writes that create segments for a foreman/day must create the ScheduleSegment **and** its SegmentRosterLink in the **same DB transaction**.
+
+### 2.11 Customer Scheduling Notifications
+Notifications are intentional scheduler-triggered acts, not automatic side effects. The system tracks all schedule changes internally (VacatedSlot, ScheduleEvent, ActivityLog) but sending a customer notification requires explicit scheduler confirmation.
+
+**ScheduleNotificationLog**
+- id, job_id
+- schedule_segment_id (nullable FK; null for cancellation notifications where no segment remains)
+- notification_type: `JOB_SCHEDULED | JOB_RESCHEDULED | JOB_CANCELLED | CONFIRMATION_REQUEST`
+- sent_by_user_id (FK → users)
+- channels_sent (jsonb; array of channels actually used, e.g. `["SMS", "EMAIL"]`)
+- channels_suppressed (jsonb, nullable; channels suppressed due to opt-in rules, e.g. `[{channel: "EMAIL", reason: "no_email_flag"}]`)
+- customer_response (enum, nullable): `CONFIRMED | RESCHEDULE_REQUESTED | NO_RESPONSE`
+- customer_responded_at (timestamptz, nullable)
+- sent_at (timestamptz)
+
+**Opt-in enforcement (all three must pass before any channel is used):**
+- `jobs.contact_allowed = true` — if false, block all outbound notifications
+- `jobs.no_email = false` — if true, suppress email channel
+- `jobs.preferred_channels` — only send via channels in this list
+
+### 2.12 Seasonal Freeze Windows (admin-managed)
+Historical freeze window data for the dispatch board calendar overlay. Display only — no bearing on scheduling logic, attempt endpoints, or state derivation.
+
+**SeasonalFreezeWindow**
+- id
+- label (varchar; e.g. "2023–2024 Freeze Window", "Typical Jan–Feb Freeze Period")
+- start_date (date)
+- end_date (date)
+- notes (text, nullable)
+- active (bool; whether to display this band on the current dispatch board)
+- created_by_user_id (FK → users)
+- created_at
 
 
 ## 3. Notes Extraction (Import + Ongoing)
@@ -334,7 +393,9 @@ Schedule segments reference the roster for that day; staffing defaults from the 
 - Extract structured fields with best-effort parsing + confidence.
 - Never silently discard information; if parse fails, keep it in raw notes and surface "unparsed signals" list.
 
-### 3.2 Parsing rules (initial beta)
+### 3.2 Parsing rules (v1 — tree service vocabulary only)
+**Scope:** Tree service abbreviation vocabulary only for beta. Expansion to landscaping/snow removal parsing vocabulary is post-v1. See §11 for the post-v1 extensibility architecture.
+
 **Flags**
 - push_up_if_possible:
   - triggers: "PUSH UP IF POSSIBLE", "PU", "P/U"
@@ -344,9 +405,9 @@ Schedule segments reference the roster for that day; staffing defaults from the 
   - triggers: "NO EMAIL"
 
 **Requirements**
-- DTL → Requirement(POLICE_DETAIL, status=REQUIRED)
-- CBP → Requirement(CRANE_AND_BOOM_PERMIT, status=REQUIRED)
-- "TREE PERMIT" / "TREE PERMIT NEEDED" → Requirement(TREE_PERMIT, status=REQUIRED)
+- DTL → Requirement(POLICE_DETAIL, status=REQUIRED, source=LEGACY_PARSE, raw_snippet preserved)
+- CBP → Requirement(CRANE_AND_BOOM_PERMIT, status=REQUIRED, source=LEGACY_PARSE, raw_snippet preserved)
+- "TREE PERMIT" / "TREE PERMIT NEEDED" → Requirement(TREE_PERMIT, status=REQUIRED, source=LEGACY_PARSE, raw_snippet preserved)
 
 **Equipment suggestions**
 - DW → suggest Resource "Ditch Witch"
@@ -354,9 +415,9 @@ Schedule segments reference the roster for that day; staffing defaults from the 
 These become suggested reservations; do not auto-reserve unless user confirms.
 
 **Schedule history (legacy parse)**
-- RS {date} → ScheduleEvent(RESCHEDULE_TO, to_at)
-- TBRS {date} → ScheduleEvent(TBS_FROM, from_at)
-- RS TO {to} FROM {from} → ScheduleEvent(DATE_SWAP, from_at, to_at)
+- RS {date} → ScheduleEvent(RESCHEDULE_TO, to_at, source=LEGACY_PARSE, raw_snippet preserved)
+- TBRS {date} → ScheduleEvent(TBS_FROM, from_at, source=LEGACY_PARSE, raw_snippet preserved)
+- RS TO {to} FROM {from} → ScheduleEvent(DATE_SWAP, from_at, to_at, source=LEGACY_PARSE, raw_snippet preserved)
 All legacy-derived events use source=LEGACY_PARSE and keep raw_snippet.
 
 ### 3.3 UI for extracted data
@@ -390,7 +451,7 @@ On Job detail:
   - Completed-without-segments fallback: if a row indicates completion but no schedule segments are created/parseable, set completed_date from any explicit completion date field if present; otherwise leave completed_date NULL and write an ActivityLog entry tagged IMPORT_NEEDS_REVIEW_COMPLETION_DATE for manual follow-up.
 
 **ImportRun**
-- id
+- id (UUID)
 - started_at, finished_at
 - run_by_user_id (nullable; system run if null)
 - source_filename (text)
@@ -398,11 +459,11 @@ On Job detail:
 - summary_json (counts of rows read/created/errored per sheet)
 
 **ImportRowMap**
-- id, import_run_id
+- id (UUID), import_run_id (UUID)
 - sheet_name (text)
 - row_number (int)
 - entity_type (text; e.g., "Job", "Customer")
-- entity_id (int FK to the created/matched entity)
+- entity_id (UUID FK to the created/matched entity) *(must be UUID — not int; all PKs in this system are UUIDs)*
 - raw_row_json (full original row preserved for debugging)
 - created_at
 
@@ -437,9 +498,10 @@ Each supports:
 - Equipment reservations per segment
 - Notes raw + extracted panel
 - Activity log + estimate history + schedule event history
+- **Notification panel** — shows ScheduleNotificationLog entries for this job; "Notify Customer" action button
 
 **One-click scheduling (beta, foreman-anchored)**
-- Scheduler selects: (1) date, (2) foreman, then clicks **“Schedule for mm/dd”** (or a recommended date button).
+- Scheduler selects: (1) date, (2) foreman, then clicks **"Schedule for mm/dd"** (or a recommended date button).
 - Duration inputs (pre-scheduling):
   - onsite_hours = Job.estimate_hours_current *(authoritative onsite labor hours required; can be set while TBS before any schedule exists)*
   - travel_hours_estimate = Job.travel_hours_estimate *(informational in beta; used for reporting/planning and future automation, not for hard fit/rejection)*
@@ -450,16 +512,14 @@ Each supports:
   - no contiguous free window fits the onsite_hours calendar block for that foreman on that date
 - On success (beta):
   - create the onsite ScheduleSegment (one calendar day; must not cross midnight local time)
-  - link it to the selected foreman’s ForemanDayRoster via SegmentRosterLink
+  - link it to the selected foreman's ForemanDayRoster via SegmentRosterLink
   - optionally (if explicitly requested by the user during the action), create a **START_OF_DAY** TravelSegment (home base → first job) with `source=MANUAL`
-  - **do not** auto-create **END_OF_DAY** TravelSegment during scheduling; end-of-day travel is created manually via “Close out day”
+  - **do not** auto-create **END_OF_DAY** TravelSegment during scheduling; end-of-day travel is created manually via "Close out day"
 - Multi-day splitting remains manual in beta.
 - **Close out day (beta, manual):** creates one **END_OF_DAY** TravelSegment (last job → home base) for a foreman+date:
-  - default `start_datetime` = latest end_datetime of that foreman’s ScheduleSegments on that date (company timezone)
+  - default `start_datetime` = latest end_datetime of that foreman's ScheduleSegments on that date (company timezone)
   - scheduler enters duration; end time auto-computed; start/end override allowed
   - enforce at most one active END_OF_DAY per foreman+date
-
-
 
 ### 5.3 Dispatch Board Calendar (beta target UI)
 Beta calendar UI is a **dispatch board**: one day, many foremen (columns), with time as the vertical axis.
@@ -474,6 +534,7 @@ Beta calendar UI is a **dispatch board**: one day, many foremen (columns), with 
 - **No hard workday boundaries:** foreman work windows vary by day; `preferred_start_time` / `preferred_end_time` are soft anchors only.
 - **Default display window:** show 05:00–19:00 local time by default; allow scrolling beyond. Managers can set operating hours to adjust this display range (preference only).
 - **Authority:** UI may show optimistic previews, but **backend attempt endpoints** must authoritatively accept/reject all creates/moves/resizes.
+- **Seasonal overlay:** historical freeze window bands (SeasonalFreezeWindow records) are displayed as color bands across the date header. Display only — no effect on scheduling logic.
 
 **Create placement algorithm (no overlap)**
 Given snapped `clicked_time` and requested `duration_minutes`, compute the free window:
@@ -495,8 +556,22 @@ Accept only if `end <= next_start` and the block stays within the local date (no
 - `warnings`: array of `{ code, message, details? }` (non-blocking; UI displays polite reminders here)
 - `rejections`: array of `{ code, message, details? }` (present only when result=REJECT)
 
-**Recommended error codes (stable for UI + tests)**
-- `SNAP_ALIGNMENT_REQUIRED`, `OVERLAP_CONFLICT`, `CROSSES_MIDNIGHT`, `ACTIVE_BLOCKER`, `CUSTOMER_WINDOW_CONFLICT`, `NO_CONTIGUOUS_SLOT_AT_CLICK`
+**Error and warning codes (stable for UI + tests)**
+
+Hard rejections (result=REJECT):
+- `SNAP_ALIGNMENT_REQUIRED` — proposed time not on a 10-minute boundary
+- `OVERLAP_CONFLICT` — block overlaps an existing occupied interval for this foreman on this date
+- `CROSSES_MIDNIGHT` — block would cross midnight local time
+- `ACTIVE_BLOCKER` — at least one ACTIVE JobBlocker exists on this job
+- `CUSTOMER_WINDOW_CONFLICT` — block falls outside a parsed customer availability window
+- `NO_CONTIGUOUS_SLOT_AT_CLICK` — no contiguous free window fits the requested duration from the clicked time
+
+Non-blocking warnings (result=ACCEPT, surface in UI as polite reminders):
+- `REQ_NOT_APPROVED` — at least one Requirement is not APPROVED or NOT_REQUIRED
+- `REQ_DENIED_PRESENT` — at least one Requirement has status DENIED
+- `REQ_UNMET_PRESENT` — required items exist but are not yet satisfied/confirmed
+- `FROZEN_GROUND_REQUIRED` — job has frozen_ground_flag=true; reminder that job requires frozen soil conditions
+- `WINTER_PREFERRED` — job has winter_flag=true; reminder that job is preferred to run in winter
 
 ### 5.4 Push-up recommender
 
@@ -512,7 +587,7 @@ The following do *not* trigger a vacated slot: changing crew assignment, changin
 
 When a trigger fires and a non-empty window is freed, create a `VacatedSlot` record (see §2.5) and open the push-up modal.
 
-**Vacated-slot modal debounce (required):** To avoid pop-up spam while a scheduler is “fiddling” with a block, only open the push-up modal on **commit** actions (e.g., drag-drop mouse-up / resize commit / explicit delete). The backend may create multiple VacatedSlot records across successive commits; the UI must throttle modal display (e.g., cooldown window) and may offer a “Show push-up suggestions” button to reopen. Optional hardening: if multiple OPEN VacatedSlots are created by the same user within a short window and are adjacent/overlapping, coalesce them into a single OPEN slot.
+**Vacated-slot modal debounce (required):** To avoid pop-up spam while a scheduler is "fiddling" with a block, only open the push-up modal on **commit** actions (e.g., drag-drop mouse-up / resize commit / explicit delete). The backend may create multiple VacatedSlot records across successive commits; the UI must throttle modal display (e.g., cooldown window) and may offer a "Show push-up suggestions" button to reopen. Optional hardening: if multiple OPEN VacatedSlots are created by the same user within a short window and are adjacent/overlapping, coalesce them into a single OPEN slot.
 
 **Candidate eligibility (hard filters — must all pass):**
 - `push_up_if_possible = true`
@@ -551,6 +626,51 @@ Resource availability warnings (inventory count) are shown inline if already mod
   - store weekly snapshot totals (by rep and equipment) to populate "previous week backlog $"
   - snapshot schedule: weekly (manager can trigger manually too)
 
+### 5.6 Customer Scheduling Notifications
+Notifications are intentional scheduler-triggered communication acts — not automatic side effects of schedule changes. Schedule changes (move, resize, delete) update VacatedSlot, ScheduleEvent, and ActivityLog internally. A customer notification is sent only when the scheduler explicitly triggers it via a "Notify Customer" action.
+
+**Notification events:**
+- **Job Scheduled** — scheduler sends after creating the initial ScheduleSegment. Customer receives SMS + email with date, address, and scope summary. Rep receives internal alert.
+- **Job Rescheduled** — scheduler sends after changing a segment date. System tracks the change internally but does NOT auto-send. Customer receives SMS + email with new date, old date referenced. Rep receives internal alert.
+- **Job Cancelled** — scheduler sends after deleting all segments. Customer receives SMS + email. Rep receives internal alert.
+- **Confirmation Request** — optional step. Scheduler sends a confirm/reschedule reply link before the job date. Customer can confirm or request reschedule via the link. Customer response creates a pipeline activity entry and triggers rep notification.
+
+**Opt-in enforcement (all checks must pass before any channel is used):**
+- `jobs.contact_allowed = true` — if false, block all outbound notifications with warning "Contact not allowed for this customer"
+- `jobs.no_email = false` — if true, suppress email channel
+- `jobs.preferred_channels` — only send via channels confirmed in this list
+- Valid contact info on file — if channel lacks contact data, surface error rather than silently dropping
+
+**Rescheduling and cancellation:** Schedule changes are NEVER auto-notified. Notifications are sent when the scheduler explicitly triggers them, which requires confirming the schedule state is final before communicating to the customer.
+
+### 5.7 Multi-Foreman Conflict Visibility
+The dispatch board renders all foremen as simultaneous columns. Conflict visibility surfaces cross-column resource tensions not visible within a single column.
+
+**Conflict types detected and surfaced:**
+
+- **Equipment double-booking** — two or more segments on the same date where ResourceReservations reference the same resource_id and total reserved quantity exceeds resource.inventory_quantity. Affected blocks on both foreman columns show a red border and badge. Non-blocking.
+
+- **Person conflict** — a crew member appears on more than one ForemanDayRoster for the same date. The DB unique constraint prevents writes; visual surfacing catches legacy data or constraint bypasses. Both roster cards show a warning badge. Flagged as data integrity issue in conflict summary panel.
+
+- **Capacity warning** — total scheduled_effective_hours across all foremen for a given date exceeds (total active crew members × operating_hours_per_person). Date header shows orange capacity indicator.
+
+- **Job overlap** — two segments on the same date reference the same job_id via different rosters. Both blocks show a "Duplicate job" badge. Non-blocking — some jobs legitimately need two crews simultaneously.
+
+**Conflict summary panel** — a collapsed panel accessible from the dispatch board date header. Shows all active conflicts for the selected date in a scannable list without navigating to individual blocks. Each entry includes: conflict type badge (color-coded), affected entity name, foremen involved, and a jump-to link that scrolls the board to the relevant block. Dismissal is per-date per-user and stored in SchedulingConflictDismissal. The panel is computed at render time from a single SQL pass — not a stored table, not a notification system.
+
+### 5.8 Foreman Mobile App (post-v1)
+All foreman-facing mobile features are **explicitly out of scope for beta**. Target format is a **native app** (iOS and Android). The following is the planned feature set when development begins:
+
+- Read-only daily schedule — foreman sees their assigned jobs for today in arrival order
+- Push notifications when schedule changes (job added, removed, or time changed)
+- Mark segment started / completed from mobile — feeds ActivityLog and job completion workflow
+- View site photos and markup annotations (photo_flattened_renders, rep annotation layer)
+- Add on-site notes and completion notes
+- View crew documents from the Crew Documents module
+- Foreman annotation layer — separate from rep markups
+
+The schema (photo_annotations.author_role, photo_flattened_renders, segment start/complete timestamps) is already designed to support all foreman mobile features without migration when the native app is built.
+
 ---
 
 ## 6. Requirements Enforcement UX (Locked)
@@ -568,7 +688,7 @@ Resource availability warnings (inventory count) are shown inline if already mod
 ## 7. Activity Log (Auditability)
 **ActivityLog**
 - id, entity_type, entity_id
-- action_type: CREATED/UPDATED/DELETED/STATE_CHANGED/SEGMENT_ADDED/SEGMENT_REMOVED/REQUIREMENT_UPDATED/NOTE_PARSED/etc.
+- action_type: CREATED/UPDATED/DELETED/STATE_CHANGED/SEGMENT_ADDED/SEGMENT_REMOVED/REQUIREMENT_UPDATED/NOTE_PARSED/NOTIFICATION_SENT/etc.
 - diff (JSON)
 - actor_user_id
 - created_at
@@ -580,6 +700,7 @@ Log all edits to:
 - Estimates
 - Crew assignments
 - Resource inventory adjustments
+- Customer notifications sent (notification_type, channels, customer response)
 
 ---
 
@@ -591,6 +712,7 @@ Log all edits to:
 - Basic auth/users/roles
 - CRUD for Customers and Jobs
 - ActivityLog framework
+- AuditLog (append-only compliance layer; see §12.1)
 
 ### M2 — Scheduling Core
 - ScheduleSegment CRUD (with datetime)
@@ -598,11 +720,10 @@ Log all edits to:
 - Completed workflow (manual mark complete, completed_date)
 - Schedule event history (user-action events)
 
-
 ### M2.1 — Internal LAN Pilot (Office Host)
 - Run Scheduler on an always-on Windows machine inside the company network (LAN-only; not for crews/mobile in this phase).
 - Users access the UI from other office PCs via an internal hostname (e.g., `http://schedule-pc:3000`).
-- Runtime must not assume `localhost` from the user’s browser:
+- Runtime must not assume `localhost` from the user's browser:
   - `apps/web` uses same-origin `/api/*` calls and proxies to `apps/api` via Next rewrites.
   - `apps/api` binds to `0.0.0.0` for LAN reachability (and is firewalled to internal subnets).
 - Authentication/authorization requirement for multi-user LAN usage:
@@ -657,17 +778,21 @@ Log all edits to:
 - Resource reservations per segment
 - Foreman day rosters + day-exclusive member assignment UI (foreman + members)
 - Availability checks: (beta approximation) sum all reservations by resource **per calendar day across all foremen**, overlap-agnostic, and warn when `total reserved quantity > inventory_quantity`; surface as a non-blocking warning — never a hard block in beta
+- Dispatch board conflict summary panel (equipment double-booking, person conflicts, capacity warnings, job overlap detection — see §5.7)
+- SchedulingConflictDismissal support (per-date per-user dismissal of conflict notices)
 
 ### M4 — Import (Full Fidelity)
 - Import CRANE/BUCKET authoritative
 - Import Completed, Unhappy Customer, Unable, Winter, DS
 - Notes parsing pipeline (flags/requirements/equipment suggestions/RS-TBRS history)
+- All parsed Requirements and ScheduleEvents tagged with source=LEGACY_PARSE and raw_snippet preserved
 - "Extracted from Notes" UI review panel
 
 ### M5 — Reporting & Weekly Snapshot
 - Live backlog report (SUMM equivalent)
 - Weekly snapshot job + "previous week backlog $" display
 - Sales-per-day editable setting (manager + schedulers)
+- Seasonal freeze window admin UI + dispatch board calendar overlay (SeasonalFreezeWindow CRUD + display bands)
 
 ### M6 — Push-up Recommender
 - Vacated-slot detection: V1 (delete), V2 (move), V3 (shorten) — creates VacatedSlot records (see §2.5 and §5.4)
@@ -681,6 +806,10 @@ Log all edits to:
 ### M7 — Polish & Hardening
 - Permission refinement (manager feedback)
 - Import validation tools + reconciliation report (rows imported vs workbook)
+- Customer scheduling notifications: SMS + email via ScheduleNotificationLog (see §5.6)
+  - Job Scheduled, Job Rescheduled, Job Cancelled, Confirmation Request events
+  - Opt-in enforcement (contact_allowed, no_email, preferred_channels)
+  - Rep internal alerts on customer response
 - Error handling, performance, and UX cleanup
 
 ---
@@ -694,9 +823,12 @@ Log all edits to:
   - mark jobs completed
   - maintain requirements with statuses
   - see clear reminders about unmet requirements
+  - see FROZEN_GROUND_REQUIRED and WINTER_PREFERRED warnings on scheduling attempts for flagged jobs
+  - view the conflict summary panel on the dispatch board date header and dismiss individual conflicts
+  - send customer scheduling notifications (SMS + email) explicitly via "Notify Customer" action
 - Manager can:
   - edit sales/day value
-  - edit admin-managed lists (blocker reasons, access constraints, requirement types)
+  - edit admin-managed lists (blocker reasons, access constraints, requirement types, seasonal freeze windows)
   - adjust resource inventory quantities
 - Reports match spreadsheet intent:
   - live backlog totals by rep and equipment
@@ -704,6 +836,7 @@ Log all edits to:
 - Notes extraction:
   - preserves `notes_raw`
   - successfully extracts at least: push-up flag, DTL/CBP/tree permit requirements, RS/TBRS history events, DW equipment suggestion
+  - all extracted requirements and schedule events have source=LEGACY_PARSE and raw_snippet populated
   - provides a review/edit mechanism
 
 ---
@@ -727,6 +860,9 @@ Log all edits to:
   - Vehicles must be moved
   - Street/parking constraints
   - Other
+- Seasonal Freeze Windows (manager-managed; no seed data — manager adds historical records):
+  - label, start_date, end_date, notes, active flag
+  - displayed as color bands on dispatch board calendar overlay
 
 ---
 
@@ -743,7 +879,7 @@ Log all edits to:
 
 **Date/time handling (novice-safety):** In the web UI and API, do not perform arithmetic with native `Date` objects. All scheduling math must use **(company-local date + snapped minute-of-day integers)**; UTC timestamps are for storage/serialization only. For timezone conversions (UTC ⇄ company-local) and day-boundary computations, use a single timezone-aware library **inside shared helpers only** (Luxon is permitted *only* within `packages/shared` time helpers). Feature code must not import Luxon directly; it must call the shared helpers.
 
-**Primary key type (authoritative):** All tables must use UUID primary keys (`@id @default(uuid())` in Prisma). Do not use integer auto-increment PKs. Sylvara CRM (the parent system this module will eventually merge into) uses UUIDs universally, and re-keying from integers to UUIDs after beta is one of the most destructive migrations possible. Use UUIDs from the first migration. This applies to every entity: Job, Customer, Resource, ScheduleSegment, ForemanDayRoster, etc.
+**Primary key type (authoritative):** All tables must use UUID primary keys (`@id @default(uuid())` in Prisma). Do not use integer auto-increment PKs. Sylvara CRM (the parent system this module will eventually merge into) uses UUIDs universally, and re-keying from integers to UUIDs after beta is one of the most destructive migrations possible. Use UUIDs from the first migration. This applies to every entity: Job, Customer, Resource, ScheduleSegment, ForemanDayRoster, ImportRowMap.entity_id, etc.
 
 **Numeric math (novice-safety):** Postgres `numeric` values must not be manipulated as JavaScript `number` in runtime logic (money, hours, and state math). Use `Prisma.Decimal` (or equivalent decimal library) end-to-end for arithmetic and comparisons. For calendar placement/overlap logic, prefer integer minutes derived from the snapped datetimes.
 
@@ -755,12 +891,20 @@ Log all edits to:
 - `REQ_NOT_APPROVED` — at least one Requirement is not APPROVED
 - `REQ_DENIED_PRESENT` — at least one Requirement is DENIED
 - `REQ_UNMET_PRESENT` — required items exist but are not yet satisfied/confirmed
+- `FROZEN_GROUND_REQUIRED` — job has frozen_ground_flag=true; scheduler reminder only
+- `WINTER_PREFERRED` — job has winter_flag=true; scheduler reminder only
+
+**Customer notification constraints:** Before any outbound notification channel is used, the scheduling service must check all three opt-in fields: `jobs.contact_allowed`, `jobs.no_email`, and `jobs.preferred_channels`. If contact_allowed=false, block the entire notification and surface a warning. If no_email=true, suppress email but allow SMS if phone is available. Never silently drop a channel — surface the suppression reason in the UI and log it in ScheduleNotificationLog.channels_suppressed. Reschedule and cancellation notifications are never automatic; they require explicit scheduler action.
+
+**Conflict visibility is read-only:** The dispatch board conflict summary panel (§5.7) is computed at render time from a single SQL pass. It does not block scheduling, does not generate any notifications, and does not write records except for SchedulingConflictDismissal rows when a user dismisses a conflict notice. Never make conflicts into hard blocks.
+
+**Notes parsing expansion (post-v1):** Beta parser covers tree service vocabulary only (DW, DTL, CBP, RS, TBRS, PUSH UP IF POSSIBLE, etc.). Post-v1 extensibility path: add a `notes_parsing_vocabulary` key to OrgSettings/tenant_settings storing a JSON dictionary of `{token: action}` pairs. Parser loads tenant vocabulary at runtime and merges with the system tree service dictionary. This enables landscaping (mowers, aerators, skid steers) and snow removal (route codes, salt/sand, priority tiers) parsing per tenant without modifying the core parser. Do not build this in beta — just don't hard-code the parser in a way that makes extension impossible.
 
 **OrgSettings (single-row, internal tool):** stores `company_timezone`, `operating_start_time`, and `operating_end_time` used for dispatch-board default display window and default availability anchor when a day has no events. These are preferences only, not hard scheduling boundaries.
 
 
 **Canonical availability query (authoritative)**
-All “foreman availability” logic must be consistent across:
+All "foreman availability" logic must be consistent across:
 - calendar/day views
 - recommended dates
 - one-click scheduling
@@ -800,7 +944,7 @@ All “foreman availability” logic must be consistent across:
 
 **`sales_rep_code` normalization:** During import and on all data entry, normalize `sales_rep_code` to uppercase-trimmed (e.g., "jd", "J.D.", " JD " all become "JD"). This is required for correct group-by-sales-rep behavior in reports.
 
-**Phase 2 decision — customer availability windows (authoritative):** Until a dedicated availability model exists, customer windows are derived only from `Job.availabilityNotes` using strict pattern parsing (24h and explicit AM/PM range forms). Recognized windows are enforced as hard scheduling constraints; unrecognized/ambiguous text is treated as “window not configured” (non-blocking). UI continues to display AM/PM-friendly labels while runtime stores and compares internal minute values.
+**Phase 2 decision — customer availability windows (authoritative):** Until a dedicated availability model exists, customer windows are derived only from `Job.availabilityNotes` using strict pattern parsing (24h and explicit AM/PM range forms). Recognized windows are enforced as hard scheduling constraints; unrecognized/ambiguous text is treated as "window not configured" (non-blocking). UI continues to display AM/PM-friendly labels while runtime stores and compares internal minute values.
 
 ---
 
@@ -816,7 +960,7 @@ This scheduler is being built standalone first (replacing the spreadsheet backlo
 
 **No `tenant_id` in standalone (acceptable; document the boundary):** Sylvara enforces `tenant_id` on every table with PostgreSQL row-level security. This scheduler is single-tenant (Iron Tree Service only) and has no `tenant_id`. This is intentional for standalone beta. `OrgSettings` serves as the proto-tenant anchor (company timezone, operating hours, etc.). When the modules merge, `tenant_id` will be added to all tables and `OrgSettings` will be replaced by the Sylvara `tenants` row. Do not build any multi-tenant logic now, but do not build patterns that make adding `tenant_id` a full rewrite either — specifically: all queries must be written to filter from a single top-level anchor, not from global scans.
 
-**Soft deletes (match Sylvara):** Sylvara uses `deleted_at` soft deletes on every table. This scheduler already uses `deleted_at` on segments and travel segments. Apply the same pattern to all other entities (Customer, Resource, ForemanDayRoster, etc.) for consistency and merge compatibility.
+**Soft deletes (match Sylvara):** Sylvara uses `deleted_at` soft deletes on every table. This scheduler uses `deleted_at` on all entities (Customer, Job, Resource, ForemanDayRoster, JobBlocker, Requirement, HomeBase, etc.). Apply this pattern to every new table added. Never hard-delete rows.
 
 **Append-only audit log (add to scheduler):** Sylvara has an immutable `audit_log` that records every INSERT/UPDATE/DELETE across all tables — separate from the user-facing `ActivityLog`. The scheduler must also implement this compliance-grade layer. Add an `AuditLog` table mirroring Sylvara's schema (`table_name`, `record_id`, `action`, `changed_by`, `changed_at`, `old_values`, `new_values` as JSONB). This is in addition to — not a replacement for — the existing domain-semantic `ActivityLog`. Populate it via a Prisma middleware or DB trigger on every write. This is a M1 task.
 
@@ -825,7 +969,7 @@ This scheduler is being built standalone first (replacing the spreadsheet backlo
 | Scheduler entity | Sylvara entity | Migration notes |
 |---|---|---|
 | `Customer` | `Contact` + `Property` + `property_contacts` | The scheduler's flat Customer must be split at merge time. Keep `Customer.name` and contact fields on `Contact`; move `job_site_address`/`town` to `Property`. Do not over-build Customer — avoid adding sub-entities that assume it stays flat. |
-| `Job` | `jobs` | Scheduler jobs have no upstream `lead_id` or `estimate_id` (they come from spreadsheet import). At merge, a nullable `estimate_id FK` will be added for going-forward jobs. `approval_date` / `approval_call` are the scheduler's lightweight substitute. |
+| `Job` | `jobs` | **Decision (locked): The scheduler's Job entity and Sylvara's jobs table are the same table in the merged system. The scheduler's richer model wins — no re-keying required.** Legacy/import-era rows have `estimate_id = NULL`. Integrated-era rows (post-merge) have `estimate_id` populated when a job is created from an approved estimate. `approval_date` / `approval_call` are the lightweight substitute until then. |
 | `Resource (PERSON)` | `crew_members` | Scheduler `Resource.name`, `is_foreman`, `active` → Sylvara `crew_members.first_name/last_name`, `role=foreman`, `active`. |
 | `Resource (EQUIPMENT)` | `equipment_types` + inventory | Sylvara's `equipment_types` is a catalog with no inventory count. The scheduler adds `inventory_quantity`. Merge path: add inventory to Sylvara's equipment_types. |
 | `ResourceReservation` | `schedule_equipment` (junction) | Sylvara's junction is simpler (no quantity). Merge path: extend with quantity. |
@@ -841,6 +985,9 @@ This scheduler is being built standalone first (replacing the spreadsheet backlo
 | `JobBlocker`, `BlockerReason` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried into Sylvara as-is. |
 | `HomeBase` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried as-is; may eventually link to `properties`. |
 | `EstimateHistory` | `estimate_revisions` (partial overlap) | Sylvara tracks estimate dollar revisions. The scheduler tracks both dollar and hour changes. At merge: extend `estimate_revisions` to include hours. |
+| `ScheduleNotificationLog` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried as-is. Integrates with Sylvara's Notifications module at merge. |
+| `SeasonalFreezeWindow` | *(not in Sylvara v1.2)* | Scheduler-specific admin-managed display data. Will be carried as-is. |
+| `SchedulingConflictDismissal` | *(not in Sylvara v1.2)* | Scheduler-specific UI state. Will be carried as-is. |
 
 ### 12.3 Role and permission mapping
 
@@ -861,18 +1008,23 @@ The standalone scheduler uses **Google OAuth only** (Auth.js). Sylvara's `users`
 
 Recommended path: Sylvara's full auth system should adopt OAuth as the primary mechanism (Google Workspace SSO for internal users; potentially other providers for future SaaS). The `password_hash` column in Sylvara can be made nullable to support OAuth-only accounts. This is a Sylvara-level decision, not a scheduler decision — but the scheduler's Auth.js implementation should be treated as the reference pattern.
 
-### 12.5 `jobs.status` — stored vs. derived
+### 12.5 `jobs.status` — resolution (stored enum replaced by derived model)
 
-Sylvara stores `jobs.status` as an enum column (`to_be_scheduled | scheduled | in_progress | completed | invoiced | unable | winter_hold | unhappy_customer`). The scheduler deliberately does **not** store state — it is derived at query time from `completed_date`, `scheduled_effective_hours`, and `estimate_hours_current` (see §2.5).
+**Decision (locked):** The scheduler's derived-state model wins. Sylvara's stored `jobs.status` enum column is dropped at merge and replaced by a database view (`jobs_derived_state`) that computes state using the authoritative five-event algorithm in §2.5. This is a Stop-and-Ask migration — do not execute without a formal merge plan.
 
-This is a genuine architectural conflict. The scheduler's approach is more accurate (state never drifts from its sources), but Sylvara's stored column enables simpler queries and status values the scheduler doesn't model (`invoiced`, `in_progress`).
+**Replacement map for the eight stored status values:**
 
-Reconciliation path at merge time:
-- The scheduler's derived-state algorithm becomes the authoritative source of truth for TBS/PARTIALLY_SCHEDULED/FULLY_SCHEDULED/COMPLETED.
-- Sylvara's `invoiced` status will be added to the scheduler's completion workflow when invoicing is integrated.
-- `in_progress` (crew currently on-site) can be derived from today's active ScheduleSegments if needed, or added as a lightweight manual flag.
-- The Sylvara `jobs.status` column will be replaced with the scheduler's derived-state model. Do not try to keep both.
-- This is a **Stop and Ask** decision if it arises before a formal merge plan exists.
+| v1.2 stored value | v2.x replacement |
+|---|---|
+| `to_be_scheduled` | Derived: `scheduled_effective_hours <= 0` and not completed |
+| `scheduled` (partial) | Derived: `0 < scheduled_effective_hours < estimate_hours_current - 0.01` |
+| `scheduled` (full) | Derived: `scheduled_effective_hours >= estimate_hours_current - 0.01` |
+| `completed` | Derived: `completed_date IS NOT NULL` |
+| `in_progress` | Post-v1 derived: today's date has an active ScheduleSegment for this job; or lightweight manual flag if needed |
+| `invoiced` | Derived from invoicing module: invoice exists in paid/sent status for this job |
+| `unable` | Replaced by `JobBlocker` with ACTIVE status — not a pipeline state |
+| `winter_hold` | Replaced by `jobs.winter_flag` boolean — not a pipeline stage |
+| `unhappy_customer` | Replaced by `CustomerRisk.status = OPEN` linked to the customer |
 
 ### 12.6 What the scheduler contributes to Sylvara
 
@@ -882,6 +1034,7 @@ To be clear about merge direction: the scheduler's scheduling model is the more 
 - `TravelSegment`, `VacatedSlot`, `ScheduleEvent` are net-new capabilities Sylvara doesn't have.
 - The notes parsing pipeline, push-up recommender, and foreman-anchored availability model are all scheduler-originated features.
 - The `ResourceReservation` inventory model extends Sylvara's `schedule_equipment` with quantity tracking.
+- `ScheduleNotificationLog`, `SeasonalFreezeWindow`, and `SchedulingConflictDismissal` are net-new.
 
 ---
 
