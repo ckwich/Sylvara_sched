@@ -12,6 +12,7 @@ import {
   MIN_LAN_SHARED_SECRET_LENGTH,
 } from './http/lan-guard.js';
 import { registerAdminRoutes } from './routes/admin.js';
+import { registerJobRoutes } from './routes/jobs.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
 
 type ServerAuthConfig = {
@@ -73,6 +74,7 @@ export function buildServer(
 
   registerSchedulingRoutes(app, { prisma: deps.prisma });
   registerAdminRoutes(app, { prisma: deps.prisma });
+  registerJobRoutes(app, { prisma: deps.prisma });
 
   return app;
 }

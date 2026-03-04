@@ -1,0 +1,885 @@
+import { Prisma, EquipmentType, JobBlockerStatus, RequirementStatus, type PrismaClient } from '@prisma/client';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { getActorDisplay, isUnauthenticatedError, requireActorUserId } from '../http/actor.js';
+import { computeScheduledEffectiveHours, deriveJobState } from '../scheduling/job-state.js';
+
+type AppDeps = {
+  prisma: PrismaClient;
+};
+
+type JobHoursRow = {
+  job_id: string;
+  hours: number;
+};
+
+const uuidSchema = z.string().uuid();
+const dateOnlySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => parseDateOnlyUtc(value) !== null, 'Invalid calendar date.');
+const decimalInputSchema = z.number().finite();
+
+const craneModelSchema = z.enum(['1090', '1060', 'EITHER']);
+const listStateSchema = z.enum(['TBS', 'PARTIALLY_SCHEDULED', 'FULLY_SCHEDULED', 'COMPLETED']);
+
+const jobListQuerySchema = z.object({
+  equipmentType: z.nativeEnum(EquipmentType).optional(),
+  state: listStateSchema.optional(),
+  pushUpIfPossible: z
+    .union([z.literal('true'), z.literal('false')])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === 'true')),
+  salesRepCode: z.string().optional(),
+});
+
+const jobIdParamsSchema = z.object({
+  id: uuidSchema,
+});
+
+const jobCreateBodySchema = z.object({
+  customerName: z.string().trim().min(1),
+  equipmentType: z.nativeEnum(EquipmentType),
+  salesRepCode: z.string().min(1),
+  jobSiteAddress: z.string().trim().min(1),
+  town: z.string().trim().min(1),
+  amountDollars: decimalInputSchema,
+  estimateHoursCurrent: decimalInputSchema,
+  travelHoursEstimate: decimalInputSchema.optional(),
+  approvalDate: dateOnlySchema.optional(),
+  approvalCall: z.string().optional(),
+  notesRaw: z.string().optional(),
+  winterFlag: z.boolean().optional(),
+  frozenGroundFlag: z.boolean().optional(),
+  craneModelSuitability: craneModelSchema.optional(),
+  requiresSpiderLift: z.boolean().optional(),
+});
+
+const jobPatchBodySchema = z
+  .object({
+    customerName: z.string().trim().min(1).optional(),
+    equipmentType: z.nativeEnum(EquipmentType).optional(),
+    salesRepCode: z.string().min(1).optional(),
+    jobSiteAddress: z.string().trim().min(1).optional(),
+    town: z.string().trim().min(1).optional(),
+    amountDollars: decimalInputSchema.optional(),
+    estimateHoursCurrent: decimalInputSchema.optional(),
+    travelHoursEstimate: decimalInputSchema.optional(),
+    approvalDate: dateOnlySchema.optional(),
+    approvalCall: z.string().optional(),
+    notesRaw: z.string().optional(),
+    winterFlag: z.boolean().optional(),
+    frozenGroundFlag: z.boolean().optional(),
+    craneModelSuitability: craneModelSchema.optional(),
+    requiresSpiderLift: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'At least one field must be provided.');
+
+const jobCompleteBodySchema = z.object({
+  completedDate: dateOnlySchema,
+  completionNotes: z.string().optional(),
+});
+
+function parseDateOnlyUtc(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() + 1 !== month ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function normalizeSalesRepCode(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function toCraneModelEnum(value: z.infer<typeof craneModelSchema> | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === '1090') {
+    return 'MODEL_1090' as const;
+  }
+  if (value === '1060') {
+    return 'MODEL_1060' as const;
+  }
+  return 'EITHER' as const;
+}
+
+function fromCraneModelEnum(
+  value: 'MODEL_1090' | 'MODEL_1060' | 'EITHER' | null,
+): z.infer<typeof craneModelSchema> | null {
+  if (value === null) {
+    return null;
+  }
+  if (value === 'MODEL_1090') {
+    return '1090';
+  }
+  if (value === 'MODEL_1060') {
+    return '1060';
+  }
+  return 'EITHER';
+}
+
+function validationError(reply: FastifyReply, message: string, details: unknown) {
+  return reply.code(400).send({
+    error: {
+      code: 'VALIDATION_ERROR',
+      message,
+      details,
+    },
+  });
+}
+
+function notFoundError(reply: FastifyReply, code: string, message: string) {
+  return reply.code(404).send({
+    error: {
+      code,
+      message,
+      details: {},
+    },
+  });
+}
+
+async function requireActor(request: FastifyRequest, deps: AppDeps, reply: FastifyReply) {
+  try {
+    const actorUserId = await requireActorUserId(deps.prisma, request);
+    return { actorUserId, actorDisplay: getActorDisplay(request) };
+  } catch (error) {
+    if (isUnauthenticatedError(error)) {
+      reply.code(401).send({
+        error: {
+          code: 'UNAUTHENTICATED',
+          message: 'Authentication required.',
+          details: {},
+        },
+      });
+      return null;
+    }
+    throw error;
+  }
+}
+
+function toDecimalString(value: Prisma.Decimal | string | number | null): string | null {
+  if (value === null) {
+    return null;
+  }
+  return new Prisma.Decimal(value).toString();
+}
+
+function computeRemainingHours(
+  estimateHoursCurrent: Prisma.Decimal | string | number | null,
+  scheduledEffectiveHours: Prisma.Decimal,
+): Prisma.Decimal | null {
+  if (estimateHoursCurrent === null) {
+    return null;
+  }
+  return new Prisma.Decimal(estimateHoursCurrent).sub(scheduledEffectiveHours);
+}
+
+async function getCompanyTimezone(prisma: PrismaClient): Promise<string> {
+  const settings = await prisma.orgSettings.findFirst({
+    where: { deletedAt: null },
+    select: { companyTimezone: true },
+  });
+  return settings?.companyTimezone ?? 'America/New_York';
+}
+
+async function aggregateScheduledHoursByJob(
+  prisma: PrismaClient,
+  jobIds: string[],
+): Promise<Map<string, Prisma.Decimal>> {
+  if (jobIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await prisma.$queryRaw<Array<JobHoursRow>>`
+    SELECT
+      job_id,
+      SUM(
+        CASE
+          WHEN scheduled_hours_override IS NOT NULL
+            THEN scheduled_hours_override
+          ELSE EXTRACT(EPOCH FROM (end_datetime - start_datetime)) / 3600.0
+        END
+      ) AS hours
+    FROM schedule_segments
+    WHERE deleted_at IS NULL
+      AND job_id = ANY(${jobIds}::uuid[])
+    GROUP BY job_id
+  `;
+
+  return new Map(
+    rows.map((row) => [
+      row.job_id,
+      row.hours === null ? new Prisma.Decimal(0) : new Prisma.Decimal(row.hours),
+    ]),
+  );
+}
+
+async function loadJobDetail(prisma: PrismaClient, jobId: string) {
+  const timezone = await getCompanyTimezone(prisma);
+  const job = await prisma.job.findFirst({
+    where: {
+      id: jobId,
+      deletedAt: null,
+      customer: {
+        deletedAt: null,
+      },
+    },
+    include: {
+      customer: true,
+      requirements: {
+        where: { deletedAt: null },
+        include: {
+          requirementType: {
+            select: {
+              code: true,
+              label: true,
+            },
+          },
+        },
+      },
+      jobBlockers: {
+        where: {
+          deletedAt: null,
+          status: JobBlockerStatus.ACTIVE,
+          blockerReason: {
+            deletedAt: null,
+          },
+        },
+        include: {
+          blockerReason: {
+            select: {
+              code: true,
+              label: true,
+            },
+          },
+        },
+      },
+      scheduleSegments: {
+        where: {
+          deletedAt: null,
+        },
+        orderBy: {
+          startDatetime: 'asc',
+        },
+      },
+      estimateHistory: {
+        where: {
+          deletedAt: null,
+        },
+        orderBy: {
+          changedAt: 'desc',
+        },
+      },
+    },
+  });
+
+  if (!job) {
+    return null;
+  }
+
+  const scheduledEffectiveHours = computeScheduledEffectiveHours({
+    timezone,
+    segments: job.scheduleSegments,
+  });
+  const derivedState = deriveJobState({
+    completedDate: job.completedDate,
+    estimateHoursCurrent: job.estimateHoursCurrent,
+    scheduledEffectiveHours,
+  });
+  const remainingHours = computeRemainingHours(job.estimateHoursCurrent, scheduledEffectiveHours);
+
+  return {
+    ...job,
+    craneModelSuitability: fromCraneModelEnum(job.craneModelSuitability),
+    scheduleSegments: job.scheduleSegments.map((segment) => ({
+      ...segment,
+      derivedState,
+    })),
+    scheduledEffectiveHours: scheduledEffectiveHours.toString(),
+    remainingHours: remainingHours?.toString() ?? null,
+    derivedState,
+  };
+}
+
+function buildJobDiff(
+  before: {
+    customerId: string;
+    equipmentType: EquipmentType;
+    salesRepCode: string;
+    jobSiteAddress: string;
+    town: string;
+    amountDollars: Prisma.Decimal;
+    estimateHoursCurrent: Prisma.Decimal | null;
+    travelHoursEstimate: Prisma.Decimal;
+    approvalDate: Date | null;
+    approvalCall: string | null;
+    notesRaw: string;
+    winterFlag: boolean;
+    frozenGroundFlag: boolean;
+    craneModelSuitability: 'MODEL_1090' | 'MODEL_1060' | 'EITHER' | null;
+    requiresSpiderLift: boolean;
+  },
+  after: {
+    customerId: string;
+    equipmentType: EquipmentType;
+    salesRepCode: string;
+    jobSiteAddress: string;
+    town: string;
+    amountDollars: Prisma.Decimal;
+    estimateHoursCurrent: Prisma.Decimal | null;
+    travelHoursEstimate: Prisma.Decimal;
+    approvalDate: Date | null;
+    approvalCall: string | null;
+    notesRaw: string;
+    winterFlag: boolean;
+    frozenGroundFlag: boolean;
+    craneModelSuitability: 'MODEL_1090' | 'MODEL_1060' | 'EITHER' | null;
+    requiresSpiderLift: boolean;
+  },
+) {
+  const diff: Record<string, { from: unknown; to: unknown }> = {};
+
+  const setIfChanged = (key: string, from: unknown, to: unknown) => {
+    const fromValue =
+      from instanceof Prisma.Decimal ? from.toString() : from instanceof Date ? from.toISOString() : from;
+    const toValue = to instanceof Prisma.Decimal ? to.toString() : to instanceof Date ? to.toISOString() : to;
+    if (fromValue !== toValue) {
+      diff[key] = { from: fromValue, to: toValue };
+    }
+  };
+
+  setIfChanged('customerId', before.customerId, after.customerId);
+  setIfChanged('equipmentType', before.equipmentType, after.equipmentType);
+  setIfChanged('salesRepCode', before.salesRepCode, after.salesRepCode);
+  setIfChanged('jobSiteAddress', before.jobSiteAddress, after.jobSiteAddress);
+  setIfChanged('town', before.town, after.town);
+  setIfChanged('amountDollars', before.amountDollars, after.amountDollars);
+  setIfChanged('estimateHoursCurrent', before.estimateHoursCurrent, after.estimateHoursCurrent);
+  setIfChanged('travelHoursEstimate', before.travelHoursEstimate, after.travelHoursEstimate);
+  setIfChanged('approvalDate', before.approvalDate, after.approvalDate);
+  setIfChanged('approvalCall', before.approvalCall, after.approvalCall);
+  setIfChanged('notesRaw', before.notesRaw, after.notesRaw);
+  setIfChanged('winterFlag', before.winterFlag, after.winterFlag);
+  setIfChanged('frozenGroundFlag', before.frozenGroundFlag, after.frozenGroundFlag);
+  setIfChanged('craneModelSuitability', before.craneModelSuitability, after.craneModelSuitability);
+  setIfChanged('requiresSpiderLift', before.requiresSpiderLift, after.requiresSpiderLift);
+  return diff;
+}
+
+export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
+  app.get('/api/jobs', async (request, reply) => {
+    const query = jobListQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return validationError(reply, 'Invalid jobs query.', query.error.flatten());
+    }
+
+    const normalizedSalesRepCode =
+      query.data.salesRepCode !== undefined ? normalizeSalesRepCode(query.data.salesRepCode) : undefined;
+
+    const jobs = await deps.prisma.job.findMany({
+      where: {
+        deletedAt: null,
+        customer: {
+          deletedAt: null,
+        },
+        ...(query.data.equipmentType !== undefined ? { equipmentType: query.data.equipmentType } : {}),
+        ...(query.data.pushUpIfPossible !== undefined
+          ? { pushUpIfPossible: query.data.pushUpIfPossible }
+          : {}),
+        ...(normalizedSalesRepCode !== undefined ? { salesRepCode: normalizedSalesRepCode } : {}),
+      },
+      include: {
+        customer: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: [{ equipmentType: 'asc' }, { salesRepCode: 'asc' }, { jobSiteAddress: 'asc' }],
+    });
+
+    const jobIds = jobs.map((job) => job.id);
+    const [hoursByJobId, activeBlockers, unmetRequirements] = await Promise.all([
+      aggregateScheduledHoursByJob(deps.prisma, jobIds),
+      deps.prisma.jobBlocker.groupBy({
+        by: ['jobId'],
+        where: {
+          deletedAt: null,
+          status: JobBlockerStatus.ACTIVE,
+          jobId: {
+            in: jobIds,
+          },
+        },
+        _count: { _all: true },
+      }),
+      deps.prisma.requirement.groupBy({
+        by: ['jobId'],
+        where: {
+          deletedAt: null,
+          status: {
+            notIn: [RequirementStatus.APPROVED, RequirementStatus.NOT_REQUIRED],
+          },
+          jobId: {
+            in: jobIds,
+          },
+        },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const blockerCountByJobId = new Map(activeBlockers.map((row) => [row.jobId, row._count._all]));
+    const unmetCountByJobId = new Map(unmetRequirements.map((row) => [row.jobId, row._count._all]));
+
+    const rows = jobs.map((job) => {
+      const scheduledEffectiveHours = hoursByJobId.get(job.id) ?? new Prisma.Decimal(0);
+      const derivedState = deriveJobState({
+        completedDate: job.completedDate,
+        estimateHoursCurrent: job.estimateHoursCurrent,
+        scheduledEffectiveHours,
+      });
+      const remainingHours = computeRemainingHours(job.estimateHoursCurrent, scheduledEffectiveHours);
+
+      return {
+        id: job.id,
+        customerId: job.customerId,
+        customerName: job.customer.name,
+        equipmentType: job.equipmentType,
+        salesRepCode: job.salesRepCode,
+        jobSiteAddress: job.jobSiteAddress,
+        town: job.town,
+        amountDollars: toDecimalString(job.amountDollars),
+        estimateHoursCurrent: toDecimalString(job.estimateHoursCurrent),
+        scheduledEffectiveHours: scheduledEffectiveHours.toString(),
+        remainingHours: remainingHours?.toString() ?? null,
+        derivedState,
+        completedDate: job.completedDate,
+        pushUpIfPossible: job.pushUpIfPossible,
+        activeBlockerCount: blockerCountByJobId.get(job.id) ?? 0,
+        unmetRequirementCount: unmetCountByJobId.get(job.id) ?? 0,
+      };
+    });
+
+    const filteredRows =
+      query.data.state === undefined ? rows : rows.filter((row) => row.derivedState === query.data.state);
+
+    return reply.code(200).send({
+      jobs: filteredRows,
+      total: filteredRows.length,
+    });
+  });
+
+  app.get('/api/jobs/:id', async (request, reply) => {
+    const params = jobIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid job id.', params.error.flatten());
+    }
+
+    const detail = await loadJobDetail(deps.prisma, params.data.id);
+    if (!detail) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+
+    return reply.code(200).send({ job: detail });
+  });
+
+  app.post('/api/jobs', async (request, reply) => {
+    const actor = await requireActor(request, deps, reply);
+    if (!actor) {
+      return;
+    }
+
+    const body = jobCreateBodySchema.safeParse(request.body);
+    if (!body.success) {
+      return validationError(reply, 'Invalid job payload.', body.error.flatten());
+    }
+
+    const payload = body.data;
+    const normalizedSalesRepCode = normalizeSalesRepCode(payload.salesRepCode);
+    if (!normalizedSalesRepCode) {
+      return validationError(reply, 'salesRepCode must contain at least one alphanumeric character.', {});
+    }
+
+    if (payload.equipmentType === EquipmentType.CRANE && payload.requiresSpiderLift !== undefined) {
+      return validationError(reply, 'requiresSpiderLift is only valid for BUCKET jobs.', {});
+    }
+    if (payload.equipmentType === EquipmentType.BUCKET && payload.craneModelSuitability !== undefined) {
+      return validationError(reply, 'craneModelSuitability is only valid for CRANE jobs.', {});
+    }
+
+    const approvalDate = payload.approvalDate ? parseDateOnlyUtc(payload.approvalDate) : null;
+
+    const job = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const customer = await tx.customer.create({
+        data: {
+          name: payload.customerName.trim(),
+        },
+      });
+
+      const created = await tx.job.create({
+        data: {
+          customerId: customer.id,
+          equipmentType: payload.equipmentType,
+          salesRepCode: normalizedSalesRepCode,
+          jobSiteAddress: payload.jobSiteAddress,
+          town: payload.town,
+          amountDollars: new Prisma.Decimal(payload.amountDollars),
+          estimateHoursCurrent: new Prisma.Decimal(payload.estimateHoursCurrent),
+          travelHoursEstimate: new Prisma.Decimal(payload.travelHoursEstimate ?? 0),
+          approvalDate,
+          approvalCall: payload.approvalCall,
+          notesRaw: payload.notesRaw ?? '',
+          winterFlag: payload.winterFlag ?? false,
+          frozenGroundFlag: payload.frozenGroundFlag ?? false,
+          craneModelSuitability:
+            payload.equipmentType === EquipmentType.CRANE
+              ? (toCraneModelEnum(payload.craneModelSuitability) ?? null)
+              : null,
+          requiresSpiderLift:
+            payload.equipmentType === EquipmentType.BUCKET ? (payload.requiresSpiderLift ?? false) : false,
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'Job',
+          entityId: created.id,
+          actionType: 'CREATED',
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+          diff: {
+            customerId: customer.id,
+            equipmentType: created.equipmentType,
+            salesRepCode: created.salesRepCode,
+          },
+        },
+      });
+
+      return created;
+    });
+
+    const detail = await loadJobDetail(deps.prisma, job.id);
+    if (!detail) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+    return reply.code(201).send({ job: detail });
+  });
+
+  app.patch('/api/jobs/:id', async (request, reply) => {
+    const actor = await requireActor(request, deps, reply);
+    if (!actor) {
+      return;
+    }
+
+    const params = jobIdParamsSchema.safeParse(request.params);
+    const body = jobPatchBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return validationError(reply, 'Invalid job update payload.', {
+        params: params.success ? undefined : params.error.flatten(),
+        body: body.success ? undefined : body.error.flatten(),
+      });
+    }
+
+    const existing = await deps.prisma.job.findFirst({
+      where: {
+        id: params.data.id,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        customerId: true,
+        equipmentType: true,
+        salesRepCode: true,
+        jobSiteAddress: true,
+        town: true,
+        amountDollars: true,
+        estimateHoursCurrent: true,
+        travelHoursEstimate: true,
+        approvalDate: true,
+        approvalCall: true,
+        notesRaw: true,
+        winterFlag: true,
+        frozenGroundFlag: true,
+        craneModelSuitability: true,
+        requiresSpiderLift: true,
+      },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+
+    const payload = body.data;
+    const updateData: Prisma.JobUpdateInput = {};
+
+    const nextEquipmentType = payload.equipmentType ?? existing.equipmentType;
+    if (payload.requiresSpiderLift !== undefined && nextEquipmentType === EquipmentType.CRANE) {
+      return validationError(reply, 'requiresSpiderLift is only valid for BUCKET jobs.', {});
+    }
+    if (payload.craneModelSuitability !== undefined && nextEquipmentType === EquipmentType.BUCKET) {
+      return validationError(reply, 'craneModelSuitability is only valid for CRANE jobs.', {});
+    }
+
+    if (payload.equipmentType !== undefined) {
+      updateData.equipmentType = payload.equipmentType;
+    }
+    if (payload.salesRepCode !== undefined) {
+      const normalizedSalesRepCode = normalizeSalesRepCode(payload.salesRepCode);
+      if (!normalizedSalesRepCode) {
+        return validationError(reply, 'salesRepCode must contain at least one alphanumeric character.', {});
+      }
+      updateData.salesRepCode = normalizedSalesRepCode;
+    }
+    if (payload.jobSiteAddress !== undefined) {
+      updateData.jobSiteAddress = payload.jobSiteAddress;
+    }
+    if (payload.town !== undefined) {
+      updateData.town = payload.town;
+    }
+    if (payload.amountDollars !== undefined) {
+      updateData.amountDollars = new Prisma.Decimal(payload.amountDollars);
+    }
+    if (payload.estimateHoursCurrent !== undefined) {
+      updateData.estimateHoursCurrent = new Prisma.Decimal(payload.estimateHoursCurrent);
+    }
+    if (payload.travelHoursEstimate !== undefined) {
+      updateData.travelHoursEstimate = new Prisma.Decimal(payload.travelHoursEstimate);
+    }
+    if (payload.approvalDate !== undefined) {
+      updateData.approvalDate = parseDateOnlyUtc(payload.approvalDate);
+    }
+    if (payload.approvalCall !== undefined) {
+      updateData.approvalCall = payload.approvalCall;
+    }
+    if (payload.notesRaw !== undefined) {
+      updateData.notesRaw = payload.notesRaw;
+    }
+    if (payload.winterFlag !== undefined) {
+      updateData.winterFlag = payload.winterFlag;
+    }
+    if (payload.frozenGroundFlag !== undefined) {
+      updateData.frozenGroundFlag = payload.frozenGroundFlag;
+    }
+    if (nextEquipmentType === EquipmentType.CRANE) {
+      if (payload.craneModelSuitability !== undefined) {
+        updateData.craneModelSuitability = toCraneModelEnum(payload.craneModelSuitability);
+      }
+      updateData.requiresSpiderLift = false;
+    }
+    if (nextEquipmentType === EquipmentType.BUCKET) {
+      updateData.craneModelSuitability = null;
+      if (payload.requiresSpiderLift !== undefined) {
+        updateData.requiresSpiderLift = payload.requiresSpiderLift;
+      }
+    }
+
+    const updatedJob = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      if (payload.customerName !== undefined) {
+        await tx.customer.update({
+          where: {
+            id: existing.customerId,
+          },
+          data: {
+            name: payload.customerName,
+          },
+        });
+      }
+
+      const updated = await tx.job.update({
+        where: {
+          id: existing.id,
+        },
+        data: updateData,
+      });
+
+      const amountChanged = !existing.amountDollars.eq(updated.amountDollars);
+      const estimateChanged =
+        existing.estimateHoursCurrent === null
+          ? updated.estimateHoursCurrent !== null
+          : updated.estimateHoursCurrent === null
+            ? true
+            : !existing.estimateHoursCurrent.eq(updated.estimateHoursCurrent);
+
+      if (amountChanged || estimateChanged) {
+        await tx.estimateHistory.create({
+          data: {
+            jobId: existing.id,
+            changedByUserId: actor.actorUserId,
+            changedAt: new Date(),
+            previousAmountDollars: existing.amountDollars,
+            newAmountDollars: updated.amountDollars,
+            previousEstimateHours: existing.estimateHoursCurrent,
+            newEstimateHours: updated.estimateHoursCurrent,
+          },
+        });
+      }
+
+      const diff = buildJobDiff(existing, updated);
+      await tx.activityLog.create({
+        data: {
+          entityType: 'Job',
+          entityId: existing.id,
+          actionType: 'UPDATED',
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+          diff,
+        },
+      });
+      return updated;
+    });
+
+    const detail = await loadJobDetail(deps.prisma, updatedJob.id);
+    if (!detail) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+    return reply.code(200).send({ job: detail });
+  });
+
+  app.post('/api/jobs/:id/complete', async (request, reply) => {
+    const actor = await requireActor(request, deps, reply);
+    if (!actor) {
+      return;
+    }
+
+    const params = jobIdParamsSchema.safeParse(request.params);
+    const body = jobCompleteBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return validationError(reply, 'Invalid complete payload.', {
+        params: params.success ? undefined : params.error.flatten(),
+        body: body.success ? undefined : body.error.flatten(),
+      });
+    }
+
+    const completedDate = parseDateOnlyUtc(body.data.completedDate);
+    if (!completedDate) {
+      return validationError(reply, 'Invalid completedDate.', {});
+    }
+
+    const existing = await deps.prisma.job.findFirst({
+      where: {
+        id: params.data.id,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        completedDate: true,
+      },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+
+    await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.job.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          completedDate,
+          completionNotes: body.data.completionNotes,
+          completedByUserId: actor.actorUserId,
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'Job',
+          entityId: existing.id,
+          actionType: 'STATE_CHANGED',
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+          diff: {
+            completedDate: {
+              from: existing.completedDate ? existing.completedDate.toISOString() : null,
+              to: completedDate.toISOString(),
+            },
+          },
+        },
+      });
+    });
+
+    const detail = await loadJobDetail(deps.prisma, existing.id);
+    if (!detail) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+    return reply.code(200).send({ job: detail });
+  });
+
+  app.post('/api/jobs/:id/uncomplete', async (request, reply) => {
+    const actor = await requireActor(request, deps, reply);
+    if (!actor) {
+      return;
+    }
+
+    const params = jobIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid job id.', params.error.flatten());
+    }
+
+    const existing = await deps.prisma.job.findFirst({
+      where: {
+        id: params.data.id,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        completedDate: true,
+      },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+
+    await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.job.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          completedDate: null,
+          completedByUserId: null,
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'Job',
+          entityId: existing.id,
+          actionType: 'STATE_CHANGED',
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+          diff: {
+            completedDate: {
+              from: existing.completedDate ? existing.completedDate.toISOString() : null,
+              to: null,
+            },
+          },
+        },
+      });
+    });
+
+    const detail = await loadJobDetail(deps.prisma, existing.id);
+    if (!detail) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+    return reply.code(200).send({ job: detail });
+  });
+}
