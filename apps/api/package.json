@@ -8,6 +8,7 @@
     "start": "node dist/server.js",
     "lint": "eslint .",
     "reset:schedule-day": "tsx scripts/reset-schedule-day.ts",
+    "seed:lan-demo": "tsx scripts/seed-lan-demo.ts",
     "test": "vitest run",
     "test:smoke": "vitest run tests/smoke",
     "test:integration": "vitest run --config vitest.integration.config.ts"

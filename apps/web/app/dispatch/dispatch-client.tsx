@@ -483,6 +483,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
         <label>
           Foreman Person ID
           <input
+            data-testid="dispatch-foreman-id-input"
             type="number"
             min={1}
             value={foremanPersonId}
@@ -493,7 +494,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
           Date
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
         </label>
-        <button type="submit" disabled={loading}>
+        <button type="submit" disabled={loading} data-testid="dispatch-load-button">
           {loading ? 'Loading...' : 'Load'}
         </button>
         {lanModeEnabled ? (
@@ -558,7 +559,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
         {data?.scheduleSegments?.length ? (
           <ul>
             {data.scheduleSegments.map((segment) => (
-              <li key={segment.id}>
+              <li key={segment.id} data-testid="dispatch-segment-item">
                 #{segment.id} job {segment.jobId} [{segment.segmentType}] {formatDateTime(segment.startDatetime, companyTimezone)} -{' '}
                 {formatDateTime(segment.endDatetime, companyTimezone)}
               </li>
@@ -670,12 +671,19 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
         <form onSubmit={submitCreate} style={{ display: 'grid', gap: 8, maxWidth: 420 }}>
           <label>
             Job ID
-            <input type="number" min={1} value={jobId} onChange={(event) => setJobId(event.target.value)} />
+            <input
+              data-testid="dispatch-create-job-id-input"
+              type="number"
+              min={1}
+              value={jobId}
+              onChange={(event) => setJobId(event.target.value)}
+            />
           </label>
           {createFieldErrors.jobId ? <p style={{ color: '#8a4b00' }}>{createFieldErrors.jobId}</p> : null}
           <label>
             Roster ID
             <input
+              data-testid="dispatch-create-roster-id-input"
               type="number"
               min={1}
               value={rosterId}
@@ -689,6 +697,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
               Interpreted as {companyTimezone}
             </span>
             <input
+              data-testid="dispatch-create-start-input"
               type="datetime-local"
               value={startDatetime}
               onChange={(event) => setStartDatetime(event.target.value)}
@@ -701,15 +710,16 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
               Interpreted as {companyTimezone}
             </span>
             <input
+              data-testid="dispatch-create-end-input"
               type="datetime-local"
               value={endDatetime}
               onChange={(event) => setEndDatetime(event.target.value)}
             />
           </label>
           {createFieldErrors.endDatetime ? <p style={{ color: '#8a4b00' }}>{createFieldErrors.endDatetime}</p> : null}
-          {createError ? <p style={{ color: 'crimson' }}>{createError}</p> : null}
+          {createError ? <p style={{ color: 'crimson' }} data-testid="dispatch-create-error">{createError}</p> : null}
           {createErrorHint ? <p style={{ color: '#8a4b00' }}>{createErrorHint}</p> : null}
-          <button type="submit" disabled={creating}>
+          <button type="submit" disabled={creating} data-testid="dispatch-create-button">
             {creating ? 'Creating...' : 'Create Segment'}
           </button>
         </form>
