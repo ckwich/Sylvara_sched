@@ -2,9 +2,14 @@ import { describe, expect, test } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { buildServer } from '../../src/server';
 
+const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
+const JOB_ID = '22222222-2222-4222-8222-222222222222';
+const ROSTER_ID = '44444444-4444-4444-8444-444444444444';
+const FOREMAN_ID = '33333333-3333-4333-8333-333333333333';
+
 type SegmentRow = {
-  id: number;
-  jobId: number;
+  id: string;
+  jobId: string;
   startDatetime: Date;
   endDatetime: Date;
   deletedAt: Date | null;
@@ -25,7 +30,7 @@ type ActivityLogRow = {
 function buildReadPrisma() {
   const rosterDate = new Date('2026-03-03T00:00:00.000Z');
   const segments: SegmentRow[] = [];
-  const links: Array<{ scheduleSegmentId: number; rosterId: number }> = [];
+  const links: Array<{ scheduleSegmentId: string; rosterId: string }> = [];
   const activityLogs: ActivityLogRow[] = [];
   let nextSegmentId = 200;
   let nextActivityId = 1;
@@ -37,8 +42,8 @@ function buildReadPrisma() {
 
   const fakePrisma = {
     user: {
-      findUnique: async ({ where }: { where: { id: number } }) =>
-        where.id === 1 ? { id: 1 } : null,
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        where.id === ACTOR_ID ? { id: ACTOR_ID } : null,
     },
     orgSettings: {
       findFirst: async () => ({
@@ -46,35 +51,35 @@ function buildReadPrisma() {
       }),
     },
     job: {
-      findUnique: async ({ where }: { where: { id: number } }) => {
-        if (where.id !== 10) {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        if (where.id !== JOB_ID) {
           return null;
         }
         return {
-          id: 10,
+          id: JOB_ID,
           completedDate: null,
           estimateHoursCurrent: '2',
         };
       },
     },
     foremanDayRoster: {
-      findUnique: async ({ where }: { where: { id: number } }) => {
-        if (where.id !== 99) {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        if (where.id !== ROSTER_ID) {
           return null;
         }
         return {
-          id: 99,
+          id: ROSTER_ID,
           date: rosterDate,
           homeBaseId: 4,
           preferredStartMinute: 480,
         };
       },
-      findFirst: async ({ where }: { where: { foremanPersonId: number; date: Date } }) => {
-        if (where.foremanPersonId !== 77 || where.date.toISOString() !== rosterDate.toISOString()) {
+      findFirst: async ({ where }: { where: { foremanPersonId: string; date: Date } }) => {
+        if (where.foremanPersonId !== FOREMAN_ID || where.date.toISOString() !== rosterDate.toISOString()) {
           return null;
         }
         return {
-          id: 99,
+          id: ROSTER_ID,
           date: rosterDate,
           homeBaseId: 4,
           preferredStartMinute: 480,
@@ -190,7 +195,7 @@ function buildReadPrisma() {
           ...segment,
           segmentRosterLink: {
             roster: {
-              id: getLinkedRosterId(segment.id) ?? 99,
+              id: getLinkedRosterId(segment.id) ?? ROSTER_ID,
               date: rosterDate,
             },
           },
@@ -200,14 +205,14 @@ function buildReadPrisma() {
         where,
       }: {
         where: {
-          id?: number | { not: number };
+          id?: string | { not: string };
           deletedAt?: null;
           startDatetime?: { lt: Date };
           endDatetime?: { gt: Date };
-          segmentRosterLink?: { is: { roster: { foremanPersonId: number; date: Date } } };
+          segmentRosterLink?: { is: { roster: { foremanPersonId: string; date: Date } } };
         };
       }) => {
-        if (typeof where.id === 'number') {
+        if (typeof where.id === 'string') {
           const found = segments.find((s) => s.id === where.id && s.deletedAt === null);
           return found ?? null;
         }
@@ -230,14 +235,14 @@ function buildReadPrisma() {
       fn: (tx: {
         scheduleSegment: {
           create: (args: {
-            data: { jobId: number; startDatetime: Date; endDatetime: Date; scheduledHoursOverride?: number };
+            data: { jobId: string; startDatetime: Date; endDatetime: Date; scheduledHoursOverride?: number };
           }) => Promise<SegmentRow>;
-          update: (args: { where: { id: number }; data: { deletedAt?: Date } }) => Promise<SegmentRow>;
+          update: (args: { where: { id: string }; data: { deletedAt?: Date } }) => Promise<SegmentRow>;
         };
         segmentRosterLink: {
-          create: (args: { data: { scheduleSegmentId: number; rosterId: number } }) => Promise<{
-            scheduleSegmentId: number;
-            rosterId: number;
+          create: (args: { data: { scheduleSegmentId: string; rosterId: string } }) => Promise<{
+            scheduleSegmentId: string;
+            rosterId: string;
           }>;
         };
         scheduleEvent: { create: () => Promise<void> };
@@ -248,7 +253,7 @@ function buildReadPrisma() {
         scheduleSegment: {
           create: async ({ data }) => {
             const created: SegmentRow = {
-              id: nextSegmentId,
+              id: `aaaa0000-0000-4000-8000-${String(nextSegmentId).padStart(12, '0')}`,
               jobId: data.jobId,
               startDatetime: data.startDatetime,
               endDatetime: data.endDatetime,
@@ -289,8 +294,8 @@ function buildReadPrisma() {
     prisma: fakePrisma,
     insertOrphanSegment() {
       segments.push({
-        id: nextSegmentId,
-        jobId: 10,
+        id: `aaaa0000-0000-4000-8000-${String(nextSegmentId).padStart(12, '0')}`,
+        jobId: JOB_ID,
         startDatetime: new Date('2026-03-03T14:00:00.000Z'),
         endDatetime: new Date('2026-03-03T15:00:00.000Z'),
         deletedAt: null,
@@ -317,20 +322,20 @@ describe('M2 schedule segment read/list endpoints', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        rosterId: 99,
+        jobId: JOB_ID,
+        rosterId: ROSTER_ID,
         startDatetime: '2026-03-03T14:00:00.000Z',
         endDatetime: '2026-03-03T15:00:00.000Z',
       },
     });
     expect(created.statusCode).toBe(200);
-    const segmentId = created.json().segment.id as number;
+    const segmentId = created.json().segment.id as string;
 
     const beforeDelete = await app.inject({
       method: 'GET',
-      url: '/api/foremen/77/schedule?date=2026-03-03',
+      url: `/api/foremen/${FOREMAN_ID}/schedule?date=2026-03-03`,
     });
     expect(beforeDelete.statusCode).toBe(200);
     const beforeBody = beforeDelete.json();
@@ -340,13 +345,13 @@ describe('M2 schedule segment read/list endpoints', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: `/api/schedule-segments/${segmentId}`,
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
     });
     expect(deleted.statusCode).toBe(200);
 
     const afterDelete = await app.inject({
       method: 'GET',
-      url: '/api/foremen/77/schedule?date=2026-03-03',
+      url: `/api/foremen/${FOREMAN_ID}/schedule?date=2026-03-03`,
     });
     expect(afterDelete.statusCode).toBe(200);
     expect(afterDelete.json().scheduleSegments).toHaveLength(0);
@@ -362,10 +367,10 @@ describe('M2 schedule segment read/list endpoints', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        rosterId: 99,
+        jobId: JOB_ID,
+        rosterId: ROSTER_ID,
         startDatetime: '2026-03-03T14:00:00.000Z',
         endDatetime: '2026-03-03T16:00:00.000Z',
       },
@@ -374,7 +379,7 @@ describe('M2 schedule segment read/list endpoints', () => {
 
     const foremanRead = await app.inject({
       method: 'GET',
-      url: '/api/foremen/77/schedule?date=2026-03-03',
+      url: `/api/foremen/${FOREMAN_ID}/schedule?date=2026-03-03`,
     });
     expect(foremanRead.statusCode).toBe(200);
     const foremanBody = foremanRead.json();
@@ -382,7 +387,7 @@ describe('M2 schedule segment read/list endpoints', () => {
 
     const jobRead = await app.inject({
       method: 'GET',
-      url: '/api/jobs/10/schedule-segments',
+      url: `/api/jobs/${JOB_ID}/schedule-segments`,
     });
     expect(jobRead.statusCode).toBe(200);
     const jobBody = jobRead.json();
@@ -398,10 +403,10 @@ describe('M2 schedule segment read/list endpoints', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        rosterId: 99,
+        jobId: JOB_ID,
+        rosterId: ROSTER_ID,
         startDatetime: '2026-03-03T14:00:00.000Z',
         endDatetime: '2026-03-03T15:00:00.000Z',
       },
@@ -410,7 +415,7 @@ describe('M2 schedule segment read/list endpoints', () => {
 
     const activity = await app.inject({
       method: 'GET',
-      url: '/api/foremen/77/activity?date=2026-03-03',
+      url: `/api/foremen/${FOREMAN_ID}/activity?date=2026-03-03`,
     });
     expect(activity.statusCode).toBe(200);
     const activityBody = activity.json() as { entries: Array<Record<string, unknown>> };
@@ -421,10 +426,12 @@ describe('M2 schedule segment read/list endpoints', () => {
 
     const wrongDay = await app.inject({
       method: 'GET',
-      url: '/api/foremen/77/activity?date=2026-03-04',
+      url: `/api/foremen/${FOREMAN_ID}/activity?date=2026-03-04`,
     });
     expect(wrongDay.statusCode).toBe(200);
     expect(wrongDay.json().entries).toHaveLength(0);
     await app.close();
   });
 });
+
+

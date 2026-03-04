@@ -30,17 +30,20 @@ import { computeScheduledEffectiveHours, deriveJobState } from '../scheduling/jo
 import type { MinuteWindow } from '../scheduling/types.js';
 import { DateTime } from 'luxon';
 
+const uuidSchema = z.string().uuid();
+const ORG_SETTINGS_ID = '11111111-1111-4111-8111-111111111111';
+
 const oneClickBodySchema = z.object({
-  jobId: z.number().int().positive(),
-  foremanPersonId: z.number().int().positive(),
+  jobId: uuidSchema,
+  foremanPersonId: uuidSchema,
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  homeBaseId: z.number().int().positive().optional(),
+  homeBaseId: uuidSchema.optional(),
   requestedStartMinute: z.number().int().min(0).max(1439).optional(),
   includeStartOfDayTravel: z.boolean().optional().default(false),
 });
 
 const closeOutBodySchema = z.object({
-  foremanPersonId: z.number().int().positive(),
+  foremanPersonId: uuidSchema,
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   durationMinutes: z.number().int().positive(),
 });
@@ -63,8 +66,8 @@ const foremanActivityQuerySchema = z.object({
 });
 
 const createSegmentBodySchema = z.object({
-  jobId: z.number().int().positive(),
-  rosterId: z.number().int().positive(),
+  jobId: uuidSchema,
+  rosterId: uuidSchema,
   startDatetime: z.string().datetime({ offset: true }),
   endDatetime: z.string().datetime({ offset: true }),
   segmentType: z.nativeEnum(SegmentType).optional().default(SegmentType.PRIMARY),
@@ -174,7 +177,7 @@ function extractNumericDiffValue(diff: Prisma.JsonValue | null, key: string): nu
 
 async function getDerivedJobState(input: {
   prisma: PrismaClient;
-  jobId: number;
+  jobId: string;
   timezone: string;
 }) {
   const job = await input.prisma.job.findUnique({
@@ -223,11 +226,11 @@ async function getDerivedJobState(input: {
 
 async function hasActiveBookingConflict(input: {
   prisma: PrismaClient;
-  foremanPersonId: number;
+  foremanPersonId: string;
   serviceDate: Date;
   startDatetime: Date;
   endDatetime: Date;
-  excludeScheduleSegmentId?: number;
+  excludeScheduleSegmentId?: string;
 }): Promise<boolean> {
   // Keep manual CRUD conflict semantics aligned with one-click availability:
   // both roster-linked onsite segments and active travel segments block time.
@@ -283,7 +286,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.patch('/api/org-settings', async (request, reply) => {
-    let actorUserId: number;
+    let actorUserId: string;
     try {
       actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
@@ -317,9 +320,9 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
 
     const updated = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const settings = await tx.orgSettings.upsert({
-        where: { id: 1 },
+        where: { id: ORG_SETTINGS_ID },
         create: {
-          id: 1,
+          id: ORG_SETTINGS_ID,
           companyTimezone: parsed.data.companyTimezone,
         },
         update: {
@@ -335,7 +338,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       await tx.activityLog.create({
         data: {
           entityType: 'OrgSettings',
-          entityId: 1,
+          entityId: ORG_SETTINGS_ID,
           actionType: 'UPDATED',
           actorUserId,
           actorDisplay,
@@ -356,7 +359,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/schedule/one-click-attempt', async (request, reply) => {
-    let actorUserId: number;
+    let actorUserId: string;
     try {
       actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
@@ -619,7 +622,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/travel/close-out-day', async (request, reply) => {
-    let actorUserId: number;
+    let actorUserId: string;
     try {
       actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
@@ -764,7 +767,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.get('/api/foremen/:foremanPersonId/schedule', async (request, reply) => {
-    const paramsSchema = z.object({ foremanPersonId: z.coerce.number().int().positive() });
+    const paramsSchema = z.object({ foremanPersonId: uuidSchema });
     const params = paramsSchema.safeParse(request.params);
     const query = foremanScheduleQuerySchema.safeParse(request.query);
     if (!params.success || !query.success) {
@@ -834,7 +837,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.get('/api/foremen/:foremanPersonId/activity', async (request, reply) => {
-    const paramsSchema = z.object({ foremanPersonId: z.coerce.number().int().positive() });
+    const paramsSchema = z.object({ foremanPersonId: uuidSchema });
     const params = paramsSchema.safeParse(request.params);
     const query = foremanActivityQuerySchema.safeParse(request.query);
     if (!params.success || !query.success) {
@@ -928,7 +931,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.get('/api/jobs/:jobId/schedule-segments', async (request, reply) => {
-    const paramsSchema = z.object({ jobId: z.coerce.number().int().positive() });
+    const paramsSchema = z.object({ jobId: uuidSchema });
     const params = paramsSchema.safeParse(request.params);
     if (!params.success) {
       return reply.code(400).send({
@@ -983,7 +986,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/schedule-segments', async (request, reply) => {
-    let actorUserId: number;
+    let actorUserId: string;
     try {
       actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
@@ -1177,7 +1180,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.patch('/api/schedule-segments/:segmentId', async (request, reply) => {
-    let actorUserId: number;
+    let actorUserId: string;
     try {
       actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
@@ -1188,7 +1191,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     }
     const actorDisplay = getActorDisplay(request);
 
-    const paramsSchema = z.object({ segmentId: z.coerce.number().int().positive() });
+    const paramsSchema = z.object({ segmentId: uuidSchema });
     const params = paramsSchema.safeParse(request.params);
     const parsed = updateSegmentBodySchema.safeParse(request.body);
     if (!params.success || !parsed.success) {
@@ -1398,7 +1401,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.delete('/api/schedule-segments/:segmentId', async (request, reply) => {
-    let actorUserId: number;
+    let actorUserId: string;
     try {
       actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
@@ -1409,7 +1412,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     }
     const actorDisplay = getActorDisplay(request);
 
-    const paramsSchema = z.object({ segmentId: z.coerce.number().int().positive() });
+    const paramsSchema = z.object({ segmentId: uuidSchema });
     const params = paramsSchema.safeParse(request.params);
     if (!params.success) {
       return reply.code(400).send({
@@ -1494,7 +1497,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.patch('/api/schedule-segments/:segmentId/restore', async (request, reply) => {
-    let actorUserId: number;
+    let actorUserId: string;
     try {
       actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
@@ -1505,7 +1508,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     }
     const actorDisplay = getActorDisplay(request);
 
-    const paramsSchema = z.object({ segmentId: z.coerce.number().int().positive() });
+    const paramsSchema = z.object({ segmentId: uuidSchema });
     const params = paramsSchema.safeParse(request.params);
     if (!params.success) {
       return reply.code(400).send({
@@ -1596,7 +1599,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/jobs/:jobId/preferred-channels', async (request, reply) => {
-    let actorUserId: number;
+    let actorUserId: string;
     try {
       actorUserId = await requireActorUserId(deps.prisma, request);
     } catch (error) {
@@ -1608,7 +1611,7 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     const actorDisplay = getActorDisplay(request);
 
     const paramsSchema = z.object({
-      jobId: z.coerce.number().int().positive(),
+      jobId: uuidSchema,
     });
     const params = paramsSchema.safeParse(request.params);
     const body = preferredChannelsSchema.safeParse(request.body);
@@ -1674,3 +1677,4 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
     });
   });
 }
+

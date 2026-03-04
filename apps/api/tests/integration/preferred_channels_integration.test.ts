@@ -4,6 +4,7 @@ import { buildServer } from '../../src/server';
 import { makePrisma, resetDb, seedBase } from './_helpers/db';
 
 const prisma = makePrisma();
+const MISSING_JOB_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 describe('preferred channels integration (real postgres)', () => {
   beforeEach(async () => {
@@ -110,7 +111,7 @@ describe('preferred channels integration (real postgres)', () => {
 
     const response = await app.inject({
       method: 'POST',
-      url: '/api/jobs/999999/preferred-channels',
+      url: `/api/jobs/${MISSING_JOB_ID}/preferred-channels`,
       headers: { 'x-actor-user-id': String(actor.id) },
       payload: {
         channels: ['CALL'],

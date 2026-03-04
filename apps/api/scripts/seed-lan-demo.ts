@@ -1,5 +1,7 @@
 import { EquipmentType, PrismaClient, ResourceType, UserRole } from '@prisma/client';
 
+const ORG_SETTINGS_ID = '11111111-1111-4111-8111-111111111111';
+
 if (process.env.NODE_ENV === 'production') {
   console.error('seed-lan-demo is disabled in production.');
   process.exit(1);
@@ -32,9 +34,9 @@ async function main() {
     }));
 
   await prisma.orgSettings.upsert({
-    where: { id: 1 },
+    where: { id: ORG_SETTINGS_ID },
     update: { companyTimezone: 'America/New_York' },
-    create: { id: 1, companyTimezone: 'America/New_York' },
+    create: { id: ORG_SETTINGS_ID, companyTimezone: 'America/New_York' },
   });
 
   const homeBase =
@@ -122,3 +124,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

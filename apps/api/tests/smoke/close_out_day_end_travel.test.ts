@@ -2,6 +2,11 @@ import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
 
+const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
+const FOREMAN_ID = '33333333-3333-4333-8333-333333333333';
+const SEGMENT_1_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const SEGMENT_2_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
 function makeDate(date: string, minute: number) {
   return new Date(new Date(`${date}T00:00:00.000Z`).getTime() + minute * 60_000);
 }
@@ -17,15 +22,18 @@ describe('A7 close out day END_OF_DAY travel', () => {
         findMany: async () => [],
         findFirst: async () => created[0] ?? null,
         create: async ({ data }: { data: Record<string, unknown> }) => {
-          const row = { id: created.length + 1, ...data };
+          const row = {
+            id: `00000000-0000-0000-0000-${String(created.length + 1).padStart(12, '0')}`,
+            ...data,
+          };
           created.push(row);
           return row;
         },
       },
       scheduleSegment: {
         findMany: async () => [
-          { id: 1, endDatetime: makeDate('2026-03-02', 720) },
-          { id: 2, endDatetime: makeDate('2026-03-02', 930) },
+          { id: SEGMENT_1_ID, endDatetime: makeDate('2026-03-02', 720) },
+          { id: SEGMENT_2_ID, endDatetime: makeDate('2026-03-02', 930) },
         ],
       },
       orgSettings: {
@@ -35,7 +43,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
           operatingStartTime: null,
         }),
       },
-      user: { findUnique: async () => ({ id: 1 }) },
+      user: { findUnique: async () => ({ id: ACTOR_ID }) },
       segmentRosterLink: { create: async () => undefined },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
       $transaction: async (
@@ -48,7 +56,10 @@ describe('A7 close out day END_OF_DAY travel', () => {
         fn({
           travelSegment: {
             create: async ({ data }: { data: Record<string, unknown> }) => {
-              const row = { id: created.length + 1, ...data };
+              const row = {
+                id: `00000000-0000-0000-0000-${String(created.length + 1).padStart(12, '0')}`,
+                ...data,
+              };
               created.push(row);
               return row;
             },
@@ -67,9 +78,9 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        foremanPersonId: 77,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
         durationMinutes: 45,
       },
@@ -83,9 +94,9 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        foremanPersonId: 77,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
         durationMinutes: 45,
       },
@@ -104,7 +115,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
       method: 'POST',
       url: '/api/travel/close-out-day',
       payload: {
-        foremanPersonId: 77,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
         durationMinutes: 45,
       },
@@ -128,9 +139,9 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: { 'x-actor-user-id': '999999' },
+      headers: { 'x-actor-user-id': 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' },
       payload: {
-        foremanPersonId: 77,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
         durationMinutes: 45,
       },
@@ -146,3 +157,4 @@ describe('A7 close out day END_OF_DAY travel', () => {
     await app.close();
   });
 });
+

@@ -114,7 +114,7 @@ enum PreferredChannel {
 }
 
 model User {
-  id     Int      @id @default(autoincrement())
+  id     String   @id @default(uuid()) @db.Uuid
   name   String
   email  String   @unique
   role   UserRole
@@ -143,7 +143,7 @@ model User {
 }
 
 model Customer {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(uuid()) @db.Uuid
   name      String
   phone     String?
   email     String?
@@ -157,7 +157,7 @@ model Customer {
 }
 
 model RiskReason {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(uuid()) @db.Uuid
   code      String   @unique
   label     String
   active    Boolean  @default(true)
@@ -170,12 +170,12 @@ model RiskReason {
 }
 
 model CustomerRisk {
-  id          Int                @id @default(autoincrement())
-  customerId  Int                @map("customer_id")
+  id          String             @id @default(uuid()) @db.Uuid
+  customerId  String             @map("customer_id") @db.Uuid
   severity    Int
   narrative   String?
   status      CustomerRiskStatus
-  ownerUserId Int?               @map("owner_user_id")
+  ownerUserId String?            @map("owner_user_id") @db.Uuid
   createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -187,9 +187,9 @@ model CustomerRisk {
 }
 
 model CustomerRiskReason {
-  id             Int @id @default(autoincrement())
-  customerRiskId Int @map("customer_risk_id")
-  riskReasonId   Int @map("risk_reason_id")
+  id             String @id @default(uuid()) @db.Uuid
+  customerRiskId String @map("customer_risk_id") @db.Uuid
+  riskReasonId   String @map("risk_reason_id") @db.Uuid
 
   customerRisk CustomerRisk @relation(fields: [customerRiskId], references: [id])
   riskReason   RiskReason   @relation(fields: [riskReasonId], references: [id])
@@ -199,14 +199,14 @@ model CustomerRiskReason {
 }
 
 model Job {
-  id                    Int                    @id @default(autoincrement())
-  customerId            Int                    @map("customer_id")
+  id                    String                 @id @default(uuid()) @db.Uuid
+  customerId            String                 @map("customer_id") @db.Uuid
   equipmentType         EquipmentType          @map("equipment_type")
   salesRepCode          String                 @map("sales_rep_code")
   jobSiteAddress        String                 @map("job_site_address")
   town                  String
   completedDate         DateTime?              @map("completed_date") @db.Date
-  completedByUserId     Int?                   @map("completed_by_user_id")
+  completedByUserId     String?                @map("completed_by_user_id") @db.Uuid
   completionNotes       String?                @map("completion_notes")
   amountDollars         Decimal                @map("amount_dollars") @db.Decimal(12, 2)
   estimateHoursCurrent  Decimal?               @map("estimate_hours_current") @db.Decimal(10, 2)
@@ -214,7 +214,7 @@ model Job {
   approvalDate          DateTime?              @map("approval_date") @db.Date
   approvalCall          String?                @map("approval_call")
   confirmedText         String?                @map("confirmed_text")
-  confirmedByUserId     Int?                   @map("confirmed_by_user_id")
+  confirmedByUserId     String?                @map("confirmed_by_user_id") @db.Uuid
   confirmedAt           DateTime?              @map("confirmed_at") @db.Timestamptz(6)
   craneModelSuitability CraneModelSuitability? @map("crane_model_suitability")
   requiresSpiderLift    Boolean                @default(false) @map("requires_spider_lift")
@@ -232,7 +232,7 @@ model Job {
   availabilityNotes     String?                @map("availability_notes")
   noEmail               Boolean                @default(false) @map("no_email")
   contactAllowed        Boolean                @default(true) @map("contact_allowed")
-  contactOwnerUserId    Int?                   @map("contact_owner_user_id")
+  contactOwnerUserId    String?                @map("contact_owner_user_id") @db.Uuid
   contactInstructions   String?                @map("contact_instructions")
   accessNotes           String?                @map("access_notes")
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -260,9 +260,9 @@ model Job {
 }
 
 model EstimateHistory {
-  id                    Int      @id @default(autoincrement())
-  jobId                 Int      @map("job_id")
-  changedByUserId       Int      @map("changed_by_user_id")
+  id                    String   @id @default(uuid()) @db.Uuid
+  jobId                 String   @map("job_id") @db.Uuid
+  changedByUserId       String   @map("changed_by_user_id") @db.Uuid
   changedAt             DateTime @map("changed_at") @db.Timestamptz(6)
   previousAmountDollars Decimal? @map("previous_amount_dollars") @db.Decimal(12, 2)
   newAmountDollars      Decimal? @map("new_amount_dollars") @db.Decimal(12, 2)
@@ -277,7 +277,7 @@ model EstimateHistory {
 }
 
 model RequirementType {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(uuid()) @db.Uuid
   code      String   @unique
   label     String
   active    Boolean  @default(true)
@@ -290,9 +290,9 @@ model RequirementType {
 }
 
 model Requirement {
-  id                Int               @id @default(autoincrement())
-  jobId             Int               @map("job_id")
-  requirementTypeId Int               @map("requirement_type_id")
+  id                String            @id @default(uuid()) @db.Uuid
+  jobId             String            @map("job_id") @db.Uuid
+  requirementTypeId String            @map("requirement_type_id") @db.Uuid
   status            RequirementStatus
   notes             String?
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -307,8 +307,8 @@ model Requirement {
 }
 
 model ScheduleSegment {
-  id                     Int         @id @default(autoincrement())
-  jobId                  Int         @map("job_id")
+  id                     String      @id @default(uuid()) @db.Uuid
+  jobId                  String      @map("job_id") @db.Uuid
   segmentGroupId         String?     @map("segment_group_id") @db.Uuid
   segmentType            SegmentType @map("segment_type")
   startDatetime          DateTime    @map("start_datetime") @db.Timestamptz(6)
@@ -316,7 +316,7 @@ model ScheduleSegment {
   scheduledHoursOverride Decimal?    @map("scheduled_hours_override") @db.Decimal(10, 2)
   deletedAt              DateTime?   @map("deleted_at") @db.Timestamptz(6)
   notes                  String?
-  createdByUserId        Int         @map("created_by_user_id")
+  createdByUserId        String      @map("created_by_user_id") @db.Uuid
   createdAt              DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -333,9 +333,9 @@ model ScheduleSegment {
 }
 
 model TravelSegment {
-  id              Int           @id @default(autoincrement())
-  foremanPersonId Int           @map("foreman_person_id")
-  relatedJobId    Int?          @map("related_job_id")
+  id              String        @id @default(uuid()) @db.Uuid
+  foremanPersonId String        @map("foreman_person_id") @db.Uuid
+  relatedJobId    String?       @map("related_job_id") @db.Uuid
   serviceDate     DateTime      @map("service_date") @db.Date
   startDatetime   DateTime      @map("start_datetime") @db.Timestamptz(6)
   endDatetime     DateTime      @map("end_datetime") @db.Timestamptz(6)
@@ -343,7 +343,7 @@ model TravelSegment {
   source          SegmentSource
   locked          Boolean       @default(false)
   notes           String?
-  createdByUserId Int           @map("created_by_user_id")
+  createdByUserId String        @map("created_by_user_id") @db.Uuid
   createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt       DateTime?     @map("deleted_at") @db.Timestamptz(6)
@@ -359,13 +359,13 @@ model TravelSegment {
 }
 
 model ScheduleEvent {
-  id          Int               @id @default(autoincrement())
-  jobId       Int               @map("job_id")
+  id          String            @id @default(uuid()) @db.Uuid
+  jobId       String            @map("job_id") @db.Uuid
   eventType   ScheduleEventType @map("event_type")
   source      EventSource
   fromAt      DateTime?         @map("from_at") @db.Timestamptz(6)
   toAt        DateTime?         @map("to_at") @db.Timestamptz(6)
-  actorUserId Int?              @map("actor_user_id")
+  actorUserId String?           @map("actor_user_id") @db.Uuid
   actorCode   String?           @map("actor_code")
   rawSnippet  String?           @map("raw_snippet")
   createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -377,19 +377,19 @@ model ScheduleEvent {
 }
 
 model VacatedSlot {
-  id                Int               @id @default(autoincrement())
-  sourceSegmentId   Int               @map("source_segment_id")
+  id                String            @id @default(uuid()) @db.Uuid
+  sourceSegmentId   String            @map("source_segment_id") @db.Uuid
   sourceAction      VacatedSlotAction @map("source_action")
   startDatetime     DateTime          @map("start_datetime") @db.Timestamptz(6)
   endDatetime       DateTime          @map("end_datetime") @db.Timestamptz(6)
   slotHours         Decimal           @map("slot_hours") @db.Decimal(10, 2)
   equipmentType     EquipmentType     @map("equipment_type")
   status            VacatedSlotStatus @default(OPEN)
-  chosenJobId       Int?              @map("chosen_job_id")
-  chosenSegmentId   Int?              @map("chosen_segment_id")
+  chosenJobId       String?           @map("chosen_job_id") @db.Uuid
+  chosenSegmentId   String?           @map("chosen_segment_id") @db.Uuid
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   dismissedAt       DateTime?         @map("dismissed_at") @db.Timestamptz(6)
-  dismissedByUserId Int?              @map("dismissed_by_user_id")
+  dismissedByUserId String?           @map("dismissed_by_user_id") @db.Uuid
 
   sourceSegment   ScheduleSegment  @relation("vacated_slot_source_segment", fields: [sourceSegmentId], references: [id])
   chosenJob       Job?             @relation("vacated_slot_chosen_job", fields: [chosenJobId], references: [id])
@@ -400,7 +400,7 @@ model VacatedSlot {
 }
 
 model BlockerReason {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(uuid()) @db.Uuid
   code      String   @unique
   label     String
   active    Boolean  @default(true)
@@ -413,15 +413,15 @@ model BlockerReason {
 }
 
 model JobBlocker {
-  id              Int              @id @default(autoincrement())
-  jobId           Int              @map("job_id")
-  blockerReasonId Int              @map("blocker_reason_id")
+  id              String           @id @default(uuid()) @db.Uuid
+  jobId           String           @map("job_id") @db.Uuid
+  blockerReasonId String           @map("blocker_reason_id") @db.Uuid
   status          JobBlockerStatus
   notes           String?
-  createdByUserId Int?             @map("created_by_user_id")
+  createdByUserId String?          @map("created_by_user_id") @db.Uuid
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   clearedAt       DateTime?        @map("cleared_at") @db.Timestamptz(6)
-  clearedByUserId Int?             @map("cleared_by_user_id")
+  clearedByUserId String?          @map("cleared_by_user_id") @db.Uuid
 
   job           Job           @relation(fields: [jobId], references: [id])
   blockerReason BlockerReason @relation(fields: [blockerReasonId], references: [id])
@@ -432,7 +432,7 @@ model JobBlocker {
 }
 
 model Resource {
-  id                Int          @id @default(autoincrement())
+  id                String       @id @default(uuid()) @db.Uuid
   resourceType      ResourceType @map("resource_type")
   name              String
   inventoryQuantity Int          @default(1) @map("inventory_quantity")
@@ -450,9 +450,9 @@ model Resource {
 }
 
 model ResourceReservation {
-  id                Int     @id @default(autoincrement())
-  scheduleSegmentId Int     @map("schedule_segment_id")
-  resourceId        Int     @map("resource_id")
+  id                String  @id @default(uuid()) @db.Uuid
+  scheduleSegmentId String  @map("schedule_segment_id") @db.Uuid
+  resourceId        String  @map("resource_id") @db.Uuid
   quantity          Int     @default(1)
   notes             String?
 
@@ -464,7 +464,7 @@ model ResourceReservation {
 }
 
 model HomeBase {
-  id           Int       @id @default(autoincrement())
+  id            String   @id @default(uuid()) @db.Uuid
   name         String
   addressLine1 String    @map("address_line1")
   addressLine2 String?   @map("address_line2")
@@ -485,16 +485,16 @@ model HomeBase {
 }
 
 model ForemanDayRoster {
-  id                 Int       @id @default(autoincrement())
+  id                   String   @id @default(uuid()) @db.Uuid
   date               DateTime  @db.Date
-  foremanPersonId    Int       @map("foreman_person_id")
-  homeBaseId         Int       @map("home_base_id")
+  foremanPersonId     String   @map("foreman_person_id") @db.Uuid
+  homeBaseId          String   @map("home_base_id") @db.Uuid
   preferredStartMinute Int?      @map("preferred_start_minute")
   preferredEndMinute   Int?      @map("preferred_end_minute")
   preferredStartTime   DateTime? @map("preferred_start_time") @db.Time(6)
   preferredEndTime     DateTime? @map("preferred_end_time") @db.Time(6)
   notes              String?
-  createdByUserId    Int       @map("created_by_user_id")
+  createdByUserId     String   @map("created_by_user_id") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -509,10 +509,10 @@ model ForemanDayRoster {
 }
 
 model ForemanDayRosterMember {
-  id               Int              @id @default(autoincrement())
-  rosterId         Int              @map("roster_id")
+  id               String           @id @default(uuid()) @db.Uuid
+  rosterId         String           @map("roster_id") @db.Uuid
   date             DateTime         @db.Date
-  personResourceId Int              @map("person_resource_id")
+  personResourceId String           @map("person_resource_id") @db.Uuid
   role             RosterMemberRole
   createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -524,10 +524,10 @@ model ForemanDayRosterMember {
 }
 
 model SegmentRosterLink {
-  id                Int      @id @default(autoincrement())
-  scheduleSegmentId Int      @map("schedule_segment_id")
-  rosterId          Int      @map("roster_id")
-  createdByUserId   Int      @map("created_by_user_id")
+  id                String   @id @default(uuid()) @db.Uuid
+  scheduleSegmentId String   @map("schedule_segment_id") @db.Uuid
+  rosterId          String   @map("roster_id") @db.Uuid
+  createdByUserId   String   @map("created_by_user_id") @db.Uuid
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   scheduleSegment ScheduleSegment  @relation(fields: [scheduleSegmentId], references: [id])
@@ -539,7 +539,7 @@ model SegmentRosterLink {
 }
 
 model AccessConstraint {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(uuid()) @db.Uuid
   code      String   @unique
   label     String
   active    Boolean  @default(true)
@@ -552,9 +552,9 @@ model AccessConstraint {
 }
 
 model JobAccessConstraint {
-  id                 Int @id @default(autoincrement())
-  jobId              Int @map("job_id")
-  accessConstraintId Int @map("access_constraint_id")
+  id                 String @id @default(uuid()) @db.Uuid
+  jobId              String @map("job_id") @db.Uuid
+  accessConstraintId String @map("access_constraint_id") @db.Uuid
 
   job              Job              @relation(fields: [jobId], references: [id])
   accessConstraint AccessConstraint @relation(fields: [accessConstraintId], references: [id])
@@ -564,8 +564,8 @@ model JobAccessConstraint {
 }
 
 model JobPreferredChannel {
-  id      Int    @id @default(autoincrement())
-  jobId   Int    @map("job_id")
+  id      String           @id @default(uuid()) @db.Uuid
+  jobId   String           @map("job_id") @db.Uuid
   channel PreferredChannel
 
   job Job @relation(fields: [jobId], references: [id])
@@ -575,12 +575,12 @@ model JobPreferredChannel {
 }
 
 model ActivityLog {
-  id          Int      @id @default(autoincrement())
+  id          String   @id @default(uuid()) @db.Uuid
   entityType  String   @map("entity_type")
-  entityId    Int      @map("entity_id")
+  entityId    String   @map("entity_id") @db.Uuid
   actionType  String   @map("action_type")
   diff        Json?
-  actorUserId Int?     @map("actor_user_id")
+  actorUserId String?  @map("actor_user_id") @db.Uuid
   actorDisplay String? @map("actor_display")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -591,10 +591,10 @@ model ActivityLog {
 }
 
 model ImportRun {
-  id             Int          @id @default(autoincrement())
+  id             String       @id @default(uuid()) @db.Uuid
   startedAt      DateTime     @map("started_at") @db.Timestamptz(6)
   finishedAt     DateTime?    @map("finished_at") @db.Timestamptz(6)
-  runByUserId    Int?         @map("run_by_user_id")
+  runByUserId    String?      @map("run_by_user_id") @db.Uuid
   sourceFilename String       @map("source_filename")
   status         ImportStatus
   summaryJson    Json?        @map("summary_json")
@@ -606,12 +606,12 @@ model ImportRun {
 }
 
 model ImportRowMap {
-  id          Int      @id @default(autoincrement())
-  importRunId Int      @map("import_run_id")
+  id          String   @id @default(uuid()) @db.Uuid
+  importRunId String   @map("import_run_id") @db.Uuid
   sheetName   String   @map("sheet_name")
   rowNumber   Int      @map("row_number")
   entityType  String   @map("entity_type")
-  entityId    Int      @map("entity_id")
+  entityId    String   @map("entity_id") @db.Uuid
   rawRowJson  Json     @map("raw_row_json")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -621,7 +621,7 @@ model ImportRowMap {
 }
 
 model OrgSettings {
-  id                 Int       @id @default(1)
+  id                 String    @id @default(uuid()) @db.Uuid
   companyTimezone    String    @default("America/New_York") @map("company_timezone")
   operatingStartMinute Int?      @map("operating_start_minute")
   operatingEndMinute   Int?      @map("operating_end_minute")

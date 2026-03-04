@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
@@ -51,7 +53,7 @@ CREATE TYPE "ImportStatus" AS ENUM ('IN_PROGRESS', 'COMPLETED', 'FAILED');
 
 -- CreateTable
 CREATE TABLE "users" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "name" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "role" "UserRole" NOT NULL,
@@ -64,7 +66,7 @@ CREATE TABLE "users" (
 
 -- CreateTable
 CREATE TABLE "customers" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "name" TEXT NOT NULL,
     "phone" TEXT,
     "email" TEXT,
@@ -76,7 +78,7 @@ CREATE TABLE "customers" (
 
 -- CreateTable
 CREATE TABLE "risk_reasons" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "code" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
@@ -88,12 +90,12 @@ CREATE TABLE "risk_reasons" (
 
 -- CreateTable
 CREATE TABLE "customer_risks" (
-    "id" SERIAL NOT NULL,
-    "customer_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "customer_id" UUID NOT NULL,
     "severity" INTEGER NOT NULL,
     "narrative" TEXT,
     "status" "CustomerRiskStatus" NOT NULL,
-    "owner_user_id" INTEGER,
+    "owner_user_id" UUID,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
 
@@ -102,23 +104,23 @@ CREATE TABLE "customer_risks" (
 
 -- CreateTable
 CREATE TABLE "customer_risk_reasons" (
-    "id" SERIAL NOT NULL,
-    "customer_risk_id" INTEGER NOT NULL,
-    "risk_reason_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "customer_risk_id" UUID NOT NULL,
+    "risk_reason_id" UUID NOT NULL,
 
     CONSTRAINT "customer_risk_reasons_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "jobs" (
-    "id" SERIAL NOT NULL,
-    "customer_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "customer_id" UUID NOT NULL,
     "equipment_type" "EquipmentType" NOT NULL,
     "sales_rep_code" TEXT NOT NULL,
     "job_site_address" TEXT NOT NULL,
     "town" TEXT NOT NULL,
     "completed_date" DATE,
-    "completed_by_user_id" INTEGER,
+    "completed_by_user_id" UUID,
     "completion_notes" TEXT,
     "amount_dollars" DECIMAL(12,2) NOT NULL,
     "estimate_hours_current" DECIMAL(10,2),
@@ -126,7 +128,7 @@ CREATE TABLE "jobs" (
     "approval_date" DATE,
     "approval_call" TEXT,
     "confirmed_text" TEXT,
-    "confirmed_by_user_id" INTEGER,
+    "confirmed_by_user_id" UUID,
     "confirmed_at" TIMESTAMPTZ(6),
     "crane_model_suitability" "CraneModelSuitability",
     "requires_spider_lift" BOOLEAN NOT NULL DEFAULT false,
@@ -142,7 +144,7 @@ CREATE TABLE "jobs" (
     "availability_notes" TEXT,
     "no_email" BOOLEAN NOT NULL DEFAULT false,
     "contact_allowed" BOOLEAN NOT NULL DEFAULT true,
-    "contact_owner_user_id" INTEGER,
+    "contact_owner_user_id" UUID,
     "contact_instructions" TEXT,
     "access_notes" TEXT,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -153,9 +155,9 @@ CREATE TABLE "jobs" (
 
 -- CreateTable
 CREATE TABLE "estimate_history" (
-    "id" SERIAL NOT NULL,
-    "job_id" INTEGER NOT NULL,
-    "changed_by_user_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" UUID NOT NULL,
+    "changed_by_user_id" UUID NOT NULL,
     "changed_at" TIMESTAMPTZ(6) NOT NULL,
     "previous_amount_dollars" DECIMAL(12,2),
     "new_amount_dollars" DECIMAL(12,2),
@@ -168,7 +170,7 @@ CREATE TABLE "estimate_history" (
 
 -- CreateTable
 CREATE TABLE "requirement_types" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "code" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
@@ -180,9 +182,9 @@ CREATE TABLE "requirement_types" (
 
 -- CreateTable
 CREATE TABLE "requirements" (
-    "id" SERIAL NOT NULL,
-    "job_id" INTEGER NOT NULL,
-    "requirement_type_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" UUID NOT NULL,
+    "requirement_type_id" UUID NOT NULL,
     "status" "RequirementStatus" NOT NULL,
     "notes" TEXT,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -193,8 +195,8 @@ CREATE TABLE "requirements" (
 
 -- CreateTable
 CREATE TABLE "schedule_segments" (
-    "id" SERIAL NOT NULL,
-    "job_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" UUID NOT NULL,
     "segment_group_id" UUID,
     "segment_type" "SegmentType" NOT NULL,
     "start_datetime" TIMESTAMPTZ(6) NOT NULL,
@@ -202,7 +204,7 @@ CREATE TABLE "schedule_segments" (
     "scheduled_hours_override" DECIMAL(10,2),
     "deleted_at" TIMESTAMPTZ(6),
     "notes" TEXT,
-    "created_by_user_id" INTEGER NOT NULL,
+    "created_by_user_id" UUID NOT NULL,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
 
@@ -211,9 +213,9 @@ CREATE TABLE "schedule_segments" (
 
 -- CreateTable
 CREATE TABLE "travel_segments" (
-    "id" SERIAL NOT NULL,
-    "foreman_person_id" INTEGER NOT NULL,
-    "related_job_id" INTEGER,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "foreman_person_id" UUID NOT NULL,
+    "related_job_id" UUID,
     "service_date" DATE NOT NULL,
     "start_datetime" TIMESTAMPTZ(6) NOT NULL,
     "end_datetime" TIMESTAMPTZ(6) NOT NULL,
@@ -221,7 +223,7 @@ CREATE TABLE "travel_segments" (
     "source" "SegmentSource" NOT NULL,
     "locked" BOOLEAN NOT NULL DEFAULT false,
     "notes" TEXT,
-    "created_by_user_id" INTEGER NOT NULL,
+    "created_by_user_id" UUID NOT NULL,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
     "deleted_at" TIMESTAMPTZ(6),
@@ -231,13 +233,13 @@ CREATE TABLE "travel_segments" (
 
 -- CreateTable
 CREATE TABLE "schedule_events" (
-    "id" SERIAL NOT NULL,
-    "job_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" UUID NOT NULL,
     "event_type" "ScheduleEventType" NOT NULL,
     "source" "EventSource" NOT NULL,
     "from_at" TIMESTAMPTZ(6),
     "to_at" TIMESTAMPTZ(6),
-    "actor_user_id" INTEGER,
+    "actor_user_id" UUID,
     "actor_code" TEXT,
     "raw_snippet" TEXT,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -247,26 +249,26 @@ CREATE TABLE "schedule_events" (
 
 -- CreateTable
 CREATE TABLE "vacated_slots" (
-    "id" SERIAL NOT NULL,
-    "source_segment_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "source_segment_id" UUID NOT NULL,
     "source_action" "VacatedSlotAction" NOT NULL,
     "start_datetime" TIMESTAMPTZ(6) NOT NULL,
     "end_datetime" TIMESTAMPTZ(6) NOT NULL,
     "slot_hours" DECIMAL(10,2) NOT NULL,
     "equipment_type" "EquipmentType" NOT NULL,
     "status" "VacatedSlotStatus" NOT NULL DEFAULT 'OPEN',
-    "chosen_job_id" INTEGER,
-    "chosen_segment_id" INTEGER,
+    "chosen_job_id" UUID,
+    "chosen_segment_id" UUID,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "dismissed_at" TIMESTAMPTZ(6),
-    "dismissed_by_user_id" INTEGER,
+    "dismissed_by_user_id" UUID,
 
     CONSTRAINT "vacated_slots_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "blocker_reasons" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "code" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
@@ -278,22 +280,22 @@ CREATE TABLE "blocker_reasons" (
 
 -- CreateTable
 CREATE TABLE "job_blockers" (
-    "id" SERIAL NOT NULL,
-    "job_id" INTEGER NOT NULL,
-    "blocker_reason_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" UUID NOT NULL,
+    "blocker_reason_id" UUID NOT NULL,
     "status" "JobBlockerStatus" NOT NULL,
     "notes" TEXT,
-    "created_by_user_id" INTEGER,
+    "created_by_user_id" UUID,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "cleared_at" TIMESTAMPTZ(6),
-    "cleared_by_user_id" INTEGER,
+    "cleared_by_user_id" UUID,
 
     CONSTRAINT "job_blockers_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "resources" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "resource_type" "ResourceType" NOT NULL,
     "name" TEXT NOT NULL,
     "inventory_quantity" INTEGER NOT NULL DEFAULT 1,
@@ -307,9 +309,9 @@ CREATE TABLE "resources" (
 
 -- CreateTable
 CREATE TABLE "resource_reservations" (
-    "id" SERIAL NOT NULL,
-    "schedule_segment_id" INTEGER NOT NULL,
-    "resource_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "schedule_segment_id" UUID NOT NULL,
+    "resource_id" UUID NOT NULL,
     "quantity" INTEGER NOT NULL DEFAULT 1,
     "notes" TEXT,
 
@@ -318,7 +320,7 @@ CREATE TABLE "resource_reservations" (
 
 -- CreateTable
 CREATE TABLE "home_bases" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "name" TEXT NOT NULL,
     "address_line1" TEXT NOT NULL,
     "address_line2" TEXT,
@@ -336,14 +338,14 @@ CREATE TABLE "home_bases" (
 
 -- CreateTable
 CREATE TABLE "foreman_day_rosters" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "date" DATE NOT NULL,
-    "foreman_person_id" INTEGER NOT NULL,
-    "home_base_id" INTEGER NOT NULL,
+    "foreman_person_id" UUID NOT NULL,
+    "home_base_id" UUID NOT NULL,
     "preferred_start_time" TIME(6),
     "preferred_end_time" TIME(6),
     "notes" TEXT,
-    "created_by_user_id" INTEGER NOT NULL,
+    "created_by_user_id" UUID NOT NULL,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
 
@@ -352,10 +354,10 @@ CREATE TABLE "foreman_day_rosters" (
 
 -- CreateTable
 CREATE TABLE "foreman_day_roster_members" (
-    "id" SERIAL NOT NULL,
-    "roster_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "roster_id" UUID NOT NULL,
     "date" DATE NOT NULL,
-    "person_resource_id" INTEGER NOT NULL,
+    "person_resource_id" UUID NOT NULL,
     "role" "RosterMemberRole" NOT NULL,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -364,10 +366,10 @@ CREATE TABLE "foreman_day_roster_members" (
 
 -- CreateTable
 CREATE TABLE "segment_roster_links" (
-    "id" SERIAL NOT NULL,
-    "schedule_segment_id" INTEGER NOT NULL,
-    "roster_id" INTEGER NOT NULL,
-    "created_by_user_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "schedule_segment_id" UUID NOT NULL,
+    "roster_id" UUID NOT NULL,
+    "created_by_user_id" UUID NOT NULL,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "segment_roster_links_pkey" PRIMARY KEY ("id")
@@ -375,7 +377,7 @@ CREATE TABLE "segment_roster_links" (
 
 -- CreateTable
 CREATE TABLE "access_constraints" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "code" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
@@ -387,17 +389,17 @@ CREATE TABLE "access_constraints" (
 
 -- CreateTable
 CREATE TABLE "job_access_constraints" (
-    "id" SERIAL NOT NULL,
-    "job_id" INTEGER NOT NULL,
-    "access_constraint_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" UUID NOT NULL,
+    "access_constraint_id" UUID NOT NULL,
 
     CONSTRAINT "job_access_constraints_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "job_preferred_channels" (
-    "id" SERIAL NOT NULL,
-    "job_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" UUID NOT NULL,
     "channel" TEXT NOT NULL,
 
     CONSTRAINT "job_preferred_channels_pkey" PRIMARY KEY ("id")
@@ -405,12 +407,12 @@ CREATE TABLE "job_preferred_channels" (
 
 -- CreateTable
 CREATE TABLE "activity_logs" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "entity_type" TEXT NOT NULL,
-    "entity_id" INTEGER NOT NULL,
+    "entity_id" UUID NOT NULL,
     "action_type" TEXT NOT NULL,
     "diff" JSONB,
-    "actor_user_id" INTEGER,
+    "actor_user_id" UUID,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "activity_logs_pkey" PRIMARY KEY ("id")
@@ -418,10 +420,10 @@ CREATE TABLE "activity_logs" (
 
 -- CreateTable
 CREATE TABLE "import_runs" (
-    "id" SERIAL NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "started_at" TIMESTAMPTZ(6) NOT NULL,
     "finished_at" TIMESTAMPTZ(6),
-    "run_by_user_id" INTEGER,
+    "run_by_user_id" UUID,
     "source_filename" TEXT NOT NULL,
     "status" "ImportStatus" NOT NULL,
     "summary_json" JSONB,
@@ -431,12 +433,12 @@ CREATE TABLE "import_runs" (
 
 -- CreateTable
 CREATE TABLE "import_row_maps" (
-    "id" SERIAL NOT NULL,
-    "import_run_id" INTEGER NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "import_run_id" UUID NOT NULL,
     "sheet_name" TEXT NOT NULL,
     "row_number" INTEGER NOT NULL,
     "entity_type" TEXT NOT NULL,
-    "entity_id" INTEGER NOT NULL,
+    "entity_id" UUID NOT NULL,
     "raw_row_json" JSONB NOT NULL,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -445,7 +447,7 @@ CREATE TABLE "import_row_maps" (
 
 -- CreateTable
 CREATE TABLE "org_settings" (
-    "id" INTEGER NOT NULL DEFAULT 1,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "company_timezone" TEXT NOT NULL DEFAULT 'America/New_York',
     "operating_start_time" TIME(6),
     "operating_end_time" TIME(6),
@@ -677,3 +679,4 @@ CREATE UNIQUE INDEX "uq_travel_start_of_day_active_per_foreman_date"
 CREATE UNIQUE INDEX "uq_travel_end_of_day_active_per_foreman_date"
   ON "travel_segments" ("foreman_person_id", "service_date")
   WHERE "deleted_at" IS NULL AND "travel_type" = 'END_OF_DAY';
+

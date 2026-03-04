@@ -14,9 +14,11 @@ This document is **authoritative** instructions for Codex (and any other coding 
 - **Styling:** Tailwind CSS (no paid UI components; optional: shadcn/ui because it is free/open-source)
 - **API server:** Node + TypeScript (Fastify recommended) in `apps/api` with REST endpoints
 - **Database:** PostgreSQL
+- **Primary keys:** UUID (`@id @default(uuid())`) on all tables — no integer auto-increment. Sylvara CRM uses UUIDs universally; using integers in the scheduler would require a full re-key at merge time. This is locked.
 - **ORM & migrations:** Prisma (recommended for novice clarity) *(migrations are required; never edit committed migrations)*
 - **Validation:** Zod (shared schemas between web/api)
-- **Date/time:** **No Luxon.** Use shared minute-of-day helpers (`packages/shared/src/time-of-day.ts`) and explicit timezone policy (`org_settings.company_timezone`) with UTC storage/serialization.
+- **Date/time:** **Luxon is allowed only inside shared time helpers.** Do not import Luxon in `apps/*`. Use shared minute-of-day helpers (`packages/shared/src/time-of-day.ts`) and explicit timezone policy (`org_settings.company_timezone`) with UTC storage/serialization.
+- **Auth:** Auth.js (NextAuth v5) with Google OAuth provider, restricted to `@irontreeservice.com`. See plan.md §2.1.1 for the full implementation spec. Do not swap or add an alternative auth library.
 - **Testing:** Vitest (unit/integration) + Playwright (E2E)
 - **Formatting/lint:** ESLint + Prettier
 
@@ -109,9 +111,10 @@ Every response must include:
 
 ### 3.1 Naming conventions
 - Use domain names that match plan.md:
-  - Job, ScheduleSegment, Requirement, Resource, ActivityLog, EstimateHistory, CustomerRisk
+  - Job, ScheduleSegment, Requirement, Resource, ActivityLog, AuditLog, EstimateHistory, CustomerRisk
 - Avoid abbreviations unless they are domain-standard:
   - CBP, DTL are domain-standard in this project.
+- **Sylvara entity mapping:** When naming new entities, consult plan.md §12.2. Use names consistent with the Sylvara merge path (e.g., don't create a `JobSite` table when the target name is `Property`).
 
 - Resource modeling guardrails:
   - `Resource.resource_type=PERSON` represents a unique individual; UI must not expose inventory_quantity editing for PERSON, and backend must enforce `inventory_quantity=1`.
@@ -145,6 +148,7 @@ At minimum:
   - weekly snapshot generation
 - Integration tests for:
   - key endpoints (create job, create segment, update requirement)
+  - AuditLog entries are written on every entity write (verify old_values/new_values populated correctly)
 - Import tests:
   - parse workbook and confirm rows imported, and `notes_raw` preserved
 
@@ -178,6 +182,7 @@ At minimum:
 ### 4.2 Data integrity
 - Use foreign keys for relationships.
 - Use NOT NULL where truly required.
+- **Soft deletes on all tables (required for Sylvara merge compatibility):** Every table must have a `deleted_at timestamptz NULL` column. Use `deleted_at IS NULL` filters in all queries. Never hard-delete rows. Sylvara enforces this universally; the scheduler must match.
 - Use indexes on (do not index `job.state` — state is derived at query time, not a stored column; index the underlying fields instead):
   - `jobs.equipment_type`
   - `jobs.town`
@@ -401,7 +406,8 @@ Codex MUST stop and ask (do not proceed) if:
 - It would modify import semantics (what gets imported or how it's keyed).
 - It would remove or overwrite `notes_raw`.
 - It would introduce a new major dependency/framework that increases complexity.
-- It would introduce or swap to a more complex auth/permissions system than the current stack requires (novice-safety gate).
+- It would introduce or swap to a more complex auth/permissions system than the current stack requires (novice-safety gate). **Note: the auth system is already decided — Auth.js + Google OAuth. See plan.md §2.1.1. Do not introduce an alternative; do stop and ask if something in that spec seems contradictory or unimplementable.**
+- It would make the Sylvara CRM merge significantly harder — specifically: using integer PKs instead of UUIDs, hard-deleting rows instead of soft-deleting, storing derived job state as a column, or renaming entities in ways that conflict with plan.md §12.2 entity mappings.
 
 **After a stop-and-ask is resolved:** Record the decision in plan.md (under the relevant section) or in a new ADR file before proceeding. Do not just continue from the chat answer — the decision must be durable.
 
@@ -419,7 +425,25 @@ A task is not "done" unless:
 
 ---
 
-## 13) Appendix — Known Domain Mappings
+## 13) Appendix — Sylvara CRM Context
+
+This scheduler module will eventually merge into **Sylvara**, a full Tree Service CRM. Understanding the broader system helps Codex make correct local decisions.
+
+**Sylvara's design principles (relevant to this module):**
+- Properties are the anchor — job history and patterns belong to a location, not just a person.
+- Contacts are persistent — they survive across leads, jobs, and years.
+- Everything is audited — every write produces an immutable `AuditLog` entry. This module must match this pattern.
+- Soft deletes everywhere — `deleted_at` on every table.
+- UUID PKs on every table — this module must match.
+- Multi-tenant foundation — `tenant_id` on every table (not built into this module yet, but the pattern must not be broken).
+
+**The scheduler is the MORE advanced side of the merge.** Sylvara's `schedule_entries` is a simple date+crew model. The scheduler's foreman-anchored roster, travel segments, and push-up recommender will be adopted by Sylvara — not replaced. Do not simplify the scheduler's scheduling model to match Sylvara's simpler one.
+
+**Full integration spec:** See plan.md §12 for the complete entity mapping, role mapping, auth reconciliation, and known migration decisions.
+
+---
+
+## 14) Appendix — Known Domain Mappings
 
 - DW → Ditch Witch (equipment)
 - DTL → Police Detail requirement

@@ -2,10 +2,10 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 
 type SeedResult = {
-  actorUserId: number;
-  foremanPersonId: number;
-  rosterId: number;
-  jobId: number;
+  actorUserId: string;
+  foremanPersonId: string;
+  rosterId: string;
+  jobId: string;
   date: string;
 };
 
@@ -36,7 +36,7 @@ async function seedFixtures(date = '2026-03-03'): Promise<SeedResult> {
   return parseJsonFromOutput((result.stdout ?? '') + (result.stderr ?? ''));
 }
 
-async function resetScheduleDay(input: { date: string; foremanPersonId: number; jobId?: number }) {
+async function resetScheduleDay(input: { date: string; foremanPersonId: string; jobId?: string }) {
   const args = [
     'pnpm',
     '-w',

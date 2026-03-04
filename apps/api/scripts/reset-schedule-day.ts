@@ -2,11 +2,13 @@ import { prisma } from '@sylvara/db';
 
 type Args = {
   date: string;
-  foremanPersonId: number;
-  jobId?: number;
+  foremanPersonId: string;
+  jobId?: string;
   dryRun: boolean;
   includeTravel: boolean;
 };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function parseArgs(argv: string[]): Args {
   const out: Partial<Args> = {
@@ -28,11 +30,11 @@ function parseArgs(argv: string[]): Args {
       continue;
     }
     if (arg.startsWith('--foremanPersonId=')) {
-      out.foremanPersonId = Number.parseInt(arg.slice('--foremanPersonId='.length), 10);
+      out.foremanPersonId = arg.slice('--foremanPersonId='.length);
       continue;
     }
     if (arg.startsWith('--jobId=')) {
-      out.jobId = Number.parseInt(arg.slice('--jobId='.length), 10);
+      out.jobId = arg.slice('--jobId='.length);
       continue;
     }
   }
@@ -45,12 +47,12 @@ function parseArgs(argv: string[]): Args {
     throw new Error('Missing or invalid --date (expected YYYY-MM-DD).');
   }
 
-  if (!Number.isInteger(out.foremanPersonId) || (out.foremanPersonId ?? 0) <= 0) {
-    throw new Error('Missing or invalid --foremanPersonId (expected integer > 0).');
+  if (!out.foremanPersonId || !UUID_RE.test(out.foremanPersonId)) {
+    throw new Error('Missing or invalid --foremanPersonId (expected UUID).');
   }
 
-  if (out.jobId !== undefined && (!Number.isInteger(out.jobId) || out.jobId <= 0)) {
-    throw new Error('Invalid --jobId (expected integer > 0).');
+  if (out.jobId !== undefined && !UUID_RE.test(out.jobId)) {
+    throw new Error('Invalid --jobId (expected UUID).');
   }
 
   return out as Args;

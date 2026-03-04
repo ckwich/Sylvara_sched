@@ -3,6 +3,7 @@ import { buildServer } from '../../src/server';
 import { makePrisma, resetDb, seedBase } from './_helpers/db';
 
 const prisma = makePrisma();
+const ORG_SETTINGS_ID = '11111111-1111-4111-8111-111111111111';
 
 describe('org settings integration (real postgres)', () => {
   beforeEach(async () => {
@@ -40,7 +41,7 @@ describe('org settings integration (real postgres)', () => {
     const log = await prisma.activityLog.findFirst({
       where: {
         entityType: 'OrgSettings',
-        entityId: 1,
+        entityId: ORG_SETTINGS_ID,
         actionType: 'UPDATED',
         actorUserId: actor.id,
       },

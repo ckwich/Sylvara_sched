@@ -608,6 +608,50 @@ Log all edits to:
 - Authentication/authorization requirement for multi-user LAN usage:
   - Human usage must not rely on the dev/test header shim (`x-actor-user-id`).
   - Implement real login + roles (MANAGER/SCHEDULER/VIEWER). Target is Google Workspace SSO restricted to `@irontreeservice.com`.
+
+#### §2.1.1 Auth Implementation (Decision Record)
+
+**Decision:** Use [Auth.js (NextAuth v5)](https://authjs.dev/) with the Google OAuth provider, restricted to the `@irontreeservice.com` domain.
+
+**Rationale:** Auth.js is free, open-source, well-documented, and purpose-built for Next.js App Router. It handles the Google OAuth flow, session management, and JWT signing with minimal boilerplate — appropriate for a novice-maintainable codebase. No paid services or complex infrastructure required.
+
+**Implementation spec (Codex must follow):**
+
+- **Library:** `next-auth` (v5 / Auth.js) installed in `apps/web`. No auth library needed in `apps/api` — the API trusts a forwarded verified token (see below).
+- **Provider:** Google OAuth (`GoogleProvider`). Restrict sign-in to `@irontreeservice.com` accounts using the `signIn` callback:
+  ```ts
+  // apps/web/auth.ts
+  callbacks: {
+    signIn({ profile }) {
+      return profile?.email?.endsWith('@irontreeservice.com') ?? false;
+    }
+  }
+  ```
+- **Session strategy:** JWT (default for Auth.js). Store `user.id` (internal DB id) and `user.role` in the JWT payload after first sign-in lookup/creation.
+- **User provisioning:** On first Google sign-in, look up the User record by email. If not found, auto-create with role `VIEWER` and `active=true`. A Manager must then elevate role via the admin UI. Never auto-assign MANAGER on sign-in.
+- **API authentication:**
+  - `apps/web` Next.js route handlers (or server actions) use `auth()` from Auth.js to get the session server-side — no token forwarding needed for web-originated requests handled within `apps/web`.
+  - For calls from `apps/web` → `apps/api` (Fastify), the web layer forwards the verified JWT as a `Bearer` token in the `Authorization` header. `apps/api` verifies the JWT signature using the shared `AUTH_SECRET` environment variable (set identically in both apps).
+  - `apps/api` must have a Fastify `preHandler` hook that verifies the JWT and sets `request.actor` (`{ id, role }`) on every authenticated route. Unauthenticated requests return `401`.
+  - The dev shim (`x-actor-user-id` header) must be **disabled in production** (guard with `NODE_ENV !== 'production'`) and must never be enabled in the LAN pilot build.
+- **Environment variables required (document in README; required in both apps):**
+  - `AUTH_SECRET` — shared JWT signing secret (generate with `openssl rand -base64 32`; same value in both `apps/web` and `apps/api`)
+  - `AUTH_GOOGLE_ID` — Google OAuth client ID
+  - `AUTH_GOOGLE_SECRET` — Google OAuth client secret
+  - `NEXTAUTH_URL` — full origin URL (e.g., `http://schedule-pc:3000`); required for OAuth redirect URI
+- **Google OAuth setup (one-time, performed by manager):**
+  1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
+  2. Enable the Google OAuth consent screen (Internal, restricted to your Workspace org).
+  3. Create OAuth 2.0 credentials (Web application type).
+  4. Add authorized redirect URIs: `http://schedule-pc:3000/api/auth/callback/google` and `http://localhost:3000/api/auth/callback/google` for local dev.
+  5. Domain restriction is enforced in code via the `signIn` callback above — do not rely on Google Console alone.
+- **Role enforcement:**
+  - `apps/api` Fastify routes check `request.actor.role` against a permission map defined in `packages/shared/src/roles.ts`.
+  - VIEWER requests to any mutating endpoint (`POST`/`PATCH`/`DELETE`) return `403`.
+  - SCHEDULER requests to manager-only endpoints (admin list edits, role changes, sales-per-day) return `403`.
+- **Session expiry:** Default Auth.js JWT expiry (30 days). Expired sessions redirect to sign-in — no silent failure.
+- **README must document:** how to set env vars, how to create the Google OAuth app, and how to promote a user to MANAGER after first sign-in.
+
 ### M3 — Resources & Rosters
 - Resource inventory CRUD (count-based)
 - Resource reservations per segment
@@ -697,7 +741,9 @@ Log all edits to:
 
 **Timezone policy:** Store all timestamps as `timestamptz` (UTC-normalized). The app operates in a single company timezone (America/New_York unless configured otherwise). All display and date input uses that timezone. Document the configured timezone in README. Never store naive local timestamps.
 
-**Date/time handling (novice-safety):** In the web UI and API, do not perform arithmetic with native `Date` objects. Use a single timezone-aware library (Luxon recommended) and always interpret/format “day” boundaries in the configured company timezone.
+**Date/time handling (novice-safety):** In the web UI and API, do not perform arithmetic with native `Date` objects. All scheduling math must use **(company-local date + snapped minute-of-day integers)**; UTC timestamps are for storage/serialization only. For timezone conversions (UTC ⇄ company-local) and day-boundary computations, use a single timezone-aware library **inside shared helpers only** (Luxon is permitted *only* within `packages/shared` time helpers). Feature code must not import Luxon directly; it must call the shared helpers.
+
+**Primary key type (authoritative):** All tables must use UUID primary keys (`@id @default(uuid())` in Prisma). Do not use integer auto-increment PKs. Sylvara CRM (the parent system this module will eventually merge into) uses UUIDs universally, and re-keying from integers to UUIDs after beta is one of the most destructive migrations possible. Use UUIDs from the first migration. This applies to every entity: Job, Customer, Resource, ScheduleSegment, ForemanDayRoster, etc.
 
 **Numeric math (novice-safety):** Postgres `numeric` values must not be manipulated as JavaScript `number` in runtime logic (money, hours, and state math). Use `Prisma.Decimal` (or equivalent decimal library) end-to-end for arithmetic and comparisons. For calendar placement/overlap logic, prefer integer minutes derived from the snapped datetimes.
 
@@ -755,6 +801,89 @@ All “foreman availability” logic must be consistent across:
 **`sales_rep_code` normalization:** During import and on all data entry, normalize `sales_rep_code` to uppercase-trimmed (e.g., "jd", "J.D.", " JD " all become "JD"). This is required for correct group-by-sales-rep behavior in reports.
 
 **Phase 2 decision — customer availability windows (authoritative):** Until a dedicated availability model exists, customer windows are derived only from `Job.availabilityNotes` using strict pattern parsing (24h and explicit AM/PM range forms). Recognized windows are enforced as hard scheduling constraints; unrecognized/ambiguous text is treated as “window not configured” (non-blocking). UI continues to display AM/PM-friendly labels while runtime stores and compares internal minute values.
+
+---
+
+## 12. Sylvara CRM Integration Notes
+
+This scheduler is being built standalone first (replacing the spreadsheet backlog for Iron Tree Service). It will later be merged into the **Sylvara CRM** platform as the scheduling module. This section documents the known gaps, entity mappings, and migration decisions so that standalone development doesn't inadvertently bake in patterns that make the merge expensive.
+
+**Standalone-first principle:** Do not build Sylvara CRM features into this module. Build the scheduler cleanly as a standalone product. The merge path below tells you what shape to keep things in — not what to build now.
+
+### 12.1 Decisions locked now for merge readiness
+
+**UUID primary keys (non-negotiable):** Sylvara uses UUIDs on every table. This module must also use UUIDs (see §11 Implementation Notes). Do not use integer auto-increment PKs anywhere.
+
+**No `tenant_id` in standalone (acceptable; document the boundary):** Sylvara enforces `tenant_id` on every table with PostgreSQL row-level security. This scheduler is single-tenant (Iron Tree Service only) and has no `tenant_id`. This is intentional for standalone beta. `OrgSettings` serves as the proto-tenant anchor (company timezone, operating hours, etc.). When the modules merge, `tenant_id` will be added to all tables and `OrgSettings` will be replaced by the Sylvara `tenants` row. Do not build any multi-tenant logic now, but do not build patterns that make adding `tenant_id` a full rewrite either — specifically: all queries must be written to filter from a single top-level anchor, not from global scans.
+
+**Soft deletes (match Sylvara):** Sylvara uses `deleted_at` soft deletes on every table. This scheduler already uses `deleted_at` on segments and travel segments. Apply the same pattern to all other entities (Customer, Resource, ForemanDayRoster, etc.) for consistency and merge compatibility.
+
+**Append-only audit log (add to scheduler):** Sylvara has an immutable `audit_log` that records every INSERT/UPDATE/DELETE across all tables — separate from the user-facing `ActivityLog`. The scheduler must also implement this compliance-grade layer. Add an `AuditLog` table mirroring Sylvara's schema (`table_name`, `record_id`, `action`, `changed_by`, `changed_at`, `old_values`, `new_values` as JSONB). This is in addition to — not a replacement for — the existing domain-semantic `ActivityLog`. Populate it via a Prisma middleware or DB trigger on every write. This is a M1 task.
+
+### 12.2 Entity mapping (scheduler → Sylvara)
+
+| Scheduler entity | Sylvara entity | Migration notes |
+|---|---|---|
+| `Customer` | `Contact` + `Property` + `property_contacts` | The scheduler's flat Customer must be split at merge time. Keep `Customer.name` and contact fields on `Contact`; move `job_site_address`/`town` to `Property`. Do not over-build Customer — avoid adding sub-entities that assume it stays flat. |
+| `Job` | `jobs` | Scheduler jobs have no upstream `lead_id` or `estimate_id` (they come from spreadsheet import). At merge, a nullable `estimate_id FK` will be added for going-forward jobs. `approval_date` / `approval_call` are the scheduler's lightweight substitute. |
+| `Resource (PERSON)` | `crew_members` | Scheduler `Resource.name`, `is_foreman`, `active` → Sylvara `crew_members.first_name/last_name`, `role=foreman`, `active`. |
+| `Resource (EQUIPMENT)` | `equipment_types` + inventory | Sylvara's `equipment_types` is a catalog with no inventory count. The scheduler adds `inventory_quantity`. Merge path: add inventory to Sylvara's equipment_types. |
+| `ResourceReservation` | `schedule_equipment` (junction) | Sylvara's junction is simpler (no quantity). Merge path: extend with quantity. |
+| `ForemanDayRoster` + `SegmentRosterLink` | *(not in Sylvara v1.2)* | The scheduler's foreman-anchored model is more advanced than Sylvara's `schedule_entries`. At merge, Sylvara adopts the scheduler's model. The scheduler's tables are the authoritative design. |
+| `TravelSegment`, `VacatedSlot` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried into Sylvara as-is. |
+| `ScheduleEvent` | *(not in Sylvara v1.2)* | Scheduler-specific history. Will be carried as-is. |
+| `CustomerRisk` | `complaints` (partial overlap) | Sylvara's `complaints` table is broader (service quality, driver behavior, property damage, billing). The scheduler's `CustomerRisk` (severity 1–10, OPEN/MONITORING/RESOLVED) is a customer satisfaction flag, not an incident log. At merge: `CustomerRisk` maps to a severity/status filter on `complaints` where `complaint_type = service_quality`. |
+| `sales_rep_code` (text) | `reps.id` (UUID FK) | Scheduler uses normalized text code (e.g., "JD"). Sylvara has a proper `reps` table. At merge: create a `reps` record per unique code and replace `sales_rep_code` with `rep_id FK`. Keep the text code as a transitional field until the FK is fully populated. |
+| `ImportRun` + `ImportRowMap` | `import_quarantine` (partial overlap) | Both can coexist. `ImportRowMap` provides row→entity traceability (scheduler-specific). Sylvara's `import_quarantine` handles unmapped/failed rows. At merge: keep both; they serve different purposes. |
+| `ActivityLog` | `audit_log` (different purpose) | See §12.1. Both should exist in the merged system. |
+| `OrgSettings` | `tenants` + `tenant_settings` | `OrgSettings.company_timezone` → `tenants.timezone`. `OrgSettings.operating_start_time/end_time` → `tenant_settings` key-value. Replace at merge. |
+| `Requirement`, `RequirementType` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried into Sylvara as-is. |
+| `JobBlocker`, `BlockerReason` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried into Sylvara as-is. |
+| `HomeBase` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried as-is; may eventually link to `properties`. |
+| `EstimateHistory` | `estimate_revisions` (partial overlap) | Sylvara tracks estimate dollar revisions. The scheduler tracks both dollar and hour changes. At merge: extend `estimate_revisions` to include hours. |
+
+### 12.3 Role and permission mapping
+
+| Scheduler role | Sylvara role | Notes |
+|---|---|---|
+| `MANAGER` | `admin` | Full access |
+| `SCHEDULER` | `scheduling` | Schedule create/edit; read-only leads/estimates |
+| `VIEWER` | `read_only` | Read-only across all |
+| *(missing)* | `sales` | Not needed in standalone scheduler; will exist at merge |
+| *(missing)* | `accounting` | Not needed in standalone scheduler |
+| *(missing)* | `foreman` | Not needed in standalone scheduler (foremen are Resources, not users) |
+
+The Auth.js implementation in §2.1.1 uses `MANAGER | SCHEDULER | VIEWER`. When merging into Sylvara, these role names will be migrated to Sylvara's enum. Do not add the Sylvara roles to the standalone scheduler — but do implement the role-permission check in `packages/shared/src/roles.ts` so the mapping point is clean and isolated.
+
+### 12.4 Auth reconciliation path
+
+The standalone scheduler uses **Google OAuth only** (Auth.js). Sylvara's `users` table uses `password_hash` (Argon2/bcrypt) — meaning it was designed for username/password login. These need reconciliation at merge time.
+
+Recommended path: Sylvara's full auth system should adopt OAuth as the primary mechanism (Google Workspace SSO for internal users; potentially other providers for future SaaS). The `password_hash` column in Sylvara can be made nullable to support OAuth-only accounts. This is a Sylvara-level decision, not a scheduler decision — but the scheduler's Auth.js implementation should be treated as the reference pattern.
+
+### 12.5 `jobs.status` — stored vs. derived
+
+Sylvara stores `jobs.status` as an enum column (`to_be_scheduled | scheduled | in_progress | completed | invoiced | unable | winter_hold | unhappy_customer`). The scheduler deliberately does **not** store state — it is derived at query time from `completed_date`, `scheduled_effective_hours`, and `estimate_hours_current` (see §2.5).
+
+This is a genuine architectural conflict. The scheduler's approach is more accurate (state never drifts from its sources), but Sylvara's stored column enables simpler queries and status values the scheduler doesn't model (`invoiced`, `in_progress`).
+
+Reconciliation path at merge time:
+- The scheduler's derived-state algorithm becomes the authoritative source of truth for TBS/PARTIALLY_SCHEDULED/FULLY_SCHEDULED/COMPLETED.
+- Sylvara's `invoiced` status will be added to the scheduler's completion workflow when invoicing is integrated.
+- `in_progress` (crew currently on-site) can be derived from today's active ScheduleSegments if needed, or added as a lightweight manual flag.
+- The Sylvara `jobs.status` column will be replaced with the scheduler's derived-state model. Do not try to keep both.
+- This is a **Stop and Ask** decision if it arises before a formal merge plan exists.
+
+### 12.6 What the scheduler contributes to Sylvara
+
+To be clear about merge direction: the scheduler's scheduling model is the more advanced design. Sylvara will adopt the scheduler's approach, not the other way around:
+
+- `ForemanDayRoster` + `SegmentRosterLink` + `ForemanDayRosterMember` replaces Sylvara's simple `crews` + `schedule_entries` model.
+- `TravelSegment`, `VacatedSlot`, `ScheduleEvent` are net-new capabilities Sylvara doesn't have.
+- The notes parsing pipeline, push-up recommender, and foreman-anchored availability model are all scheduler-originated features.
+- The `ResourceReservation` inventory model extends Sylvara's `schedule_equipment` with quantity tracking.
+
+---
 
 **State invalidation surface:** Derived job state changes when exactly these five write events occur:
 1. A ScheduleSegment is created (for this job)

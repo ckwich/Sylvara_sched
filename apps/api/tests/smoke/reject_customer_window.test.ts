@@ -2,6 +2,12 @@ import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
 
+const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
+const JOB_ID = '22222222-2222-4222-8222-222222222222';
+const FOREMAN_ID = '33333333-3333-4333-8333-333333333333';
+const ROSTER_ID = '44444444-4444-4444-8444-444444444444';
+const SEGMENT_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
 function makeUtcDate(iso: string): Date {
   return new Date(iso);
 }
@@ -10,7 +16,7 @@ function buildWindowConflictPrisma(availabilityNotes: string | null): PrismaClie
   const fakePrisma = {
     job: {
       findUnique: async () => ({
-        id: 10,
+        id: JOB_ID,
         estimateHoursCurrent: '2',
         availabilityNotes,
         requirements: [],
@@ -19,7 +25,7 @@ function buildWindowConflictPrisma(availabilityNotes: string | null): PrismaClie
     },
     foremanDayRoster: {
       findFirst: async () => ({
-        id: 99,
+        id: ROSTER_ID,
         preferredStartMinute: 420,
         preferredStartTime: null,
         homeBase: { openingMinute: 420, openingTime: null },
@@ -41,7 +47,7 @@ function buildWindowConflictPrisma(availabilityNotes: string | null): PrismaClie
         operatingStartTime: null,
       }),
     },
-    user: { findUnique: async () => ({ id: 1 }) },
+    user: { findUnique: async () => ({ id: ACTOR_ID }) },
     segmentRosterLink: { create: async () => undefined },
     jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
     $transaction: async () => undefined,
@@ -67,10 +73,10 @@ describe('A6 customer window conflict and unconfigured warning', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/schedule/one-click-attempt',
-        headers: { 'x-actor-user-id': '1' },
+        headers: { 'x-actor-user-id': ACTOR_ID },
         payload: {
-          jobId: 10,
-          foremanPersonId: 77,
+          jobId: JOB_ID,
+          foremanPersonId: FOREMAN_ID,
           date: '2026-03-03',
         },
       });
@@ -84,11 +90,11 @@ describe('A6 customer window conflict and unconfigured warning', () => {
   );
 
   test('accepts and warns CUSTOMER_WINDOW_NOT_CONFIGURED when window cannot be parsed', async () => {
-    const createdLinks: Array<{ scheduleSegmentId: number; rosterId: number }> = [];
+    const createdLinks: Array<{ scheduleSegmentId: string; rosterId: string }> = [];
     const fakePrisma = {
       job: {
         findUnique: async () => ({
-          id: 10,
+          id: JOB_ID,
           estimateHoursCurrent: '1',
           availabilityNotes: 'mornings only',
           requirements: [],
@@ -97,7 +103,7 @@ describe('A6 customer window conflict and unconfigured warning', () => {
       },
       foremanDayRoster: {
         findFirst: async () => ({
-          id: 99,
+          id: ROSTER_ID,
           preferredStartMinute: 600,
           preferredStartTime: null,
           homeBase: { openingMinute: 420, openingTime: null },
@@ -112,9 +118,9 @@ describe('A6 customer window conflict and unconfigured warning', () => {
           operatingStartTime: null,
         }),
       },
-      user: { findUnique: async () => ({ id: 1 }) },
+      user: { findUnique: async () => ({ id: ACTOR_ID }) },
       segmentRosterLink: {
-        create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+        create: async ({ data }: { data: { scheduleSegmentId: string; rosterId: string } }) => {
           createdLinks.push(data);
           return data;
         },
@@ -122,26 +128,26 @@ describe('A6 customer window conflict and unconfigured warning', () => {
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
       $transaction: async (
         fn: (tx: {
-          scheduleSegment: { create: () => Promise<{ id: number; startDatetime: Date; endDatetime: Date }> };
+          scheduleSegment: { create: () => Promise<{ id: string; startDatetime: Date; endDatetime: Date }> };
           segmentRosterLink: {
-            create: (args: { data: { scheduleSegmentId: number; rosterId: number } }) => Promise<{
-              scheduleSegmentId: number;
-              rosterId: number;
+            create: (args: { data: { scheduleSegmentId: string; rosterId: string } }) => Promise<{
+              scheduleSegmentId: string;
+              rosterId: string;
             }>;
           };
           activityLog: { create: () => Promise<void> };
-        }) => Promise<{ id: number; startDatetime: Date; endDatetime: Date }>,
+        }) => Promise<{ id: string; startDatetime: Date; endDatetime: Date }>,
       ) =>
         fn({
           scheduleSegment: {
             create: async () => ({
-              id: 333,
+              id: SEGMENT_ID,
               startDatetime: makeUtcDate('2026-03-03T15:00:00.000Z'),
               endDatetime: makeUtcDate('2026-03-03T16:00:00.000Z'),
             }),
           },
           segmentRosterLink: {
-            create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+            create: async ({ data }: { data: { scheduleSegmentId: string; rosterId: string } }) => {
               createdLinks.push(data);
               return data;
             },
@@ -154,10 +160,10 @@ describe('A6 customer window conflict and unconfigured warning', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-03',
       },
     });
@@ -167,8 +173,9 @@ describe('A6 customer window conflict and unconfigured warning', () => {
     expect(body.result).toBe('ACCEPT');
     expect(body.warnings.map((w: { code: string }) => w.code)).toContain('CUSTOMER_WINDOW_NOT_CONFIGURED');
     expect(
-      createdLinks.some((link) => link.scheduleSegmentId === 333 && link.rosterId === 99),
+      createdLinks.some((link) => link.scheduleSegmentId === SEGMENT_ID && link.rosterId === ROSTER_ID),
     ).toBe(true);
     await app.close();
   });
 });
+

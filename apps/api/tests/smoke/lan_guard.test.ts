@@ -3,6 +3,8 @@ import { buildServer } from '../../src/server';
 import type { PreferredChannel, PrismaClient } from '@prisma/client';
 
 const LAN_SECRET = 'office-shared-secret-123456';
+const JOB_ID = '22222222-2222-4222-8222-222222222222';
+const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const ORIGINAL_LAN_MODE = process.env.LAN_MODE;
 
 function enableLanMode() {
@@ -77,7 +79,7 @@ describe('LAN guard', () => {
 
     const response = await app.inject({
       method: 'POST',
-      url: '/api/jobs/10/preferred-channels',
+      url: `/api/jobs/${JOB_ID}/preferred-channels`,
       headers: {
         authorization: `Bearer ${LAN_SECRET}`,
       },
@@ -102,11 +104,11 @@ describe('LAN guard', () => {
 
     const response = await app.inject({
       method: 'POST',
-      url: '/api/jobs/10/preferred-channels',
+      url: `/api/jobs/${JOB_ID}/preferred-channels`,
       headers: {
         authorization: `Bearer ${LAN_SECRET}`,
         'x-lan-user': 'Cole',
-        'x-actor-user-id': '1',
+        'x-actor-user-id': ACTOR_ID,
       },
       payload: {
         channels: ['CALL'],
@@ -130,16 +132,16 @@ describe('LAN guard', () => {
       {
         prisma: {
           user: {
-            findFirst: async () => ({ id: 1 }),
+            findFirst: async () => ({ id: ACTOR_ID }),
           },
           job: {
-            findUnique: async () => ({ id: 10 }),
+            findUnique: async () => ({ id: JOB_ID }),
           },
           $transaction: async (
             fn: (tx: {
               jobPreferredChannel: {
-                deleteMany: (args: { where: { jobId: number } }) => Promise<void>;
-                createMany: (args: { data: Array<{ jobId: number; channel: PreferredChannel }> }) => Promise<void>;
+                deleteMany: (args: { where: { jobId: string } }) => Promise<void>;
+                createMany: (args: { data: Array<{ jobId: string; channel: PreferredChannel }> }) => Promise<void>;
               };
               activityLog: {
                 create: (args: { data: { actorDisplay?: string | null; diff: { preferredChannels: PreferredChannel[] } } }) => Promise<void>;
@@ -166,7 +168,7 @@ describe('LAN guard', () => {
 
     const response = await app.inject({
       method: 'POST',
-      url: '/api/jobs/10/preferred-channels',
+      url: `/api/jobs/${JOB_ID}/preferred-channels`,
       headers: {
         authorization: `Bearer ${LAN_SECRET}`,
         'x-lan-user': 'Cole',
@@ -182,3 +184,4 @@ describe('LAN guard', () => {
     await app.close();
   });
 });
+

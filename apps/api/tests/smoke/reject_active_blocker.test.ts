@@ -2,12 +2,16 @@ import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
 
+const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
+const JOB_ID = '22222222-2222-4222-8222-222222222222';
+const FOREMAN_ID = '33333333-3333-4333-8333-333333333333';
+
 describe('A5 reject active blocker', () => {
   test('rejects one-click attempt with ACTIVE_BLOCKER', async () => {
     const fakePrisma = {
       job: {
         findUnique: async () => ({
-          id: 10,
+          id: JOB_ID,
           estimateHoursCurrent: '4',
           availabilityNotes: null,
           requirements: [],
@@ -18,7 +22,7 @@ describe('A5 reject active blocker', () => {
       travelSegment: { findMany: async () => [] },
       scheduleSegment: { findMany: async () => [] },
       orgSettings: { findFirst: async () => null },
-      user: { findUnique: async () => ({ id: 1 }) },
+      user: { findUnique: async () => ({ id: ACTOR_ID }) },
       segmentRosterLink: { create: async () => undefined },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
       $transaction: async () => undefined,
@@ -28,10 +32,10 @@ describe('A5 reject active blocker', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
       },
     });
@@ -49,8 +53,8 @@ describe('A5 reject active blocker', () => {
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
       },
     });
@@ -73,10 +77,10 @@ describe('A5 reject active blocker', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': '999999' },
+      headers: { 'x-actor-user-id': 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' },
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
       },
     });
@@ -91,3 +95,4 @@ describe('A5 reject active blocker', () => {
     await app.close();
   });
 });
+

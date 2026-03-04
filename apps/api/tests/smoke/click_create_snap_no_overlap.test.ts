@@ -3,6 +3,11 @@ import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
 
 const TEST_TZ = 'America/New_York';
+const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
+const JOB_ID = '22222222-2222-4222-8222-222222222222';
+const FOREMAN_ID = '33333333-3333-4333-8333-333333333333';
+const ROSTER_ID = '44444444-4444-4444-8444-444444444444';
+const SEGMENT_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 function makeUtcDate(iso: string): Date {
   return new Date(iso);
@@ -33,11 +38,11 @@ function localParts(iso: string, timeZone: string): { date: string; minute: numb
 
 describe('A3 click-to-create snap and no-overlap', () => {
   test('floors 09:19 to 09:10 and places non-overlapping block', async () => {
-    const createdLinks: Array<{ scheduleSegmentId: number; rosterId: number }> = [];
+    const createdLinks: Array<{ scheduleSegmentId: string; rosterId: string }> = [];
     const fakePrisma = {
       job: {
         findUnique: async () => ({
-          id: 10,
+          id: JOB_ID,
           estimateHoursCurrent: '1',
           availabilityNotes: null,
           requirements: [],
@@ -46,7 +51,7 @@ describe('A3 click-to-create snap and no-overlap', () => {
       },
       foremanDayRoster: {
         findFirst: async () => ({
-          id: 99,
+          id: ROSTER_ID,
           preferredStartMinute: 540,
           preferredStartTime: null,
           homeBase: { openingMinute: 420, openingTime: null },
@@ -75,9 +80,9 @@ describe('A3 click-to-create snap and no-overlap', () => {
           operatingStartTime: null,
         }),
       },
-      user: { findUnique: async () => ({ id: 1 }) },
+      user: { findUnique: async () => ({ id: ACTOR_ID }) },
       segmentRosterLink: {
-        create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+        create: async ({ data }: { data: { scheduleSegmentId: string; rosterId: string } }) => {
           createdLinks.push(data);
           return data;
         },
@@ -86,29 +91,29 @@ describe('A3 click-to-create snap and no-overlap', () => {
       $transaction: async (
         fn: (tx: {
           scheduleSegment: {
-            create: () => Promise<{ id: number; startDatetime: Date; endDatetime: Date }>;
+            create: () => Promise<{ id: string; startDatetime: Date; endDatetime: Date }>;
           };
           segmentRosterLink: {
-            create: (args: { data: { scheduleSegmentId: number; rosterId: number } }) => Promise<{
-              scheduleSegmentId: number;
-              rosterId: number;
+            create: (args: { data: { scheduleSegmentId: string; rosterId: string } }) => Promise<{
+              scheduleSegmentId: string;
+              rosterId: string;
             }>;
           };
           activityLog: {
             create: () => Promise<void>;
           };
-        }) => Promise<{ id: number; startDatetime: Date; endDatetime: Date }>,
+        }) => Promise<{ id: string; startDatetime: Date; endDatetime: Date }>,
       ) =>
         fn({
           scheduleSegment: {
             create: async () => ({
-              id: 123,
+              id: SEGMENT_ID,
               startDatetime: makeUtcDate('2026-03-03T14:10:00.000Z'),
               endDatetime: makeUtcDate('2026-03-03T15:10:00.000Z'),
             }),
           },
           segmentRosterLink: {
-            create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+            create: async ({ data }: { data: { scheduleSegmentId: string; rosterId: string } }) => {
               createdLinks.push(data);
               return data;
             },
@@ -123,10 +128,10 @@ describe('A3 click-to-create snap and no-overlap', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-03',
         requestedStartMinute: 559,
       },
@@ -139,8 +144,9 @@ describe('A3 click-to-create snap and no-overlap', () => {
     expect(local.date).toBe('2026-03-03');
     expect(local.minute).toBe(550);
     expect(
-      createdLinks.some((link) => link.scheduleSegmentId === 123 && link.rosterId === 99),
+      createdLinks.some((link) => link.scheduleSegmentId === SEGMENT_ID && link.rosterId === ROSTER_ID),
     ).toBe(true);
     await app.close();
   });
 });
+

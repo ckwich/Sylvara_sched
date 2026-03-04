@@ -6,6 +6,8 @@ import {
   UserRole,
 } from '@prisma/client';
 
+const ORG_SETTINGS_ID = '11111111-1111-4111-8111-111111111111';
+
 export function makePrisma(): PrismaClient {
   const testDatabaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!testDatabaseUrl) {
@@ -70,9 +72,9 @@ export async function seedBase(
   });
 
   await prisma.orgSettings.upsert({
-    where: { id: 1 },
+    where: { id: ORG_SETTINGS_ID },
     create: {
-      id: 1,
+      id: ORG_SETTINGS_ID,
       companyTimezone: 'America/New_York',
     },
     update: {
@@ -138,7 +140,7 @@ export async function seedBase(
 
 export async function linkSegmentToRoster(
   prisma: PrismaClient,
-  input: { scheduleSegmentId: number; rosterId: number; createdByUserId: number },
+  input: { scheduleSegmentId: string; rosterId: string; createdByUserId: string },
 ) {
   return prisma.segmentRosterLink.create({
     data: {
@@ -152,9 +154,9 @@ export async function linkSegmentToRoster(
 export async function createLinkedSegment(
   prisma: PrismaClient,
   input: {
-    jobId: number;
-    rosterId: number;
-    createdByUserId: number;
+    jobId: string;
+    rosterId: string;
+    createdByUserId: string;
     startDatetime: Date;
     endDatetime: Date;
   },
@@ -175,3 +177,4 @@ export async function createLinkedSegment(
   });
   return segment;
 }
+

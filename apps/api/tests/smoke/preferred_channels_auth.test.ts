@@ -2,12 +2,15 @@ import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient, PreferredChannel } from '@prisma/client';
 
+const ACTOR_ID = '42424242-4242-4242-8242-424242424242';
+const JOB_ID = '22222222-2222-4222-8222-222222222222';
+
 describe('preferred channels auth-backed actor attribution', () => {
   test('returns 401 when actor header is missing', async () => {
     const app = buildServer({ prisma: {} as PrismaClient });
     const response = await app.inject({
       method: 'POST',
-      url: '/api/jobs/10/preferred-channels',
+      url: `/api/jobs/${JOB_ID}/preferred-channels`,
       payload: {
         channels: ['CALL'],
       },
@@ -24,24 +27,24 @@ describe('preferred channels auth-backed actor attribution', () => {
   });
 
   test('uses actor header for activity log write', async () => {
-    const captured: { actorUserId?: number; channels?: PreferredChannel[] } = {};
+    const captured: { actorUserId?: string; channels?: PreferredChannel[] } = {};
     const fakePrisma = {
       user: {
-        findUnique: async ({ where }: { where: { id: number } }) =>
-          where.id === 42 ? { id: 42 } : null,
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          where.id === ACTOR_ID ? { id: ACTOR_ID } : null,
       },
       job: {
-        findUnique: async ({ where }: { where: { id: number } }) =>
-          where.id === 10 ? { id: 10 } : null,
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          where.id === JOB_ID ? { id: JOB_ID } : null,
       },
       $transaction: async (
         fn: (tx: {
           jobPreferredChannel: {
-            deleteMany: (args: { where: { jobId: number } }) => Promise<void>;
-            createMany: (args: { data: Array<{ jobId: number; channel: PreferredChannel }> }) => Promise<void>;
+            deleteMany: (args: { where: { jobId: string } }) => Promise<void>;
+            createMany: (args: { data: Array<{ jobId: string; channel: PreferredChannel }> }) => Promise<void>;
           };
           activityLog: {
-            create: (args: { data: { actorUserId: number; diff: { preferredChannels: PreferredChannel[] } } }) => Promise<void>;
+            create: (args: { data: { actorUserId: string; diff: { preferredChannels: PreferredChannel[] } } }) => Promise<void>;
           };
         }) => Promise<void>,
       ) =>
@@ -63,8 +66,8 @@ describe('preferred channels auth-backed actor attribution', () => {
     const app = buildServer({ prisma: fakePrisma });
     const response = await app.inject({
       method: 'POST',
-      url: '/api/jobs/10/preferred-channels',
-      headers: { 'x-actor-user-id': '42' },
+      url: `/api/jobs/${JOB_ID}/preferred-channels`,
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
         channels: ['CALL', 'TEXT'],
       },
@@ -75,7 +78,7 @@ describe('preferred channels auth-backed actor attribution', () => {
       ok: true,
       channels: ['CALL', 'TEXT'],
     });
-    expect(captured.actorUserId).toBe(42);
+    expect(captured.actorUserId).toBe(ACTOR_ID);
     expect(captured.channels).toEqual(['CALL', 'TEXT']);
     await app.close();
   });
@@ -84,8 +87,8 @@ describe('preferred channels auth-backed actor attribution', () => {
     let transactionCalled = false;
     const fakePrisma = {
       user: {
-        findUnique: async ({ where }: { where: { id: number } }) =>
-          where.id === 42 ? { id: 42 } : null,
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          where.id === ACTOR_ID ? { id: ACTOR_ID } : null,
       },
       job: {
         findUnique: async () => null,
@@ -98,8 +101,8 @@ describe('preferred channels auth-backed actor attribution', () => {
     const app = buildServer({ prisma: fakePrisma });
     const response = await app.inject({
       method: 'POST',
-      url: '/api/jobs/999999/preferred-channels',
-      headers: { 'x-actor-user-id': '42' },
+      url: '/api/jobs/99999999-9999-4999-8999-999999999999/preferred-channels',
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
         channels: ['CALL'],
       },
@@ -118,8 +121,8 @@ describe('preferred channels auth-backed actor attribution', () => {
     const app = buildServer({ prisma: fakePrisma });
     const response = await app.inject({
       method: 'POST',
-      url: '/api/jobs/10/preferred-channels',
-      headers: { 'x-actor-user-id': '999999' },
+      url: `/api/jobs/${JOB_ID}/preferred-channels`,
+      headers: { 'x-actor-user-id': 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' },
       payload: {
         channels: ['CALL'],
       },
@@ -135,3 +138,4 @@ describe('preferred channels auth-backed actor attribution', () => {
     await app.close();
   });
 });
+

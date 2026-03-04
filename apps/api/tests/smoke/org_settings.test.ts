@@ -2,6 +2,10 @@ import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
 
+const ACTOR_1_ID = '11111111-1111-4111-8111-111111111111';
+const ACTOR_7_ID = '77777777-7777-4777-8777-777777777777';
+const ACTOR_9_ID = '99999999-9999-4999-8999-999999999999';
+
 describe('org settings endpoints', () => {
   test('GET /api/org-settings returns timezone', async () => {
     const app = buildServer({
@@ -54,7 +58,7 @@ describe('org settings endpoints', () => {
     const app = buildServer({
       prisma: {
         user: {
-          findUnique: async () => ({ id: 1 }),
+          findUnique: async () => ({ id: ACTOR_1_ID }),
         },
       } as unknown as PrismaClient,
     });
@@ -62,7 +66,7 @@ describe('org settings endpoints', () => {
       method: 'PATCH',
       url: '/api/org-settings',
       headers: {
-        'x-actor-user-id': '1',
+        'x-actor-user-id': ACTOR_1_ID,
       },
       payload: {
         companyTimezone: 'Not/A_Real_Zone',
@@ -76,11 +80,11 @@ describe('org settings endpoints', () => {
   });
 
   test('PATCH /api/org-settings updates timezone for valid value', async () => {
-    const captured: { companyTimezone?: string; actorUserId?: number } = {};
+    const captured: { companyTimezone?: string; actorUserId?: string } = {};
     const app = buildServer({
       prisma: {
         user: {
-          findUnique: async () => ({ id: 7 }),
+          findUnique: async () => ({ id: ACTOR_7_ID }),
         },
         $transaction: async (
           fn: (tx: {
@@ -94,7 +98,7 @@ describe('org settings endpoints', () => {
               }>;
             };
             activityLog: {
-              create: (args: { data: { actorUserId: number } }) => Promise<void>;
+              create: (args: { data: { actorUserId: string } }) => Promise<void>;
             };
           }) => Promise<{
             companyTimezone: string;
@@ -125,7 +129,7 @@ describe('org settings endpoints', () => {
       method: 'PATCH',
       url: '/api/org-settings',
       headers: {
-        'x-actor-user-id': '7',
+        'x-actor-user-id': ACTOR_7_ID,
       },
       payload: {
         companyTimezone: 'America/Chicago',
@@ -135,7 +139,7 @@ describe('org settings endpoints', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().companyTimezone).toBe('America/Chicago');
     expect(captured.companyTimezone).toBe('America/Chicago');
-    expect(captured.actorUserId).toBe(7);
+    expect(captured.actorUserId).toBe(ACTOR_7_ID);
     await app.close();
   });
 
@@ -144,7 +148,7 @@ describe('org settings endpoints', () => {
     const app = buildServer({
       prisma: {
         user: {
-          findUnique: async () => ({ id: 9 }),
+          findUnique: async () => ({ id: ACTOR_9_ID }),
         },
         $transaction: async (
           fn: (tx: {
@@ -188,7 +192,7 @@ describe('org settings endpoints', () => {
       method: 'PATCH',
       url: '/api/org-settings',
       headers: {
-        'x-actor-user-id': '9',
+        'x-actor-user-id': ACTOR_9_ID,
       },
       payload: {
         companyTimezone: 'America/Chicago',
@@ -200,3 +204,4 @@ describe('org settings endpoints', () => {
     await app.close();
   });
 });
+

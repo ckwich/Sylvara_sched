@@ -23,7 +23,7 @@ export function isUnauthenticatedError(error: unknown): error is Unauthenticated
 export async function requireActorUserId(
   prisma: Pick<PrismaClient, 'user'>,
   request: FastifyRequest,
-): Promise<number> {
+): Promise<string> {
   if (process.env.NODE_ENV === 'production') {
     throw new UnauthenticatedError();
   }
@@ -52,10 +52,10 @@ export async function requireActorUserId(
     throw new UnauthenticatedError();
   }
 
-  const actorUserId = Number.parseInt(value, 10);
-  if (!Number.isInteger(actorUserId) || actorUserId <= 0) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
     throw new UnauthenticatedError();
   }
+  const actorUserId = value;
 
   const user = await prisma.user.findUnique({
     where: { id: actorUserId },

@@ -3,6 +3,12 @@ import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
 
 const TEST_TZ = 'America/New_York';
+const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
+const JOB_ID = '22222222-2222-4222-8222-222222222222';
+const FOREMAN_ID = '33333333-3333-4333-8333-333333333333';
+const ROSTER_ID = '44444444-4444-4444-8444-444444444444';
+const SEGMENT_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const HOME_BASE_ID = '55555555-5555-4555-8555-555555555555';
 
 function makeDate(date: string, minute: number) {
   return new Date(new Date(`${date}T00:00:00.000Z`).getTime() + minute * 60_000);
@@ -33,12 +39,12 @@ function localParts(iso: string, timeZone: string): { date: string; minute: numb
 
 describe('A2 one-click schedule success', () => {
   test('creates onsite segment and roster link without END_OF_DAY travel', async () => {
-    const createdLinks: Array<{ scheduleSegmentId: number; rosterId: number }> = [];
+    const createdLinks: Array<{ scheduleSegmentId: string; rosterId: string }> = [];
 
     const fakePrisma = {
       job: {
         findUnique: async () => ({
-          id: 10,
+          id: JOB_ID,
           estimateHoursCurrent: '4',
           availabilityNotes: null,
           requirements: [],
@@ -47,7 +53,7 @@ describe('A2 one-click schedule success', () => {
       },
       foremanDayRoster: {
         findFirst: async () => ({
-          id: 99,
+          id: ROSTER_ID,
           preferredStartMinute: 480,
           preferredStartTime: null,
           homeBase: { openingMinute: 420, openingTime: null },
@@ -66,9 +72,9 @@ describe('A2 one-click schedule success', () => {
           operatingStartTime: null,
         }),
       },
-      user: { findUnique: async () => ({ id: 1 }) },
+      user: { findUnique: async () => ({ id: ACTOR_ID }) },
       segmentRosterLink: {
-        create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+        create: async ({ data }: { data: { scheduleSegmentId: string; rosterId: string } }) => {
           createdLinks.push(data);
           return data;
         },
@@ -80,27 +86,27 @@ describe('A2 one-click schedule success', () => {
       $transaction: async (
         fn: (tx: {
           scheduleSegment: {
-            create: () => Promise<{ id: number; startDatetime: Date; endDatetime: Date }>;
+            create: () => Promise<{ id: string; startDatetime: Date; endDatetime: Date }>;
           };
           segmentRosterLink: {
-            create: (args: { data: { scheduleSegmentId: number; rosterId: number } }) => Promise<{
-              scheduleSegmentId: number;
-              rosterId: number;
+            create: (args: { data: { scheduleSegmentId: string; rosterId: string } }) => Promise<{
+              scheduleSegmentId: string;
+              rosterId: string;
             }>;
           };
           activityLog: { create: () => Promise<void> };
-        }) => Promise<{ id: number; startDatetime: Date; endDatetime: Date }>,
+        }) => Promise<{ id: string; startDatetime: Date; endDatetime: Date }>,
       ) =>
         fn({
           scheduleSegment: {
             create: async () => ({
-              id: 123,
+              id: SEGMENT_ID,
               startDatetime: makeDate('2026-03-02', 480),
               endDatetime: makeDate('2026-03-02', 720),
             }),
           },
           segmentRosterLink: {
-            create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+            create: async ({ data }: { data: { scheduleSegmentId: string; rosterId: string } }) => {
               createdLinks.push(data);
               return data;
             },
@@ -115,10 +121,10 @@ describe('A2 one-click schedule success', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
       },
     });
@@ -126,9 +132,9 @@ describe('A2 one-click schedule success', () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.result).toBe('ACCEPT');
-    expect(body.segment.id).toBe(123);
+    expect(body.segment.id).toBe(SEGMENT_ID);
     expect(createdLinks).toHaveLength(1);
-    expect(createdLinks[0].rosterId).toBe(99);
+    expect(createdLinks[0].rosterId).toBe(ROSTER_ID);
     await app.close();
   });
 
@@ -136,7 +142,7 @@ describe('A2 one-click schedule success', () => {
     const fakePrisma = {
       job: {
         findUnique: async () => ({
-          id: 10,
+          id: JOB_ID,
           estimateHoursCurrent: '1',
           availabilityNotes: null,
           requirements: [],
@@ -145,7 +151,7 @@ describe('A2 one-click schedule success', () => {
       },
       foremanDayRoster: {
         findFirst: async () => ({
-          id: 99,
+          id: ROSTER_ID,
           preferredStartMinute: 1435,
           preferredStartTime: null,
           homeBase: { openingMinute: 420, openingTime: null },
@@ -160,7 +166,7 @@ describe('A2 one-click schedule success', () => {
           operatingStartTime: null,
         }),
       },
-      user: { findUnique: async () => ({ id: 1 }) },
+      user: { findUnique: async () => ({ id: ACTOR_ID }) },
       segmentRosterLink: { create: async () => undefined },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
       $transaction: async () => undefined,
@@ -170,10 +176,10 @@ describe('A2 one-click schedule success', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-03',
         requestedStartMinute: 1410,
       },
@@ -187,14 +193,14 @@ describe('A2 one-click schedule success', () => {
   });
 
   test('places repeat attempts deterministically without overlap and reuses same roster link', async () => {
-    const createdLinks: Array<{ scheduleSegmentId: number; rosterId: number }> = [];
-    const createdSegments: Array<{ id: number; startDatetime: Date; endDatetime: Date }> = [];
+    const createdLinks: Array<{ scheduleSegmentId: string; rosterId: string }> = [];
+    const createdSegments: Array<{ id: string; startDatetime: Date; endDatetime: Date }> = [];
     let nextSegmentId = 200;
 
     const fakePrisma = {
       job: {
         findUnique: async () => ({
-          id: 10,
+          id: JOB_ID,
           estimateHoursCurrent: '2',
           availabilityNotes: null,
           requirements: [],
@@ -203,7 +209,7 @@ describe('A2 one-click schedule success', () => {
       },
       foremanDayRoster: {
         findFirst: async () => ({
-          id: 99,
+          id: ROSTER_ID,
           preferredStartMinute: 420,
           preferredStartTime: null,
           homeBase: { openingMinute: 420, openingTime: null },
@@ -220,9 +226,9 @@ describe('A2 one-click schedule success', () => {
           operatingStartTime: null,
         }),
       },
-      user: { findUnique: async () => ({ id: 1 }) },
+      user: { findUnique: async () => ({ id: ACTOR_ID }) },
       segmentRosterLink: {
-        create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+        create: async ({ data }: { data: { scheduleSegmentId: string; rosterId: string } }) => {
           createdLinks.push(data);
           return data;
         },
@@ -232,25 +238,25 @@ describe('A2 one-click schedule success', () => {
         fn: (tx: {
           scheduleSegment: {
             create: (args: { data: { startDatetime: Date; endDatetime: Date } }) => Promise<{
-              id: number;
+              id: string;
               startDatetime: Date;
               endDatetime: Date;
             }>;
           };
           segmentRosterLink: {
-            create: (args: { data: { scheduleSegmentId: number; rosterId: number } }) => Promise<{
-              scheduleSegmentId: number;
-              rosterId: number;
+            create: (args: { data: { scheduleSegmentId: string; rosterId: string } }) => Promise<{
+              scheduleSegmentId: string;
+              rosterId: string;
             }>;
           };
           activityLog: { create: () => Promise<void> };
-        }) => Promise<{ id: number; startDatetime: Date; endDatetime: Date }>,
+        }) => Promise<{ id: string; startDatetime: Date; endDatetime: Date }>,
       ) =>
         fn({
           scheduleSegment: {
             create: async ({ data }: { data: { startDatetime: Date; endDatetime: Date } }) => {
               const created = {
-                id: nextSegmentId,
+                id: `00000000-0000-0000-0000-${String(nextSegmentId).padStart(12, '0')}`,
                 startDatetime: data.startDatetime,
                 endDatetime: data.endDatetime,
               };
@@ -260,7 +266,7 @@ describe('A2 one-click schedule success', () => {
             },
           },
           segmentRosterLink: {
-            create: async ({ data }: { data: { scheduleSegmentId: number; rosterId: number } }) => {
+            create: async ({ data }: { data: { scheduleSegmentId: string; rosterId: string } }) => {
               createdLinks.push(data);
               return data;
             },
@@ -274,10 +280,10 @@ describe('A2 one-click schedule success', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-03',
         requestedStartMinute: 420,
       },
@@ -290,10 +296,10 @@ describe('A2 one-click schedule success', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-03',
       },
     });
@@ -314,10 +320,14 @@ describe('A2 one-click schedule success', () => {
     expect(secondLocalStart.minute).toBeGreaterThanOrEqual(firstLocalEnd.minute);
     expect(secondLocalStart.minute % 10).toBe(0);
     expect(
-      createdLinks.some((link) => link.scheduleSegmentId === firstBody.segment.id && link.rosterId === 99),
+      createdLinks.some(
+        (link) => link.scheduleSegmentId === firstBody.segment.id && link.rosterId === ROSTER_ID,
+      ),
     ).toBe(true);
     expect(
-      createdLinks.some((link) => link.scheduleSegmentId === secondBody.segment.id && link.rosterId === 99),
+      createdLinks.some(
+        (link) => link.scheduleSegmentId === secondBody.segment.id && link.rosterId === ROSTER_ID,
+      ),
     ).toBe(true);
     await app.close();
   });
@@ -326,7 +336,7 @@ describe('A2 one-click schedule success', () => {
     const fakePrisma = {
       job: {
         findUnique: async () => ({
-          id: 10,
+          id: JOB_ID,
           estimateHoursCurrent: '1',
           availabilityNotes: null,
           requirements: [],
@@ -336,7 +346,7 @@ describe('A2 one-click schedule success', () => {
       foremanDayRoster: {
         findFirst: async () => null,
         create: async () => ({
-          id: 99,
+          id: ROSTER_ID,
           preferredStartMinute: null,
           preferredStartTime: null,
           homeBase: { openingMinute: 420, openingTime: null },
@@ -351,19 +361,19 @@ describe('A2 one-click schedule success', () => {
           operatingStartTime: null,
         }),
       },
-      user: { findUnique: async () => ({ id: 1 }) },
+      user: { findUnique: async () => ({ id: ACTOR_ID }) },
       activityLog: { create: async () => undefined },
       segmentRosterLink: { create: async () => ({}) },
       jobPreferredChannel: { deleteMany: async () => undefined, createMany: async () => undefined },
       $transaction: async (
         fn: (tx: {
-          scheduleSegment: { create: () => Promise<{ id: number }> };
+          scheduleSegment: { create: () => Promise<{ id: string }> };
           segmentRosterLink: { create: () => Promise<Record<string, unknown>> };
           activityLog: { create: () => Promise<void> };
-        }) => Promise<{ id: number }>,
+        }) => Promise<{ id: string }>,
       ) =>
         fn({
-          scheduleSegment: { create: async () => ({ id: 123 }) },
+          scheduleSegment: { create: async () => ({ id: SEGMENT_ID }) },
           segmentRosterLink: { create: async () => ({}) },
           activityLog: { create: async () => undefined },
         }),
@@ -373,12 +383,12 @@ describe('A2 one-click schedule success', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': '1' },
+      headers: { 'x-actor-user-id': ACTOR_ID },
       payload: {
-        jobId: 10,
-        foremanPersonId: 77,
+        jobId: JOB_ID,
+        foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
-        homeBaseId: 5,
+        homeBaseId: HOME_BASE_ID,
       },
     });
 
@@ -388,3 +398,4 @@ describe('A2 one-click schedule success', () => {
     await app.close();
   });
 });
+
