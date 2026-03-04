@@ -11,3 +11,11 @@ export {
   parseHHMMToMinute,
   resolveAnchorMinute,
 } from './time-of-day.js';
+
+export type {
+  DetectedRequirement,
+  DetectedScheduleEvent,
+  ParsedNotes,
+  ParsedNotesConfidence,
+} from './notes-parser.js';
+export { parseNotes } from './notes-parser.js';

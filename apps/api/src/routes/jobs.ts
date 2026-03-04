@@ -1,6 +1,7 @@
 import { Prisma, EquipmentType, JobBlockerStatus, RequirementStatus, type PrismaClient } from '@prisma/client';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { parseNotes, type ParsedNotes } from '@sylvara/shared';
 import { getActorDisplay, isUnauthenticatedError, requireActorUserId } from '../http/actor.js';
 import { computeScheduledEffectiveHours, deriveJobState } from '../scheduling/job-state.js';
 
@@ -12,6 +13,8 @@ type JobHoursRow = {
   job_id: string;
   hours: number;
 };
+
+type RequirementTypeCode = ParsedNotes['requirements'][number]['typeCode'];
 
 const uuidSchema = z.string().uuid();
 const dateOnlySchema = z
@@ -385,6 +388,10 @@ function buildJobDiff(
   return diff;
 }
 
+function scheduleEventKey(event: { eventType: string; fromAt: Date | null; toAt: Date | null; rawSnippet: string }) {
+  return `${event.eventType}|${event.fromAt?.toISOString() ?? 'null'}|${event.toAt?.toISOString() ?? 'null'}|${event.rawSnippet}`;
+}
+
 export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
   app.get('/api/jobs', async (request, reply) => {
     const query = jobListQuerySchema.safeParse(request.query);
@@ -629,6 +636,8 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
 
     const payload = body.data;
     const updateData: Prisma.JobUpdateInput = {};
+    const shouldParseNotes = payload.notesRaw !== undefined && payload.notesRaw !== existing.notesRaw;
+    const parsedNotes = shouldParseNotes ? parseNotes(payload.notesRaw ?? '') : null;
 
     const nextEquipmentType = payload.equipmentType ?? existing.equipmentType;
     if (payload.requiresSpiderLift !== undefined && nextEquipmentType === EquipmentType.CRANE) {
@@ -671,6 +680,13 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
     }
     if (payload.notesRaw !== undefined) {
       updateData.notesRaw = payload.notesRaw;
+      if (parsedNotes) {
+        updateData.notesLastParsedAt = new Date();
+        updateData.notesParseConfidence = parsedNotes.confidence;
+        updateData.pushUpIfPossible = parsedNotes.pushUpIfPossible;
+        updateData.mustBeFirstJob = parsedNotes.mustBeFirstJob;
+        updateData.noEmail = parsedNotes.noEmail;
+      }
     }
     if (payload.winterFlag !== undefined) {
       updateData.winterFlag = payload.winterFlag;
@@ -728,6 +744,143 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
             newAmountDollars: updated.amountDollars,
             previousEstimateHours: existing.estimateHoursCurrent,
             newEstimateHours: updated.estimateHoursCurrent,
+          },
+        });
+      }
+
+      if (parsedNotes) {
+        const detectedTypeCodes = Array.from(new Set(parsedNotes.requirements.map((requirement) => requirement.typeCode)));
+        if (detectedTypeCodes.length > 0) {
+          const typeCodeToDbCode: Record<RequirementTypeCode, string> = {
+            POLICE_DETAIL: 'POLICE_DETAIL',
+            CRANE_AND_BOOM_PERMIT: 'CRANE_AND_BOOM_PERMIT',
+            TREE_PERMIT: 'TREE_PERMIT',
+          };
+
+          const requirementTypes = await tx.requirementType.findMany({
+            where: {
+              deletedAt: null,
+              code: {
+                in: detectedTypeCodes.map((typeCode) => typeCodeToDbCode[typeCode]),
+              },
+            },
+            select: {
+              id: true,
+              code: true,
+            },
+          });
+
+          const requirementTypeIdByCode = new Map(requirementTypes.map((type) => [type.code, type.id]));
+          const existingRequirements = await tx.requirement.findMany({
+            where: {
+              deletedAt: null,
+              jobId: existing.id,
+              requirementTypeId: {
+                in: requirementTypes.map((type) => type.id),
+              },
+            },
+            select: {
+              requirementTypeId: true,
+            },
+          });
+
+          const existingTypeIds = new Set(existingRequirements.map((requirement) => requirement.requirementTypeId));
+          const firstRequirementSnippetByCode = new Map<string, string>();
+          for (const requirement of parsedNotes.requirements) {
+            if (!firstRequirementSnippetByCode.has(requirement.typeCode)) {
+              firstRequirementSnippetByCode.set(requirement.typeCode, requirement.rawSnippet);
+            }
+          }
+
+          for (const typeCode of detectedTypeCodes) {
+            const dbCode = typeCodeToDbCode[typeCode];
+            const requirementTypeId = requirementTypeIdByCode.get(dbCode);
+            if (!requirementTypeId || existingTypeIds.has(requirementTypeId)) {
+              continue;
+            }
+
+            await tx.requirement.create({
+              data: {
+                jobId: existing.id,
+                requirementTypeId,
+                status: RequirementStatus.REQUIRED,
+                source: 'LEGACY_PARSE',
+                rawSnippet: firstRequirementSnippetByCode.get(typeCode),
+              },
+            });
+          }
+        }
+
+        if (parsedNotes.scheduleEvents.length > 0) {
+          const existingScheduleEvents = await tx.scheduleEvent.findMany({
+            where: {
+              deletedAt: null,
+              jobId: existing.id,
+              source: 'LEGACY_PARSE',
+              eventType: {
+                in: parsedNotes.scheduleEvents.map((event) => event.eventType),
+              },
+            },
+            select: {
+              eventType: true,
+              fromAt: true,
+              toAt: true,
+              rawSnippet: true,
+            },
+          });
+
+          const existingKeys = new Set(
+            existingScheduleEvents.map((event) =>
+              scheduleEventKey({
+                eventType: event.eventType,
+                fromAt: event.fromAt,
+                toAt: event.toAt,
+                rawSnippet: event.rawSnippet ?? '',
+              }),
+            ),
+          );
+
+          for (const event of parsedNotes.scheduleEvents) {
+            const key = scheduleEventKey(event);
+            if (existingKeys.has(key)) {
+              continue;
+            }
+
+            await tx.scheduleEvent.create({
+              data: {
+                jobId: existing.id,
+                eventType: event.eventType,
+                source: 'LEGACY_PARSE',
+                fromAt: event.fromAt,
+                toAt: event.toAt,
+                rawSnippet: event.rawSnippet,
+              },
+            });
+          }
+        }
+
+        await tx.activityLog.create({
+          data: {
+            entityType: 'Job',
+            entityId: existing.id,
+            actionType: 'NOTE_PARSED',
+            actorUserId: actor.actorUserId,
+            actorDisplay: actor.actorDisplay,
+            diff: {
+              detectedFlags: [
+                ...(parsedNotes.pushUpIfPossible ? ['pushUpIfPossible'] : []),
+                ...(parsedNotes.mustBeFirstJob ? ['mustBeFirstJob'] : []),
+                ...(parsedNotes.noEmail ? ['noEmail'] : []),
+                ...(parsedNotes.ditchWitchSuggested ? ['ditchWitchSuggested'] : []),
+              ],
+              detectedRequirements: parsedNotes.requirements.map((requirement) => requirement.typeCode),
+              scheduleEvents: parsedNotes.scheduleEvents.map((event) => ({
+                eventType: event.eventType,
+                fromAt: event.fromAt ? event.fromAt.toISOString() : null,
+                toAt: event.toAt ? event.toAt.toISOString() : null,
+                rawSnippet: event.rawSnippet,
+              })),
+            },
           },
         });
       }
