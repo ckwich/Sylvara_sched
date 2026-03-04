@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import http from 'node:http';
 import { getLanHealthTargets } from './lan-health-targets.mjs';
 
@@ -11,6 +12,7 @@ const apiPort = process.env.API_PORT ?? '4000';
 const lanSharedSecret = process.env.LAN_SHARED_SECRET;
 const minSharedSecretLength = 24;
 const { webHealthUrl, apiHealthViaWebProxyUrl, rawApiHealthUrl } = getLanHealthTargets();
+const coworkerUrl = process.env.PUBLIC_WEB_ORIGIN ?? `http://${os.hostname()}:${webPort}`;
 
 if (!lanSharedSecret || lanSharedSecret.trim().length < minSharedSecretLength) {
   console.error(`LAN_SHARED_SECRET is required and must be at least ${minSharedSecretLength} characters for LAN mode.`);
@@ -195,6 +197,8 @@ const webArgs = [nextBin, 'start', '-H', hostBind, '-p', webPort];
 
 console.log(`Launch API: ${apiCommand} ${apiArgs.join(' ')} (cwd=${process.cwd()})`);
 console.log(`Launch WEB: ${webCommand} ${webArgs.join(' ')} (cwd=${webCwd})`);
+console.log(`Coworker URL: ${coworkerUrl}/dispatch`);
+console.log(`Logs directory: ${pidDir}`);
 
 const apiChild = spawnDetached(apiCommand, apiArgs, apiLogPath);
 const webChild = spawnDetached(webCommand, webArgs, webLogPath, webCwd);
@@ -283,3 +287,4 @@ if (!ready.ok) {
 
 console.log(`LAN services started and healthy (API PID ${processes.api.pid}, WEB PID ${processes.web.pid}).`);
 console.log(`Logs: ${apiLogPath} and ${webLogPath}`);
+console.log(`Open from another machine: ${coworkerUrl}/dispatch`);

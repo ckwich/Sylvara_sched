@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { fileURLToPath } from 'node:url';
 import { getLanHealthTargets } from './lan-health-targets.mjs';
 
 const { webHealthUrl, apiHealthViaWebProxyUrl, rawApiHealthUrl } = getLanHealthTargets();
@@ -55,7 +56,7 @@ async function check(url, label) {
   });
 }
 
-async function main() {
+export async function checkLanHealth() {
   console.log(`Health targets:`);
   console.log(`- webHealthUrl=${webHealthUrl}`);
   console.log(`- apiHealthViaWebProxyUrl=${apiHealthViaWebProxyUrl}`);
@@ -70,12 +71,15 @@ async function main() {
 
   if (webHealthOk && apiHealthViaProxyOk && rawApiHealthOk) {
     console.log('LAN check passed.');
-    process.exitCode = 0;
-    return;
+    return true;
   }
 
   console.error('LAN check failed.');
-  process.exitCode = 1;
+  return false;
 }
 
-await main();
+const isEntrypoint = process.argv[1] === fileURLToPath(import.meta.url);
+if (isEntrypoint) {
+  const ok = await checkLanHealth();
+  process.exitCode = ok ? 0 : 1;
+}

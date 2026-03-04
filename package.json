@@ -7,6 +7,7 @@
     "lan": "node scripts/lan-dev.mjs",
     "lan:build": "corepack pnpm --filter @sylvara/shared build && corepack pnpm --filter @sylvara/api build && corepack pnpm --filter @sylvara/web build",
     "lan:start": "node scripts/lan-start.mjs",
+    "lan:status": "node scripts/lan-status.mjs",
     "lan:stop": "node scripts/lan-stop.mjs",
     "lan:check": "node scripts/lan-check.mjs",
     "dev:all": "turbo run dev --parallel",
