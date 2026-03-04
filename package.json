@@ -13,6 +13,7 @@
     "lint": "corepack pnpm -r lint",
     "format": "prettier --write .",
     "reset:schedule-day": "corepack pnpm --filter @sylvara/api reset:schedule-day --",
+    "seed:lan-demo": "node scripts/seed-lan-demo.mjs",
     "test:db:up": "docker compose -f docker-compose.test.yml up -d",
     "test:db:down": "docker compose -f docker-compose.test.yml down -v",
     "test:db:reset": "node scripts/test-db-reset.mjs",

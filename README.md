@@ -58,6 +58,18 @@ Use this when running the Scheduler from an always-on office host so coworkers c
 9. Security caveat:
    - This is not real authentication/authorization and must remain internal-only.
 
+### LAN Pilot: first-time setup (quick demo)
+
+1. Build and start LAN services:
+   - `corepack pnpm lan:build`
+   - `corepack pnpm lan:start`
+   - `corepack pnpm lan:check`
+2. Open `http://<host-machine-name>:3000/dispatch`.
+3. In non-production runs (`NODE_ENV != production`), use **Dev Tools** on `/dispatch`:
+   - **Seed Demo Fixtures** (creates one actor/home base/foreman/roster/job fixture set)
+   - **Reset Schedule Day** (runs the existing reset flow for a foreman/date)
+4. Reload the day in Dispatch after seed/reset to verify roster-linked results.
+
 ## Integration Tests (Real Postgres)
 
 Test DB uses `docker-compose.test.yml` and `TEST_DATABASE_URL`.

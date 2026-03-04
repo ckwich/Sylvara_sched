@@ -183,9 +183,16 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
   const [showDiagnostics, setShowDiagnostics] = useState(!lanModeEnabled);
   const [hasStoredDatePreference, setHasStoredDatePreference] = useState(false);
   const [timezoneDriftWarning, setTimezoneDriftWarning] = useState<string | null>(null);
+  const [devToolOutput, setDevToolOutput] = useState<string | null>(null);
+  const [devToolRunning, setDevToolRunning] = useState(false);
+  const [devResetDate, setDevResetDate] = useState('2026-03-03');
+  const [devResetForemanId, setDevResetForemanId] = useState('4');
+  const [devResetJobId, setDevResetJobId] = useState('');
+  const [devSeedDate, setDevSeedDate] = useState('2026-03-03');
 
   const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
   const canExpandDebugDetails = process.env.NODE_ENV !== 'production' && !lanModeEnabled;
+  const showDevTools = process.env.NODE_ENV !== 'production';
 
   const createValidationError = useMemo(() => {
     if (!startDatetime || !endDatetime) {
@@ -427,6 +434,28 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
   function onLoadSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void loadSchedule();
+  }
+
+  async function runDevTool(url: string, payload: Record<string, unknown>) {
+    setDevToolRunning(true);
+    setDevToolOutput(null);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = (await response.json()) as { output?: string; error?: { message?: string } };
+      if (!response.ok) {
+        setDevToolOutput(body.error?.message ?? body.output ?? 'Dev tool request failed.');
+        return;
+      }
+      setDevToolOutput(body.output ?? 'OK');
+    } catch (error) {
+      setDevToolOutput(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDevToolRunning(false);
+    }
   }
 
   useEffect(() => {
@@ -685,6 +714,67 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
           </button>
         </form>
       </section>
+      {showDevTools ? (
+        <section style={{ marginTop: 20, borderTop: '1px solid #ddd', paddingTop: 12 }}>
+          <h2>Dev Tools (Non-Production Only)</h2>
+          <p style={{ marginTop: 0 }}>Use these helpers to seed/reset local demo data quickly.</p>
+          <div style={{ display: 'grid', gap: 8, maxWidth: 520 }}>
+            <label>
+              Seed Date
+              <input type="date" value={devSeedDate} onChange={(event) => setDevSeedDate(event.target.value)} />
+            </label>
+            <button
+              type="button"
+              disabled={devToolRunning}
+              onClick={() => {
+                void runDevTool('/api/dev/seed-fixtures', { date: devSeedDate });
+              }}
+            >
+              {devToolRunning ? 'Running...' : 'Seed Demo Fixtures'}
+            </button>
+            <label>
+              Reset Date
+              <input type="date" value={devResetDate} onChange={(event) => setDevResetDate(event.target.value)} />
+            </label>
+            <label>
+              Foreman Person ID
+              <input
+                type="number"
+                min={1}
+                value={devResetForemanId}
+                onChange={(event) => setDevResetForemanId(event.target.value)}
+              />
+            </label>
+            <label>
+              Optional Job ID
+              <input
+                type="number"
+                min={1}
+                value={devResetJobId}
+                onChange={(event) => setDevResetJobId(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={devToolRunning}
+              onClick={() => {
+                void runDevTool('/api/dev/reset-schedule-day', {
+                  date: devResetDate,
+                  foremanPersonId: Number(devResetForemanId),
+                  ...(devResetJobId ? { jobId: Number(devResetJobId) } : {}),
+                });
+              }}
+            >
+              {devToolRunning ? 'Running...' : 'Reset Schedule Day'}
+            </button>
+          </div>
+          {devToolOutput ? (
+            <pre style={{ background: '#f5f5f5', padding: 8, overflowX: 'auto', marginTop: 8 }}>
+              {devToolOutput}
+            </pre>
+          ) : null}
+        </section>
+      ) : null}
     </main>
   );
 }
