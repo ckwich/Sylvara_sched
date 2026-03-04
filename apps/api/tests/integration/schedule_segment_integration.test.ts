@@ -217,4 +217,62 @@ describe('schedule segment integration (real postgres)', () => {
     expect(event?.toAt?.toISOString()).toBe('2026-03-03T16:00:00.000Z');
     await app.close();
   });
+
+  test('returns foreman/day activity feed scoped to roster-linked segments', async () => {
+    const { actor, job, roster, foreman } = await seedBase(prisma);
+    const app = buildServer({ prisma });
+
+    const createdDayOne = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': String(actor.id) },
+      payload: {
+        jobId: job.id,
+        rosterId: roster.id,
+        startDatetime: '2026-03-03T14:00:00.000Z',
+        endDatetime: '2026-03-03T15:00:00.000Z',
+      },
+    });
+    expect(createdDayOne.statusCode).toBe(200);
+    const dayOneSegmentId = createdDayOne.json().segment.id as number;
+
+    const rosterDayTwo = await prisma.foremanDayRoster.create({
+      data: {
+        date: new Date('2026-03-04T00:00:00.000Z'),
+        foremanPersonId: foreman.id,
+        homeBaseId: roster.homeBaseId,
+        createdByUserId: actor.id,
+      },
+    });
+
+    const createdDayTwo = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': String(actor.id) },
+      payload: {
+        jobId: job.id,
+        rosterId: rosterDayTwo.id,
+        startDatetime: '2026-03-04T14:00:00.000Z',
+        endDatetime: '2026-03-04T15:00:00.000Z',
+      },
+    });
+    expect(createdDayTwo.statusCode).toBe(200);
+    const dayTwoSegmentId = createdDayTwo.json().segment.id as number;
+
+    const dayOneActivity = await app.inject({
+      method: 'GET',
+      url: `/api/foremen/${foreman.id}/activity?date=2026-03-03`,
+    });
+    expect(dayOneActivity.statusCode).toBe(200);
+    const dayOneBody = dayOneActivity.json() as {
+      entries: Array<{ segmentId: number | null; action: string; jobId: number | null }>;
+    };
+    expect(dayOneBody.entries.length).toBeGreaterThan(0);
+    expect(dayOneBody.entries.some((entry) => entry.segmentId === dayOneSegmentId)).toBe(true);
+    expect(dayOneBody.entries.some((entry) => entry.segmentId === dayTwoSegmentId)).toBe(false);
+    expect(dayOneBody.entries[0]?.action).toBeTruthy();
+    expect(dayOneBody.entries[0]?.jobId).toBe(job.id);
+
+    await app.close();
+  });
 });

@@ -11,11 +11,24 @@ type SegmentRow = {
   scheduledHoursOverride: number | null;
 };
 
+type ActivityLogRow = {
+  id: number;
+  entityType: string;
+  entityId: number;
+  actionType: string;
+  actorUserId: number | null;
+  actorDisplay: string | null;
+  diff: Record<string, unknown> | null;
+  createdAt: Date;
+};
+
 function buildReadPrisma() {
   const rosterDate = new Date('2026-03-03T00:00:00.000Z');
   const segments: SegmentRow[] = [];
   const links: Array<{ scheduleSegmentId: number; rosterId: number }> = [];
+  const activityLogs: ActivityLogRow[] = [];
   let nextSegmentId = 200;
+  let nextActivityId = 1;
 
   const getLinkedRosterId = (segmentId: number): number | null => {
     const link = links.find((l) => l.scheduleSegmentId === segmentId);
@@ -66,6 +79,60 @@ function buildReadPrisma() {
           homeBaseId: 4,
           preferredStartMinute: 480,
         };
+      },
+    },
+    activityLog: {
+      findMany: async ({
+        where,
+      }: {
+        where: {
+          OR: Array<
+            | { entityType: string; entityId: number }
+            | { entityType: string; entityId: { in: number[] } }
+          >;
+        };
+      }) => {
+        const rosterEntry = where.OR.find((entry) => entry.entityType === 'ForemanDayRoster');
+        const segmentEntry = where.OR.find((entry) => entry.entityType === 'ScheduleSegment') as
+          | { entityType: string; entityId: { in: number[] } }
+          | undefined;
+        const rosterId = rosterEntry && typeof rosterEntry.entityId === 'number' ? rosterEntry.entityId : null;
+        const segmentIds = segmentEntry?.entityId.in ?? [];
+
+        return activityLogs
+          .filter(
+            (log) =>
+              (rosterId !== null && log.entityType === 'ForemanDayRoster' && log.entityId === rosterId) ||
+              (log.entityType === 'ScheduleSegment' && segmentIds.includes(log.entityId)),
+          )
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .slice(0, 50);
+      },
+      create: async ({
+        data,
+      }: {
+        data: {
+          entityType: string;
+          entityId: number;
+          actionType: string;
+          actorUserId?: number;
+          actorDisplay?: string | null;
+          diff?: Record<string, unknown>;
+        };
+      }) => {
+        const created: ActivityLogRow = {
+          id: nextActivityId,
+          entityType: data.entityType,
+          entityId: data.entityId,
+          actionType: data.actionType,
+          actorUserId: data.actorUserId ?? null,
+          actorDisplay: data.actorDisplay ?? null,
+          diff: data.diff ?? null,
+          createdAt: new Date(Date.now() + nextActivityId),
+        };
+        nextActivityId += 1;
+        activityLogs.push(created);
+        return created;
       },
     },
     travelSegment: {
@@ -210,7 +277,11 @@ function buildReadPrisma() {
           },
         },
         scheduleEvent: { create: async () => undefined },
-        activityLog: { create: async () => undefined },
+        activityLog: {
+          create: async ({ data }) => {
+            await fakePrisma.activityLog.create({ data });
+          },
+        },
       }),
   } as unknown as PrismaClient;
 
@@ -226,6 +297,14 @@ function buildReadPrisma() {
         scheduledHoursOverride: null,
       });
       nextSegmentId += 1;
+    },
+    insertActivityLog(input: Omit<ActivityLogRow, 'id' | 'createdAt'>) {
+      activityLogs.push({
+        id: nextActivityId,
+        createdAt: new Date(Date.now() + nextActivityId),
+        ...input,
+      });
+      nextActivityId += 1;
     },
   };
 }
@@ -309,6 +388,43 @@ describe('M2 schedule segment read/list endpoints', () => {
     const jobBody = jobRead.json();
     expect(jobBody.segments).toHaveLength(1);
     expect(jobBody.jobState.state).toBe('FULLY_SCHEDULED');
+    await app.close();
+  });
+
+  test('returns foreman day activity entries with newest-first ordering and day filtering', async () => {
+    const store = buildReadPrisma();
+    const app = buildServer({ prisma: store.prisma });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/schedule-segments',
+      headers: { 'x-actor-user-id': '1' },
+      payload: {
+        jobId: 10,
+        rosterId: 99,
+        startDatetime: '2026-03-03T14:00:00.000Z',
+        endDatetime: '2026-03-03T15:00:00.000Z',
+      },
+    });
+    expect(created.statusCode).toBe(200);
+
+    const activity = await app.inject({
+      method: 'GET',
+      url: '/api/foremen/77/activity?date=2026-03-03',
+    });
+    expect(activity.statusCode).toBe(200);
+    const activityBody = activity.json() as { entries: Array<Record<string, unknown>> };
+    expect(activityBody.entries.length).toBeGreaterThan(0);
+    expect(activityBody.entries[0]).toHaveProperty('createdAt');
+    expect(activityBody.entries[0]).toHaveProperty('action');
+    expect(activityBody.entries[0]).toHaveProperty('actorUserId');
+
+    const wrongDay = await app.inject({
+      method: 'GET',
+      url: '/api/foremen/77/activity?date=2026-03-04',
+    });
+    expect(wrongDay.statusCode).toBe(200);
+    expect(wrongDay.json().entries).toHaveLength(0);
     await app.close();
   });
 });

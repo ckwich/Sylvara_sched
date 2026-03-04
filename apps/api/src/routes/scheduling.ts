@@ -58,6 +58,9 @@ const foremanScheduleQuerySchema = z.object({
     .optional()
     .transform((value) => value === 'true'),
 });
+const foremanActivityQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
 
 const createSegmentBodySchema = z.object({
   jobId: z.number().int().positive(),
@@ -159,6 +162,14 @@ function parseIsoDatetime(value: string): Date | null {
     return null;
   }
   return parsed.toUTC().toJSDate();
+}
+
+function extractNumericDiffValue(diff: Prisma.JsonValue | null, key: string): number | null {
+  if (!diff || typeof diff !== 'object' || Array.isArray(diff)) {
+    return null;
+  }
+  const value = (diff as Record<string, unknown>)[key];
+  return typeof value === 'number' ? value : null;
 }
 
 async function getDerivedJobState(input: {
@@ -819,6 +830,100 @@ export function registerSchedulingRoutes(app: FastifyInstance, deps: AppDeps) {
       roster,
       scheduleSegments,
       travelSegments,
+    });
+  });
+
+  app.get('/api/foremen/:foremanPersonId/activity', async (request, reply) => {
+    const paramsSchema = z.object({ foremanPersonId: z.coerce.number().int().positive() });
+    const params = paramsSchema.safeParse(request.params);
+    const query = foremanActivityQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid foreman activity request.',
+          details: {
+            params: params.success ? undefined : params.error.flatten(),
+            query: query.success ? undefined : query.error.flatten(),
+          },
+        },
+      });
+    }
+
+    const serviceDate = dateOnlyToUtc(query.data.date);
+    const roster = await deps.prisma.foremanDayRoster.findFirst({
+      where: {
+        foremanPersonId: params.data.foremanPersonId,
+        date: serviceDate,
+      },
+      select: {
+        id: true,
+      },
+    });
+    if (!roster) {
+      return reply.code(200).send({ entries: [] });
+    }
+
+    const linkedSegments = await deps.prisma.scheduleSegment.findMany({
+      where: {
+        segmentRosterLink: {
+          is: {
+            rosterId: roster.id,
+          },
+        },
+      },
+      select: {
+        id: true,
+        jobId: true,
+      },
+    });
+    const linkedSegmentIds = linkedSegments.map((segment) => segment.id);
+    const jobIdBySegmentId = new Map(linkedSegments.map((segment) => [segment.id, segment.jobId]));
+
+    const logs = await deps.prisma.activityLog.findMany({
+      where: {
+        OR: [
+          {
+            entityType: 'ForemanDayRoster',
+            entityId: roster.id,
+          },
+          ...(linkedSegmentIds.length > 0
+            ? [
+                {
+                  entityType: 'ScheduleSegment',
+                  entityId: { in: linkedSegmentIds },
+                },
+              ]
+            : []),
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        createdAt: true,
+        actionType: true,
+        actorDisplay: true,
+        actorUserId: true,
+        entityType: true,
+        entityId: true,
+        diff: true,
+      },
+    });
+
+    return reply.code(200).send({
+      entries: logs.map((log) => {
+        const isSegment = log.entityType === 'ScheduleSegment';
+        const segmentId = isSegment ? log.entityId : null;
+        const jobIdFromMap = segmentId ? jobIdBySegmentId.get(segmentId) ?? null : null;
+        return {
+          createdAt: log.createdAt,
+          action: log.actionType,
+          actorDisplay: log.actorDisplay,
+          actorUserId: log.actorUserId,
+          segmentId,
+          jobId: jobIdFromMap ?? extractNumericDiffValue(log.diff, 'jobId'),
+        };
+      }),
     });
   });
 
