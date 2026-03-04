@@ -18,7 +18,7 @@
     "test:db:up": "docker compose -f docker-compose.test.yml up -d",
     "test:db:down": "docker compose -f docker-compose.test.yml down -v",
     "test:db:reset": "node scripts/test-db-reset.mjs",
-    "test": "pnpm test:smoke && pnpm test:integration",
+    "test": "corepack pnpm test:smoke && corepack pnpm test:integration",
     "test:integration": "node scripts/test-integration.mjs",
     "test:api:smoke": "corepack pnpm --filter @sylvara/api test:smoke",
     "test:e2e:smoke": "corepack pnpm --filter @sylvara/e2e test:smoke",
