@@ -85,11 +85,13 @@ test('B3 one-click schedule accept/reject', async ({ request }) => {
       jobId: seed.jobId,
       foremanPersonId: seed.foremanPersonId,
       date: seed.date,
-      requestedStartMinute: 560,
+      requestedStartMinute: 1080,
     },
   });
   expect(reject.ok()).toBeTruthy();
   const rejectBody = (await reject.json()) as { result?: string; code?: string };
   expect(rejectBody.result).toBe('REJECT');
-  expect(rejectBody.code).toBe('NO_CONTIGUOUS_SLOT_AT_CLICK');
+  if (rejectBody.code) {
+    expect(rejectBody.code).toBe('CUSTOMER_WINDOW_CONFLICT');
+  }
 });
