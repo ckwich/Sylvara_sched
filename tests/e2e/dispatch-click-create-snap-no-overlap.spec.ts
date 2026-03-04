@@ -48,6 +48,7 @@ async function resetScheduleDay(input: { date: string; foremanPersonId: number; 
   if (input.jobId) {
     args.push(`--jobId=${input.jobId}`);
   }
+  args.push('--includeTravel');
   const result = spawnSync('corepack', args, {
     cwd: process.cwd(),
     shell: process.platform === 'win32',
