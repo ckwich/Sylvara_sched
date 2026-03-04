@@ -65,12 +65,29 @@ export type OrgSettingsResponse = {
   operatingEndMinute: number | null;
 };
 
+export type ForemanActivityEntry = {
+  createdAt: string;
+  action: string;
+  actorDisplay: string | null;
+  actorUserId: number | null;
+  segmentId: number | null;
+  jobId: number | null;
+};
+
+export type ForemanActivityResponse = {
+  entries: ForemanActivityEntry[];
+};
+
 export function buildOrgSettingsUrl(): string {
   return `${API_BASE_URL}/api/org-settings`;
 }
 
 export function buildForemanScheduleUrl(foremanPersonId: number, date: string): string {
   return `${API_BASE_URL}/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}`;
+}
+
+export function buildForemanActivityUrl(foremanPersonId: number, date: string): string {
+  return `${API_BASE_URL}/api/foremen/${foremanPersonId}/activity?date=${encodeURIComponent(date)}`;
 }
 
 async function parseJsonSafe(response: Response): Promise<unknown> {
@@ -114,6 +131,30 @@ export async function getForemanSchedule(
     throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as ForemanScheduleResponse;
+}
+
+export async function getForemanActivity(
+  foremanPersonId: number,
+  date: string,
+): Promise<ForemanActivityResponse> {
+  const url = buildForemanActivityUrl(foremanPersonId, date);
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ForemanActivityResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as ForemanActivityResponse;
 }
 
 export async function createScheduleSegment(

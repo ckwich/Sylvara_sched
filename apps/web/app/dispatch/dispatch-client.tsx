@@ -4,11 +4,14 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   API_BASE_URL,
   ApiRequestError,
+  buildForemanActivityUrl,
   buildForemanScheduleUrl,
   buildOrgSettingsUrl,
   createScheduleSegment,
+  getForemanActivity,
   getForemanSchedule,
   getOrgSettings,
+  type ForemanActivityEntry,
   type ForemanScheduleResponse,
 } from '../../lib/api';
 import { browserTimezoneDiffers, companyLocalInputToUtcIso } from '../../lib/company-time';
@@ -178,6 +181,17 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
     errorBody: null,
     networkErrorMessage: null,
   });
+  const [activityDiagnostics, setActivityDiagnostics] = useState<RequestDiagnostics>({
+    url: buildForemanActivityUrl(Number(foremanPersonId), date),
+    status: null,
+    errorBody: null,
+    networkErrorMessage: null,
+  });
+  const [recentChanges, setRecentChanges] = useState<ForemanActivityEntry[]>([]);
+  const [recentChangesLoading, setRecentChangesLoading] = useState(false);
+  const [recentChangesError, setRecentChangesError] = useState<string | null>(null);
+  const [showRecentChanges, setShowRecentChanges] = useState(false);
+  const [autoRefreshChanges, setAutoRefreshChanges] = useState(false);
   const [lanUser, setLanUser] = useState('');
   const [showDebugDetails, setShowDebugDetails] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(!lanModeEnabled);
@@ -291,7 +305,54 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
       ...current,
       url: buildForemanScheduleUrl(Number(foremanPersonId), date),
     }));
+    setActivityDiagnostics((current) => ({
+      ...current,
+      url: buildForemanActivityUrl(Number(foremanPersonId), date),
+    }));
   }, [foremanPersonId, date]);
+
+  async function loadRecentChanges(foremanId: number, serviceDate: string) {
+    setRecentChangesLoading(true);
+    setRecentChangesError(null);
+    const activityUrl = buildForemanActivityUrl(foremanId, serviceDate);
+    setActivityDiagnostics({
+      url: activityUrl,
+      status: null,
+      errorBody: null,
+      networkErrorMessage: null,
+    });
+
+    try {
+      const response = await getForemanActivity(foremanId, serviceDate);
+      setRecentChanges(response.entries);
+      setActivityDiagnostics({
+        url: activityUrl,
+        status: 200,
+        errorBody: null,
+        networkErrorMessage: null,
+      });
+    } catch (error) {
+      const described = describeError(error);
+      setRecentChangesError(described.message);
+      if (error instanceof ApiRequestError) {
+        setActivityDiagnostics({
+          url: error.url,
+          status: error.status,
+          errorBody: error.body,
+          networkErrorMessage: error.networkErrorMessage ?? null,
+        });
+      } else {
+        setActivityDiagnostics({
+          url: activityUrl,
+          status: null,
+          errorBody: String(error),
+          networkErrorMessage: null,
+        });
+      }
+    } finally {
+      setRecentChangesLoading(false);
+    }
+  }
 
   async function loadSchedule() {
     setLoading(true);
@@ -337,6 +398,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
 
       const response = await getForemanSchedule(parsedForemanId, date);
       setData(response);
+      await loadRecentChanges(parsedForemanId, date);
       setScheduleDiagnostics({
         url: scheduleUrl,
         status: 200,
@@ -376,6 +438,22 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!autoRefreshChanges) {
+      return;
+    }
+    const parsedForemanId = Number(foremanPersonId);
+    if (!Number.isInteger(parsedForemanId) || parsedForemanId <= 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadRecentChanges(parsedForemanId, date);
+    }, 30_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [autoRefreshChanges, foremanPersonId, date]);
 
   async function submitCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -621,6 +699,55 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
         )}
       </section>
 
+      <section style={{ marginTop: 16 }}>
+        <h2>Recent Changes</h2>
+        <button type="button" onClick={() => setShowRecentChanges((value) => !value)}>
+          {showRecentChanges ? 'Hide Recent Changes' : 'Show Recent Changes'}
+        </button>
+        {showRecentChanges ? (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                disabled={recentChangesLoading}
+                onClick={() => {
+                  const parsedForemanId = Number(foremanPersonId);
+                  if (Number.isInteger(parsedForemanId) && parsedForemanId > 0) {
+                    void loadRecentChanges(parsedForemanId, date);
+                  }
+                }}
+              >
+                {recentChangesLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={autoRefreshChanges}
+                  onChange={(event) => setAutoRefreshChanges(event.target.checked)}
+                />{' '}
+                auto-refresh every 30s
+              </label>
+            </div>
+            {recentChangesError ? <p style={{ color: 'crimson' }}>{recentChangesError}</p> : null}
+            {recentChanges.length === 0 ? (
+              <p>No recent changes for this foreman/day.</p>
+            ) : (
+              <ul>
+                {recentChanges.map((entry, index) => (
+                  <li key={`${entry.createdAt}-${entry.action}-${index}`}>
+                    {formatDateTime(entry.createdAt, companyTimezone)} -{' '}
+                    {entry.actorDisplay ?? (entry.actorUserId ? `User ${entry.actorUserId}` : 'Unknown actor')} -{' '}
+                    {entry.action}
+                    {entry.jobId ? ` (job ${entry.jobId})` : ''}
+                    {entry.segmentId ? ` (segment ${entry.segmentId})` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+      </section>
+
       <section style={{ marginTop: 20 }}>
         <h2>Diagnostics</h2>
         {lanModeEnabled ? (
@@ -663,10 +790,15 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
           scheduleDiagnostics,
           canExpandDebugDetails && showDebugDetails,
         ),
+        foremanActivityRequest: buildDiagnosticsView(
+          activityDiagnostics,
+          canExpandDebugDetails && showDebugDetails,
+        ),
       }
     : {
         orgSettingsRequest: { url: '(client-only)', status: null, errorBody: null },
         foremanScheduleRequest: { url: '(client-only)', status: null, errorBody: null },
+        foremanActivityRequest: { url: '(client-only)', status: null, errorBody: null },
       },
   null,
   2,
@@ -692,6 +824,10 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
                       scheduleDiagnostics,
                       canExpandDebugDetails && showDebugDetails,
                     ),
+                    foremanActivityRequest: buildDiagnosticsView(
+                      activityDiagnostics,
+                      canExpandDebugDetails && showDebugDetails,
+                    ),
                   }
                 : {
                     foremanPersonId,
@@ -701,6 +837,7 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
                     timezoneError,
                     orgSettingsRequest: { url: '(client-only)', status: null, errorBody: null },
                     foremanScheduleRequest: { url: '(client-only)', status: null, errorBody: null },
+                    foremanActivityRequest: { url: '(client-only)', status: null, errorBody: null },
                   },
               null,
               2,
