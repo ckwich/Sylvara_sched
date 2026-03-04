@@ -1,5 +1,26 @@
-import DispatchClient from './dispatch-client';
+import { redirect } from 'next/navigation';
+import DispatchCalendar from './dispatch-calendar';
 
-export default function DispatchPage() {
-  return <DispatchClient lanModeEnabled={process.env.LAN_MODE === 'true'} />;
+function todayInTimezone(timezone: string): string {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(new Date());
+}
+
+export default async function DispatchPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ date?: string; devtools?: string }>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const date = resolvedSearchParams?.date;
+  if (!date) {
+    redirect(`/dispatch?date=${todayInTimezone('America/New_York')}`);
+  }
+
+  return <DispatchCalendar initialDate={date} />;
 }

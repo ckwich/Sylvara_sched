@@ -1,4 +1,5 @@
-import Link from 'next/link';
+import NavBar from './nav-bar';
+import './globals.css';
 
 export default function RootLayout({
   children,
@@ -8,11 +9,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <nav className="border-b border-slate-200 bg-white px-4 py-3">
-          <Link href="/admin" className="text-sm font-medium text-slate-700 hover:text-slate-900">
-            Admin
-          </Link>
-        </nav>
+        <NavBar />
         {children}
       </body>
     </html>

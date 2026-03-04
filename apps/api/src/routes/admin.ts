@@ -553,6 +553,97 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     return reply.code(200).send({ foremen });
   });
 
+  app.get('/api/foremen/:foremanId/rosters/:date', async (request, reply) => {
+    const params = rosterMemberParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid roster lookup request.', params.error.flatten());
+    }
+
+    const date = parseDateOnlyUtc(params.data.date);
+    if (!date) {
+      return validationError(reply, 'Invalid roster date.', {});
+    }
+
+    const roster = await deps.prisma.foremanDayRoster.findFirst({
+      where: {
+        foremanPersonId: params.data.foremanId,
+        date,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        foremanPersonId: true,
+        date: true,
+        homeBaseId: true,
+        preferredStartMinute: true,
+        preferredEndMinute: true,
+        notes: true,
+      },
+    });
+
+    if (!roster) {
+      return notFoundError(reply, 'ROSTER_NOT_FOUND', 'Roster not found for foreman and date.');
+    }
+
+    return reply.code(200).send({ roster });
+  });
+
+  app.get('/api/foremen/:foremanId/rosters/:date/members', async (request, reply) => {
+    const params = rosterMemberParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid roster members lookup request.', params.error.flatten());
+    }
+
+    const date = parseDateOnlyUtc(params.data.date);
+    if (!date) {
+      return validationError(reply, 'Invalid roster date.', {});
+    }
+
+    const roster = await deps.prisma.foremanDayRoster.findFirst({
+      where: {
+        foremanPersonId: params.data.foremanId,
+        date,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!roster) {
+      return reply.code(200).send({ members: [] });
+    }
+
+    const members = await deps.prisma.foremanDayRosterMember.findMany({
+      where: {
+        rosterId: roster.id,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        personResourceId: true,
+        role: true,
+        personResource: {
+          select: {
+            name: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    return reply.code(200).send({
+      members: members.map((member) => ({
+        id: member.id,
+        personResourceId: member.personResourceId,
+        role: member.role,
+        resourceName: member.personResource.name,
+      })),
+    });
+  });
+
   app.post('/api/foremen/:foremanId/rosters', async (request, reply) => {
     const actor = await requireActor(request, deps, reply);
     if (!actor) {

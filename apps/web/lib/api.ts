@@ -1,3 +1,5 @@
+import { localDateMinuteToUtc } from '@sylvara/shared';
+
 export const API_BASE_URL = '';
 
 type ApiErrorBody = {
@@ -174,11 +176,11 @@ export function buildOrgSettingsUrl(): string {
   return `${API_BASE_URL}/api/org-settings`;
 }
 
-export function buildForemanScheduleUrl(foremanPersonId: number, date: string): string {
+export function buildForemanScheduleUrl(foremanPersonId: string | number, date: string): string {
   return `${API_BASE_URL}/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}`;
 }
 
-export function buildForemanActivityUrl(foremanPersonId: number, date: string): string {
+export function buildForemanActivityUrl(foremanPersonId: string | number, date: string): string {
   return `${API_BASE_URL}/api/foremen/${foremanPersonId}/activity?date=${encodeURIComponent(date)}`;
 }
 
@@ -220,7 +222,7 @@ function buildActorHeaders(actorUserId: string | undefined): Record<string, stri
 }
 
 export async function getForemanSchedule(
-  foremanPersonId: number,
+  foremanPersonId: string | number,
   date: string,
 ): Promise<ForemanScheduleResponse> {
   const url = buildForemanScheduleUrl(foremanPersonId, date);
@@ -244,7 +246,7 @@ export async function getForemanSchedule(
 }
 
 export async function getForemanActivity(
-  foremanPersonId: number,
+  foremanPersonId: string | number,
   date: string,
 ): Promise<ForemanActivityResponse> {
   const url = buildForemanActivityUrl(foremanPersonId, date);
@@ -635,4 +637,390 @@ export async function getForemen(): Promise<GetForemenResponse> {
     throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as GetForemenResponse;
+}
+
+export type ForemanDayRoster = {
+  id: string;
+  foremanPersonId: string;
+  date: string;
+  homeBaseId: string | null;
+  preferredStartMinute: number | null;
+  preferredEndMinute: number | null;
+  notes: string | null;
+};
+
+export type ForemanRosterMembersResponse = {
+  members: Array<{
+    id: string;
+    personResourceId: string;
+    role: 'CLIMBER' | 'GROUND' | 'OPERATOR' | 'OTHER';
+    resourceName: string;
+  }>;
+};
+
+export type DispatchTravelSegment = {
+  id: string;
+  foremanPersonId: string;
+  relatedJobId: string | null;
+  serviceDate: string;
+  startDatetime: string;
+  endDatetime: string;
+  travelType: 'START_OF_DAY' | 'END_OF_DAY' | 'BETWEEN_JOBS';
+  source: string;
+  locked: boolean;
+  notes: string | null;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type DispatchScheduleSegment = {
+  id: string;
+  jobId: string;
+  segmentType: string;
+  startDatetime: string;
+  endDatetime: string;
+  scheduledHoursOverride: string | null;
+  notes: string | null;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type DispatchForemanScheduleResponse = {
+  roster: {
+    id: string;
+    date: string;
+    homeBaseId: string | null;
+    preferredStartMinute: number | null;
+    preferredEndMinute: number | null;
+    foremanPersonId: string;
+  } | null;
+  scheduleSegments: DispatchScheduleSegment[];
+  travelSegments?: DispatchTravelSegment[];
+};
+
+export type CreateForemanRosterPayload = {
+  date: string;
+  homeBaseId: string;
+  notes?: string;
+  preferredStartMinute?: number;
+  preferredEndMinute?: number;
+};
+
+export type AddRosterMemberPayload = {
+  personResourceId: string;
+  role: 'CLIMBER' | 'GROUND' | 'OPERATOR' | 'OTHER';
+};
+
+export type CreateTravelPayload = {
+  foremanPersonId: string;
+  travelType: 'START_OF_DAY' | 'END_OF_DAY' | 'BETWEEN_JOBS';
+  startDatetime: string;
+  endDatetime: string;
+  relatedJobId?: string;
+  notes?: string;
+};
+
+export type CreateScheduleAttemptPayload = {
+  jobId: string;
+  foremanPersonId: string;
+  date: string;
+  requestedStartMinute: number;
+  durationMinutes: number;
+  companyTimezone?: string;
+  homeBaseId?: string;
+  rosterId?: string;
+  actorUserId?: string;
+};
+
+export type CreateScheduleAttemptResponse = {
+  result: 'ACCEPT' | 'REJECT';
+  segment?: DispatchScheduleSegment;
+  warnings?: Array<{ code: string; message: string }>;
+  error?: { code: string; message: string };
+};
+
+function buildWriteHeaders(actorUserId?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+  };
+  if (actorUserId) {
+    headers['x-actor-user-id'] = actorUserId;
+  }
+  return headers;
+}
+
+export async function getForemanDaySchedule(
+  foremanPersonId: string,
+  date: string,
+): Promise<DispatchForemanScheduleResponse> {
+  const url = `${API_BASE_URL}/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}&includeTravel=true`;
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as DispatchForemanScheduleResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as DispatchForemanScheduleResponse;
+}
+
+export async function getForemanRoster(
+  foremanId: string,
+  date: string,
+): Promise<ForemanDayRoster | null> {
+  const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}`;
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  const body = (await parseJsonSafe(response)) as { roster?: ForemanDayRoster } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { roster: ForemanDayRoster }).roster;
+}
+
+export async function getForemanRosterMembers(
+  foremanId: string,
+  date: string,
+): Promise<ForemanRosterMembersResponse> {
+  const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}/members`;
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ForemanRosterMembersResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as ForemanRosterMembersResponse;
+}
+
+export async function createForemanRoster(
+  foremanId: string,
+  payload: CreateForemanRosterPayload,
+  actorUserId?: string,
+): Promise<ForemanDayRoster> {
+  const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: buildWriteHeaders(actorUserId),
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { roster?: ForemanDayRoster } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { roster: ForemanDayRoster }).roster;
+}
+
+export async function addForemanRosterMember(
+  foremanId: string,
+  date: string,
+  payload: AddRosterMemberPayload,
+  actorUserId?: string,
+): Promise<void> {
+  const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}/members`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: buildWriteHeaders(actorUserId),
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, body ?? {});
+  }
+}
+
+export async function createTravelSegment(
+  payload: CreateTravelPayload,
+  actorUserId?: string,
+): Promise<DispatchTravelSegment> {
+  const url = `${API_BASE_URL}/api/travel/create`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: buildWriteHeaders(actorUserId),
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { travelSegment?: DispatchTravelSegment } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { travelSegment: DispatchTravelSegment }).travelSegment;
+}
+
+export async function createScheduleAttempt(
+  payload: CreateScheduleAttemptPayload,
+): Promise<CreateScheduleAttemptResponse> {
+  if (payload.rosterId) {
+    const timezone = payload.companyTimezone ?? 'America/New_York';
+    const startAt = localDateMinuteToUtc(payload.date, payload.requestedStartMinute, timezone).toISOString();
+    const endAt = localDateMinuteToUtc(
+      payload.date,
+      payload.requestedStartMinute + payload.durationMinutes,
+      timezone,
+    ).toISOString();
+    const url = `${API_BASE_URL}/api/schedule-segments`;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: buildWriteHeaders(payload.actorUserId),
+        body: JSON.stringify({
+          jobId: payload.jobId,
+          rosterId: payload.rosterId,
+          startDatetime: startAt,
+          endDatetime: endAt,
+        }),
+      });
+    } catch (error) {
+      throw new ApiRequestError({
+        status: null,
+        url,
+        body: null,
+        message: 'NETWORK_ERROR: Request failed.',
+        networkErrorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
+    const body = (await parseJsonSafe(response)) as { segment?: DispatchScheduleSegment } | ApiErrorBody;
+    if (!response.ok) {
+      if (response.status === 409 || response.status === 400) {
+        const apiError = (body as ApiErrorBody)?.error;
+        return {
+          result: 'REJECT',
+          error: {
+            code: apiError?.code ?? `HTTP_${response.status}`,
+            message: apiError?.message ?? 'Request rejected.',
+          },
+        };
+      }
+      throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+    }
+
+    return {
+      result: 'ACCEPT',
+      segment: (body as { segment: DispatchScheduleSegment }).segment,
+      warnings: [],
+    };
+  }
+
+  const oneClickUrl = `${API_BASE_URL}/api/schedule/one-click-attempt`;
+  let response: Response;
+  try {
+    response = await fetch(oneClickUrl, {
+      method: 'POST',
+      headers: buildWriteHeaders(payload.actorUserId),
+      body: JSON.stringify({
+        jobId: payload.jobId,
+        foremanPersonId: payload.foremanPersonId,
+        date: payload.date,
+        homeBaseId: payload.homeBaseId,
+        requestedStartMinute: payload.requestedStartMinute,
+      }),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url: oneClickUrl,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const body = (await parseJsonSafe(response)) as CreateScheduleAttemptResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, oneClickUrl, (body ?? {}) as ApiErrorBody);
+  }
+  return body as CreateScheduleAttemptResponse;
+}
+
+export async function removeScheduleSegment(segmentId: string, actorUserId?: string): Promise<void> {
+  const url = `${API_BASE_URL}/api/schedule-segments/${segmentId}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'DELETE',
+      headers: actorUserId ? { 'x-actor-user-id': actorUserId } : undefined,
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, body ?? {});
+  }
 }
