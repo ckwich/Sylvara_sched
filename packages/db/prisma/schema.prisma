@@ -122,6 +122,7 @@ model User {
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   customerRisksOwned        CustomerRisk[]      @relation("customer_risk_owner")
   jobsCompleted             Job[]               @relation("job_completed_by")
@@ -149,6 +150,7 @@ model Customer {
   email     String?
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   jobs          Job[]
   customerRisks CustomerRisk[]
@@ -163,6 +165,7 @@ model RiskReason {
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   customerRiskReasons CustomerRiskReason[]
 
@@ -178,6 +181,7 @@ model CustomerRisk {
   ownerUserId String?            @map("owner_user_id") @db.Uuid
   createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime?          @map("deleted_at") @db.Timestamptz(6)
 
   customer  Customer             @relation(fields: [customerId], references: [id])
   ownerUser User?                @relation("customer_risk_owner", fields: [ownerUserId], references: [id])
@@ -190,6 +194,7 @@ model CustomerRiskReason {
   id             String @id @default(uuid()) @db.Uuid
   customerRiskId String @map("customer_risk_id") @db.Uuid
   riskReasonId   String @map("risk_reason_id") @db.Uuid
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   customerRisk CustomerRisk @relation(fields: [customerRiskId], references: [id])
   riskReason   RiskReason   @relation(fields: [riskReasonId], references: [id])
@@ -237,6 +242,7 @@ model Job {
   accessNotes           String?                @map("access_notes")
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt             DateTime?              @map("deleted_at") @db.Timestamptz(6)
 
   customer           Customer              @relation(fields: [customerId], references: [id])
   completedByUser    User?                 @relation("job_completed_by", fields: [completedByUserId], references: [id])
@@ -269,6 +275,7 @@ model EstimateHistory {
   previousEstimateHours Decimal? @map("previous_estimate_hours") @db.Decimal(10, 2)
   newEstimateHours      Decimal? @map("new_estimate_hours") @db.Decimal(10, 2)
   note                  String?
+  deletedAt             DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   job           Job  @relation(fields: [jobId], references: [id])
   changedByUser User @relation("estimate_history_changed_by", fields: [changedByUserId], references: [id])
@@ -283,6 +290,7 @@ model RequirementType {
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   requirements Requirement[]
 
@@ -297,6 +305,7 @@ model Requirement {
   notes             String?
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt         DateTime?         @map("deleted_at") @db.Timestamptz(6)
 
   job             Job             @relation(fields: [jobId], references: [id])
   requirementType RequirementType @relation(fields: [requirementTypeId], references: [id])
@@ -369,6 +378,7 @@ model ScheduleEvent {
   actorCode   String?           @map("actor_code")
   rawSnippet  String?           @map("raw_snippet")
   createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt   DateTime?         @map("deleted_at") @db.Timestamptz(6)
 
   job       Job   @relation(fields: [jobId], references: [id])
   actorUser User? @relation("schedule_event_actor", fields: [actorUserId], references: [id])
@@ -390,6 +400,7 @@ model VacatedSlot {
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   dismissedAt       DateTime?         @map("dismissed_at") @db.Timestamptz(6)
   dismissedByUserId String?           @map("dismissed_by_user_id") @db.Uuid
+  deletedAt         DateTime?         @map("deleted_at") @db.Timestamptz(6)
 
   sourceSegment   ScheduleSegment  @relation("vacated_slot_source_segment", fields: [sourceSegmentId], references: [id])
   chosenJob       Job?             @relation("vacated_slot_chosen_job", fields: [chosenJobId], references: [id])
@@ -406,6 +417,7 @@ model BlockerReason {
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   jobBlockers JobBlocker[]
 
@@ -422,6 +434,7 @@ model JobBlocker {
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   clearedAt       DateTime?        @map("cleared_at") @db.Timestamptz(6)
   clearedByUserId String?          @map("cleared_by_user_id") @db.Uuid
+  deletedAt       DateTime?        @map("deleted_at") @db.Timestamptz(6)
 
   job           Job           @relation(fields: [jobId], references: [id])
   blockerReason BlockerReason @relation(fields: [blockerReasonId], references: [id])
@@ -440,6 +453,7 @@ model Resource {
   active            Boolean      @default(true)
   createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt         DateTime?    @map("deleted_at") @db.Timestamptz(6)
 
   resourceReservations ResourceReservation[]
   foremanRosters       ForemanDayRoster[]       @relation("roster_foreman_person")
@@ -455,6 +469,7 @@ model ResourceReservation {
   resourceId        String  @map("resource_id") @db.Uuid
   quantity          Int     @default(1)
   notes             String?
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   scheduleSegment ScheduleSegment @relation(fields: [scheduleSegmentId], references: [id])
   resource        Resource        @relation(fields: [resourceId], references: [id])
@@ -478,6 +493,7 @@ model HomeBase {
   active       Boolean   @default(true)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   foremanRosters ForemanDayRoster[]
 
@@ -497,6 +513,7 @@ model ForemanDayRoster {
   createdByUserId     String   @map("created_by_user_id") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   foremanPerson      Resource                 @relation("roster_foreman_person", fields: [foremanPersonId], references: [id])
   homeBase           HomeBase                 @relation(fields: [homeBaseId], references: [id])
@@ -515,6 +532,7 @@ model ForemanDayRosterMember {
   personResourceId String           @map("person_resource_id") @db.Uuid
   role             RosterMemberRole
   createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt        DateTime?        @map("deleted_at") @db.Timestamptz(6)
 
   roster         ForemanDayRoster @relation(fields: [rosterId], references: [id])
   personResource Resource         @relation("roster_member_person", fields: [personResourceId], references: [id])
@@ -529,6 +547,7 @@ model SegmentRosterLink {
   rosterId          String   @map("roster_id") @db.Uuid
   createdByUserId   String   @map("created_by_user_id") @db.Uuid
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   scheduleSegment ScheduleSegment  @relation(fields: [scheduleSegmentId], references: [id])
   roster          ForemanDayRoster @relation(fields: [rosterId], references: [id])
@@ -545,6 +564,7 @@ model AccessConstraint {
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   jobAccessConstraints JobAccessConstraint[]
 
@@ -555,6 +575,7 @@ model JobAccessConstraint {
   id                 String @id @default(uuid()) @db.Uuid
   jobId              String @map("job_id") @db.Uuid
   accessConstraintId String @map("access_constraint_id") @db.Uuid
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   job              Job              @relation(fields: [jobId], references: [id])
   accessConstraint AccessConstraint @relation(fields: [accessConstraintId], references: [id])
@@ -567,6 +588,7 @@ model JobPreferredChannel {
   id      String           @id @default(uuid()) @db.Uuid
   jobId   String           @map("job_id") @db.Uuid
   channel PreferredChannel
+  deletedAt DateTime?      @map("deleted_at") @db.Timestamptz(6)
 
   job Job @relation(fields: [jobId], references: [id])
 
@@ -583,6 +605,7 @@ model ActivityLog {
   actorUserId String?  @map("actor_user_id") @db.Uuid
   actorDisplay String? @map("actor_display")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6) // Keep NULL in app logic; audit rows should remain immutable.
 
   actorUser User? @relation("activity_log_actor", fields: [actorUserId], references: [id])
 
@@ -598,6 +621,7 @@ model ImportRun {
   sourceFilename String       @map("source_filename")
   status         ImportStatus
   summaryJson    Json?        @map("summary_json")
+  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz(6)
 
   runByUser User?          @relation("import_run_by_user", fields: [runByUserId], references: [id])
   rowMaps   ImportRowMap[]
@@ -614,6 +638,7 @@ model ImportRowMap {
   entityId    String   @map("entity_id") @db.Uuid
   rawRowJson  Json     @map("raw_row_json")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   importRun ImportRun @relation(fields: [importRunId], references: [id])
 
@@ -629,6 +654,7 @@ model OrgSettings {
   operatingEndTime     DateTime? @map("operating_end_time") @db.Time(6)
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   @@map("org_settings")
 }
