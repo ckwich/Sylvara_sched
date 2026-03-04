@@ -203,6 +203,25 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
     }
     return null;
   }, [startDatetime, endDatetime]);
+  const apiConnectivity = useMemo(() => {
+    const hasNetworkError = Boolean(
+      orgDiagnostics.networkErrorMessage || scheduleDiagnostics.networkErrorMessage,
+    );
+    if (hasNetworkError) {
+      return {
+        label: 'API unreachable ❌',
+        detail:
+          orgDiagnostics.networkErrorMessage ??
+          scheduleDiagnostics.networkErrorMessage ??
+          'Network error.',
+      };
+    }
+    const hasResponse = orgDiagnostics.status !== null || scheduleDiagnostics.status !== null;
+    if (hasResponse) {
+      return { label: 'Connected to API ✅', detail: null };
+    }
+    return { label: 'API status not checked yet', detail: null };
+  }, [orgDiagnostics, scheduleDiagnostics]);
 
   useEffect(() => {
     setShowDiagnostics(!lanModeEnabled);
@@ -475,6 +494,34 @@ export default function DispatchClient({ lanModeEnabled }: DispatchClientProps) 
   return (
     <main style={{ padding: 16, fontFamily: 'sans-serif', maxWidth: 960 }}>
       <h1>Dispatch Day Viewer</h1>
+      <section
+        style={{
+          marginTop: 12,
+          marginBottom: 12,
+          padding: 12,
+          border: '1px solid #d0d5dd',
+          background: '#f8fafc',
+        }}
+      >
+        <h2 style={{ marginTop: 0 }}>Quick Start</h2>
+        <p style={{ margin: '4px 0' }}>
+          Mode: {lanModeEnabled ? 'LAN Mode' : 'Local Dev'}
+        </p>
+        <p style={{ margin: '4px 0' }}>Company timezone: {companyTimezone}</p>
+        {lanModeEnabled ? (
+          <p style={{ margin: '4px 0' }}>
+            LAN User:{' '}
+            {lanUser.trim() ? `set (${lanUser.trim()})` : 'missing (required for writes)'}
+          </p>
+        ) : null}
+        <p style={{ margin: '4px 0' }}>{apiConnectivity.label}</p>
+        {apiConnectivity.detail ? (
+          <p style={{ margin: '4px 0', color: '#b42318' }}>{apiConnectivity.detail}</p>
+        ) : null}
+        <button type="button" onClick={() => void loadSchedule()} disabled={loading}>
+          {loading ? 'Checking...' : 'Retry'}
+        </button>
+      </section>
 
       <form
         onSubmit={onLoadSubmit}
