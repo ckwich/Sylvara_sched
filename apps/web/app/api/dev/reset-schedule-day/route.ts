@@ -30,10 +30,7 @@ function runCommand(command: string, args: string[], cwd: string): Promise<{ cod
 
 export async function POST(request: Request) {
   if (process.env.NODE_ENV === 'production') {
-    return Response.json(
-      { error: { code: 'FORBIDDEN', message: 'Dev tools are disabled in production.' } },
-      { status: 403 },
-    );
+    return Response.json({ error: { code: 'NOT_FOUND', message: 'Not found.' } }, { status: 404 });
   }
 
   const body = (await request.json()) as ResetRequest;
