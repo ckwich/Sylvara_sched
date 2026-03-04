@@ -104,6 +104,72 @@ export type JobsResponse = {
   total: number;
 };
 
+export type ResourceRecord = {
+  id: string;
+  resourceType: 'PERSON' | 'EQUIPMENT';
+  name: string;
+  inventoryQuantity: number;
+  isForeman: boolean;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type HomeBaseRecord = {
+  id: string;
+  name: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string;
+  state: string;
+  postalCode: string;
+  openingMinute: number | null;
+  closingMinute: number | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type GetResourcesResponse = {
+  resources: ResourceRecord[];
+};
+
+export type GetHomeBasesResponse = {
+  homeBases: HomeBaseRecord[];
+};
+
+export type GetForemenResponse = {
+  foremen: ResourceRecord[];
+};
+
+export type CreateResourcePayload = {
+  name: string;
+  resourceType: 'PERSON' | 'EQUIPMENT';
+  isForeman?: boolean;
+  active?: boolean;
+};
+
+export type UpdateResourcePayload = {
+  name?: string;
+  active?: boolean;
+  inventoryQuantity?: number;
+};
+
+export type CreateHomeBasePayload = {
+  name: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  openingTime?: number;
+  closingTime?: number;
+};
+
+export type UpdateHomeBasePayload = Partial<CreateHomeBasePayload> & { active?: boolean };
+
 export function buildOrgSettingsUrl(): string {
   return `${API_BASE_URL}/api/org-settings`;
 }
@@ -141,6 +207,16 @@ function buildApiError(status: number, url: string, body: ApiErrorBody): Error {
     body,
     message: `${code}: ${message}`,
   });
+}
+
+function buildActorHeaders(actorUserId: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+  };
+  if (actorUserId) {
+    headers['x-actor-user-id'] = actorUserId;
+  }
+  return headers;
 }
 
 export async function getForemanSchedule(
@@ -382,4 +458,181 @@ export async function getJobs(state?: JobDerivedState): Promise<JobsResponse> {
     throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as JobsResponse;
+}
+
+export async function getResources(): Promise<GetResourcesResponse> {
+  const url = `${API_BASE_URL}/api/resources`;
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as GetResourcesResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as GetResourcesResponse;
+}
+
+export async function createResource(
+  payload: CreateResourcePayload,
+  actorUserId: string | undefined,
+): Promise<ResourceRecord> {
+  const url = `${API_BASE_URL}/api/resources`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: buildActorHeaders(actorUserId),
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { resource?: ResourceRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { resource: ResourceRecord }).resource;
+}
+
+export async function updateResource(
+  id: string,
+  payload: UpdateResourcePayload,
+  actorUserId: string | undefined,
+): Promise<ResourceRecord> {
+  const url = `${API_BASE_URL}/api/resources/${id}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'PATCH',
+      headers: buildActorHeaders(actorUserId),
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { resource?: ResourceRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { resource: ResourceRecord }).resource;
+}
+
+export async function getHomeBases(): Promise<GetHomeBasesResponse> {
+  const url = `${API_BASE_URL}/api/home-bases`;
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as GetHomeBasesResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as GetHomeBasesResponse;
+}
+
+export async function createHomeBase(
+  payload: CreateHomeBasePayload,
+  actorUserId: string | undefined,
+): Promise<HomeBaseRecord> {
+  const url = `${API_BASE_URL}/api/home-bases`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: buildActorHeaders(actorUserId),
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { homeBase?: HomeBaseRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { homeBase: HomeBaseRecord }).homeBase;
+}
+
+export async function updateHomeBase(
+  id: string,
+  payload: UpdateHomeBasePayload,
+  actorUserId: string | undefined,
+): Promise<HomeBaseRecord> {
+  const url = `${API_BASE_URL}/api/home-bases/${id}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'PATCH',
+      headers: buildActorHeaders(actorUserId),
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { homeBase?: HomeBaseRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { homeBase: HomeBaseRecord }).homeBase;
+}
+
+export async function getForemen(): Promise<GetForemenResponse> {
+  const url = `${API_BASE_URL}/api/foremen`;
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as GetForemenResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as GetForemenResponse;
 }

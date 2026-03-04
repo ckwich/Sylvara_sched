@@ -54,6 +54,9 @@ const createHomeBaseBodySchema = z.object({
 
 const updateHomeBaseBodySchema = createHomeBaseBodySchema
   .partial()
+  .extend({
+    active: z.boolean().optional(),
+  })
   .refine((value) => Object.keys(value).length > 0, 'At least one field must be provided.');
 
 const foremanIdParamsSchema = z.object({
@@ -489,6 +492,9 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     }
     if (body.data.closingTime !== undefined) {
       updateData.closingMinute = body.data.closingTime;
+    }
+    if (body.data.active !== undefined) {
+      updateData.active = body.data.active;
     }
 
     const homeBase = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
