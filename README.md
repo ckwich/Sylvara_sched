@@ -89,6 +89,13 @@ Test DB uses `docker-compose.test.yml` and `TEST_DATABASE_URL`.
 
 If you hit Prisma Windows file-lock errors (`EPERM ... query_engine-windows.dll.node`), stop dev/watch processes and rerun the command.
 
+### Windows EPERM mitigation (integration harness)
+
+- `corepack pnpm test:integration` skips `prisma generate` by default on Windows to avoid DLL lock failures.
+- To force generation, set `INTEGRATION_RUN_PRISMA_GENERATE=true`.
+- When generation is forced, the harness retries up to 3 times for retryable `EPERM`/`EBUSY` lock errors.
+- Keep Next/API watch processes closed while running integration tests to reduce DLL lock contention.
+
 ## Fixture Reset Command (Dev Only)
 
 Use this to reset a foreman/day schedule fixture without manual DB cleanup.

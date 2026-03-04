@@ -1,11 +1,14 @@
-import { spawnSync } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
+import {
+  isRetryablePrismaGenerateError,
+  runCommand,
+  runWithRetry,
+} from './prisma-command-runner.mjs';
 
 function run(command, args, env = process.env) {
-  const result = spawnSync(command, args, {
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
+  const result = runCommand(command, args, {
     env,
+    captureOutput: false,
   });
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
@@ -40,14 +43,30 @@ function buildPrismaEnv(databaseUrl) {
   return env;
 }
 
+function canUseExistingGeneratedClient(env) {
+  const probe = runCommand(
+    'corepack',
+    [
+      'pnpm',
+      '--filter',
+      '@sylvara/db',
+      'exec',
+      'node',
+      '-e',
+      'import("@prisma/client").then(() => process.exit(0)).catch(() => process.exit(1))',
+    ],
+    { env, captureOutput: true },
+  );
+  return probe.status === 0;
+}
+
 async function waitForPostgres() {
   for (let i = 0; i < 60; i += 1) {
-    const probe = spawnSync(
+    const probe = runCommand(
       'docker',
       ['compose', '-f', 'docker-compose.test.yml', 'exec', '-T', 'postgres-test', 'pg_isready', '-U', 'postgres', '-d', 'sylvara_test'],
       {
-        stdio: 'ignore',
-        shell: process.platform === 'win32',
+        captureOutput: true,
       },
     );
     if (probe.status === 0) {
@@ -74,12 +93,43 @@ run('docker', ['compose', '-f', 'docker-compose.test.yml', 'up', '-d']);
 await waitForPostgres();
 
 const prismaEnv = buildPrismaEnv(process.env.TEST_DATABASE_URL);
+const shouldRunGenerate =
+  process.env.INTEGRATION_RUN_PRISMA_GENERATE === 'true' || process.platform !== 'win32';
 
-run(
-  'corepack',
-  ['pnpm', '--filter', '@sylvara/db', 'prisma:generate'],
-  prismaEnv,
-);
+if (shouldRunGenerate) {
+  const generateResult = await runWithRetry({
+    command: 'corepack',
+    args: ['pnpm', '--filter', '@sylvara/db', 'prisma:generate'],
+    env: prismaEnv,
+    attempts: 3,
+    baseDelayMs: 750,
+    shouldRetry: isRetryablePrismaGenerateError,
+    runner: (command, args, options) =>
+      runCommand(command, args, { ...options, captureOutput: true }),
+  });
+  if (generateResult.status !== 0) {
+    if (generateResult.stderr) {
+      console.error(generateResult.stderr);
+    }
+    if (generateResult.stdout) {
+      console.error(generateResult.stdout);
+    }
+    if (
+      isRetryablePrismaGenerateError(generateResult) &&
+      canUseExistingGeneratedClient(prismaEnv)
+    ) {
+      console.warn(
+        'Proceeding with existing generated Prisma client after retryable prisma:generate lock failure.',
+      );
+    } else {
+      process.exit(generateResult.status ?? 1);
+    }
+  }
+} else {
+  console.log(
+    'Skipping prisma:generate on Windows for integration harness reliability. Set INTEGRATION_RUN_PRISMA_GENERATE=true to force generation.',
+  );
+}
 
 run(
   'corepack',
