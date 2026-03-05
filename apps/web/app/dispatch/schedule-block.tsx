@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
+
 type BlockVisualState = 'TBS' | 'PARTIALLY_SCHEDULED' | 'FULLY_SCHEDULED' | 'COMPLETED' | 'TRAVEL';
 
 export type ScheduleBlockData = {
@@ -15,6 +17,8 @@ export type ScheduleBlockData = {
   travelLabel?: string;
   topPx: number;
   heightPx: number;
+  startMinuteOfDay: number;
+  endMinuteOfDay: number;
 };
 
 type ScheduleBlockProps = {
@@ -35,15 +39,63 @@ function colorClassForState(state: BlockVisualState): string {
   return 'border-blue-600 bg-blue-500 text-white';
 }
 
+function formatDuration(startMinuteOfDay: number, endMinuteOfDay: number): string {
+  const durationMinutes = Math.max(0, endMinuteOfDay - startMinuteOfDay);
+  const hours = Math.floor(durationMinutes / 60);
+  const minutes = durationMinutes % 60;
+  if (hours > 0 && minutes > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (hours > 0) {
+    return `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
 export default function ScheduleBlock(props: ScheduleBlockProps) {
   const isTall = props.block.heightPx >= 75;
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function onDocumentClick(event: MouseEvent) {
+      if (!rootRef.current) {
+        return;
+      }
+      if (!rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', onDocumentClick);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocumentClick);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
 
   return (
-    <details
+    <div
+      ref={rootRef}
       data-schedule-block="true"
-      className={`group h-full rounded-md border shadow-sm ${colorClassForState(props.block.state)}`}
+      className={`group relative h-full rounded-md border shadow-sm ${colorClassForState(props.block.state)}`}
     >
-      <summary className="cursor-pointer list-none px-2 py-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="h-full w-full cursor-pointer px-2 py-1.5 text-left"
+      >
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-xs font-semibold">{props.block.title}</p>
           <span className="text-[10px] font-medium">
@@ -52,26 +104,28 @@ export default function ScheduleBlock(props: ScheduleBlockProps) {
         </div>
         {isTall ? <p className="mt-0.5 truncate text-[11px] opacity-90">{props.block.subtitle}</p> : null}
         {props.block.travelLabel ? <p className="mt-0.5 text-[10px] font-medium">{props.block.travelLabel}</p> : null}
-      </summary>
+      </button>
 
-      <div className="space-y-2 border-t border-white/30 bg-white/95 p-2 text-[11px] text-slate-900">
-        <p>
-          <span className="font-medium">Job state:</span> {props.block.jobStateLabel}
-        </p>
-        <p>
-          <span className="font-medium">Scheduled:</span> {props.block.scheduledHoursLabel}
-        </p>
-        <p>
-          <span className="font-medium">Remaining:</span> {props.block.remainingHoursLabel}
-        </p>
-        <button
-          type="button"
-          onClick={() => void props.onRemove(props.block.id)}
-          className="rounded-md border border-red-300 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-50"
-        >
-          Remove segment
-        </button>
-      </div>
-    </details>
+      {open ? (
+        <div className="absolute left-0 top-full z-20 mt-1 w-60 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-lg">
+          <p className="font-semibold text-slate-900">{props.block.title}</p>
+          <p className="text-slate-600">{props.block.subtitle}</p>
+          <p className="mt-2">
+            {props.block.startLabel} - {props.block.endLabel}
+          </p>
+          <p>Duration: {formatDuration(props.block.startMinuteOfDay, props.block.endMinuteOfDay)}</p>
+          <button
+            type="button"
+            onClick={async () => {
+              await props.onRemove(props.block.id);
+              setOpen(false);
+            }}
+            className="mt-3 rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+          >
+            Remove
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }

@@ -141,6 +141,8 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             jobStateLabel: job?.derivedState ?? 'TBS',
             topPx: top,
             heightPx: height,
+            startMinuteOfDay,
+            endMinuteOfDay,
           };
         })
           .filter((block): block is ScheduleBlockData => block !== null);
@@ -172,6 +174,8 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             travelLabel: segment.travelType.replaceAll('_', ' '),
             topPx: top,
             heightPx: height,
+            startMinuteOfDay,
+            endMinuteOfDay,
           };
         })
           .filter((block): block is ScheduleBlockData => block !== null);
@@ -379,7 +383,13 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         >
           <div
             className="flex flex-row min-w-0"
-            style={{ display: 'flex', flexDirection: 'row', overflow: 'hidden', height: '100%' }}
+            style={{
+              overflowY: 'auto',
+              overflowX: 'auto',
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'row',
+            }}
           >
             <aside
               className="flex-none w-16 border-r border-slate-200 bg-white pt-[76px]"

@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { ApiRequestError, getJobs, type JobDerivedState, type JobSummary } from '../../lib/api';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { ApiRequestError, createJob, getJobs, type JobDerivedState, type JobSummary } from '../../lib/api';
 import { buildSections } from './backlog-helpers';
 import BacklogSection from './backlog-section';
 import { NON_COMPLETED_STATES, STATE_LABELS, type EquipmentFilter, type EquipmentType } from './backlog-types';
 
 export default function BacklogClient() {
+  const ADD_NEW_REP_VALUE = '__ADD_NEW_REP__';
   const [baseJobs, setBaseJobs] = useState<JobSummary[]>([]);
   const [completedJobs, setCompletedJobs] = useState<JobSummary[]>([]);
   const [completedLoaded, setCompletedLoaded] = useState(false);
@@ -27,41 +28,95 @@ export default function BacklogClient() {
     CRANE: true,
     BUCKET: true,
   });
+  const [newJobOpen, setNewJobOpen] = useState(false);
+  const [newJobSubmitting, setNewJobSubmitting] = useState(false);
+  const [newJobError, setNewJobError] = useState<string | null>(null);
+  const [newJobCustomRepInput, setNewJobCustomRepInput] = useState(false);
+  const [newJobForm, setNewJobForm] = useState({
+    customerName: '',
+    town: '',
+    equipmentType: 'CRANE' as const,
+    estimateHoursCurrent: '',
+    amountDollars: '',
+    salesRepCode: '',
+    notesRaw: '',
+  });
 
-  useEffect(() => {
-    let cancelled = false;
+  async function loadBaseJobs(): Promise<void> {
     setLoading(true);
     setError(null);
-
-    void getJobs()
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-        setBaseJobs(response.jobs.filter((job) => job.derivedState !== 'COMPLETED'));
-      })
-      .catch((requestError) => {
-        if (cancelled) {
-          return;
-        }
-        const message =
-          requestError instanceof ApiRequestError
+    try {
+      const response = await getJobs();
+      setBaseJobs(response.jobs.filter((job) => job.derivedState !== 'COMPLETED'));
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? requestError.message
+          : requestError instanceof Error
             ? requestError.message
-            : requestError instanceof Error
-              ? requestError.message
-              : 'Failed to load backlog.';
-        setError(message);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
+            : 'Failed to load backlog.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-    return () => {
-      cancelled = true;
-    };
+  useEffect(() => {
+    void loadBaseJobs();
   }, []);
+
+  async function handleCreateJobSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setNewJobError(null);
+
+    const estimate = Number(newJobForm.estimateHoursCurrent);
+    const amount = Number(newJobForm.amountDollars);
+    if (
+      !newJobForm.customerName.trim() ||
+      !newJobForm.town.trim() ||
+      !newJobForm.salesRepCode.trim() ||
+      Number.isNaN(estimate) ||
+      Number.isNaN(amount)
+    ) {
+      setNewJobError('Please complete all required fields.');
+      return;
+    }
+
+    setNewJobSubmitting(true);
+    try {
+      await createJob({
+        customerName: newJobForm.customerName.trim(),
+        town: newJobForm.town.trim(),
+        equipmentType: newJobForm.equipmentType,
+        estimateHoursCurrent: estimate,
+        amountDollars: amount,
+        salesRepCode: newJobForm.salesRepCode.trim(),
+        notesRaw: newJobForm.notesRaw.trim() || undefined,
+      });
+      setNewJobForm({
+        customerName: '',
+        town: '',
+        equipmentType: 'CRANE',
+        estimateHoursCurrent: '',
+        amountDollars: '',
+        salesRepCode: '',
+        notesRaw: '',
+      });
+      setNewJobCustomRepInput(false);
+      setNewJobOpen(false);
+      await loadBaseJobs();
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? requestError.message
+          : requestError instanceof Error
+            ? requestError.message
+            : 'Failed to create job.';
+      setNewJobError(message);
+    } finally {
+      setNewJobSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     if (!showCompleted || completedLoaded || loadingCompleted) {
@@ -104,6 +159,17 @@ export default function BacklogClient() {
   const loadedJobs = useMemo(
     () => (showCompleted ? [...baseJobs, ...completedJobs] : baseJobs),
     [baseJobs, completedJobs, showCompleted],
+  );
+  const newJobRepOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...baseJobs, ...completedJobs]
+            .map((job) => job.salesRepCode.trim())
+            .filter((code) => code.length > 0),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [baseJobs, completedJobs],
   );
 
   const jobsBeforeRepFilter = useMemo(() => {
@@ -164,7 +230,166 @@ export default function BacklogClient() {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8">
-      <h1 className="text-3xl font-semibold text-slate-900">Backlog</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-3xl font-semibold text-slate-900">Backlog</h1>
+        <button
+          type="button"
+          onClick={() => setNewJobOpen((open) => !open)}
+          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+        >
+          New Job
+        </button>
+      </div>
+
+      {newJobOpen ? (
+        <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <form className="grid gap-3 md:grid-cols-2" onSubmit={handleCreateJobSubmit}>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Customer name
+              <input
+                required
+                type="text"
+                className="rounded-md border border-slate-300 px-2 py-1.5"
+                value={newJobForm.customerName}
+                onChange={(event) => setNewJobForm((current) => ({ ...current, customerName: event.target.value }))}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Town
+              <input
+                required
+                type="text"
+                className="rounded-md border border-slate-300 px-2 py-1.5"
+                value={newJobForm.town}
+                onChange={(event) => setNewJobForm((current) => ({ ...current, town: event.target.value }))}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Equipment type
+              <select
+                required
+                className="rounded-md border border-slate-300 bg-white px-2 py-1.5"
+                value={newJobForm.equipmentType}
+                onChange={(event) =>
+                  setNewJobForm((current) => ({
+                    ...current,
+                    equipmentType: event.target.value as 'CRANE' | 'BUCKET',
+                  }))
+                }
+              >
+                <option value="CRANE">CRANE</option>
+                <option value="BUCKET">BUCKET</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Estimated hours
+              <input
+                required
+                type="number"
+                min="0"
+                step="0.1"
+                className="rounded-md border border-slate-300 px-2 py-1.5"
+                value={newJobForm.estimateHoursCurrent}
+                onChange={(event) =>
+                  setNewJobForm((current) => ({ ...current, estimateHoursCurrent: event.target.value }))
+                }
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Dollar amount
+              <input
+                required
+                type="number"
+                min="0"
+                step="0.01"
+                className="rounded-md border border-slate-300 px-2 py-1.5"
+                value={newJobForm.amountDollars}
+                onChange={(event) => setNewJobForm((current) => ({ ...current, amountDollars: event.target.value }))}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Sales rep code
+              {newJobCustomRepInput ? (
+                <div className="space-y-2">
+                  <input
+                    required
+                    type="text"
+                    className="w-full rounded-md border border-slate-300 px-2 py-1.5"
+                    value={newJobForm.salesRepCode}
+                    onChange={(event) =>
+                      setNewJobForm((current) => ({ ...current, salesRepCode: event.target.value }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="text-xs text-slate-600 underline"
+                    onClick={() => {
+                      setNewJobCustomRepInput(false);
+                      setNewJobForm((current) => ({ ...current, salesRepCode: '' }));
+                    }}
+                  >
+                    Choose existing rep instead
+                  </button>
+                </div>
+              ) : (
+                <select
+                  required
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1.5"
+                  value={
+                    newJobForm.salesRepCode && newJobRepOptions.includes(newJobForm.salesRepCode)
+                      ? newJobForm.salesRepCode
+                      : ''
+                  }
+                  onChange={(event) => {
+                    if (event.target.value === ADD_NEW_REP_VALUE) {
+                      setNewJobCustomRepInput(true);
+                      setNewJobForm((current) => ({ ...current, salesRepCode: '' }));
+                      return;
+                    }
+                    setNewJobForm((current) => ({ ...current, salesRepCode: event.target.value }));
+                  }}
+                >
+                  <option value="">Select rep...</option>
+                  {newJobRepOptions.map((repCode) => (
+                    <option key={repCode} value={repCode}>
+                      {repCode}
+                    </option>
+                  ))}
+                  <option value={ADD_NEW_REP_VALUE}>Add new rep code...</option>
+                </select>
+              )}
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-700 md:col-span-2">
+              Notes
+              <textarea
+                rows={3}
+                className="rounded-md border border-slate-300 px-2 py-1.5"
+                value={newJobForm.notesRaw}
+                onChange={(event) => setNewJobForm((current) => ({ ...current, notesRaw: event.target.value }))}
+              />
+            </label>
+            <div className="md:col-span-2 flex items-center gap-2">
+              <button
+                type="submit"
+                disabled={newJobSubmitting}
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              >
+                {newJobSubmitting ? 'Saving...' : 'Create Job'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewJobOpen(false)}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+            {newJobError ? (
+              <p className="md:col-span-2 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{newJobError}</p>
+            ) : null}
+          </form>
+        </section>
+      ) : null}
 
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">

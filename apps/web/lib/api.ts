@@ -106,6 +106,16 @@ export type JobsResponse = {
   total: number;
 };
 
+export type CreateJobPayload = {
+  customerName: string;
+  town: string;
+  equipmentType: 'CRANE' | 'BUCKET';
+  estimateHoursCurrent: number;
+  amountDollars: number;
+  salesRepCode: string;
+  notesRaw?: string;
+};
+
 export type ResourceRecord = {
   id: string;
   resourceType: 'PERSON' | 'EQUIPMENT';
@@ -473,6 +483,40 @@ export async function getJobs(state?: JobDerivedState): Promise<JobsResponse> {
     throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as JobsResponse;
+}
+
+export async function createJob(payload: CreateJobPayload): Promise<{ id: string }> {
+  const url = `${API_BASE_URL}/api/jobs`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, {
+      method: 'POST',
+      body: JSON.stringify({
+        customerName: payload.customerName,
+        equipmentType: payload.equipmentType,
+        salesRepCode: payload.salesRepCode,
+        jobSiteAddress: payload.town,
+        town: payload.town,
+        amountDollars: payload.amountDollars,
+        estimateHoursCurrent: payload.estimateHoursCurrent,
+        notesRaw: payload.notesRaw ?? '',
+      }),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const body = (await parseJsonSafe(response)) as { job?: { id: string } } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return { id: (body as { job: { id: string } }).job.id };
 }
 
 export async function getResources(): Promise<GetResourcesResponse> {
