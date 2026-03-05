@@ -1,6 +1,6 @@
 'use client';
 
-import { localDateMinuteToUtc } from '@sylvara/shared';
+import { localDateMinuteToUtc, utcToLocalParts } from '@sylvara/shared';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -14,7 +14,6 @@ import {
   DAY_START_MINUTE,
   formatDateHeading,
   getErrorMessage,
-  localMinuteFromIso,
   minuteToLabel,
   nextDate,
   PX_PER_MINUTE,
@@ -87,8 +86,18 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         const minute = (DAY_START_MINUTE + index * 30) % 1440;
         const lineClass = minute % 60 === 0 ? 'border-slate-300' : 'border-slate-200';
         return (
-          <div key={`axis-${minute}`} className={`h-[45px] border-t ${lineClass} pr-2 text-right text-xs text-slate-500`}>
-            {minuteToLabel(minute)}
+          <div key={`axis-${minute}`} className={`relative h-[45px] border-t ${lineClass}`}>
+            <span
+              className="absolute right-2 block text-right"
+              style={{
+                top: 0,
+                transform: 'translateY(-50%)',
+                fontSize: '0.75rem',
+                color: '#6b7280',
+              }}
+            >
+              {minuteToLabel(minute)}
+            </span>
           </div>
         );
       }),
@@ -98,14 +107,26 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
   const columns = useMemo(
     () =>
       foremen.map((foreman) => {
+        const minuteOfDay = (iso: string) => {
+          const local = utcToLocalParts(new Date(iso), companyTimezone);
+          return local.hour * 60 + local.minute;
+        };
+        const toSlot = (minuteOfDayValue: number) => Math.floor((minuteOfDayValue - DAY_START_MINUTE) / 10);
+
         const dayData = dataByForeman[foreman.id] ?? { roster: null, schedule: [], travel: [], crew: [] };
-        const scheduleBlocks: ScheduleBlockData[] = dayData.schedule.map((segment) => {
-          const startMinute = localMinuteFromIso(segment.startDatetime, companyTimezone);
-          const endMinute = localMinuteFromIso(segment.endDatetime, companyTimezone);
-          const startSlot = Math.floor((((startMinute - DAY_START_MINUTE) % 1440) + 1440) / 10);
-          let endSlotExclusive = Math.ceil((((endMinute - DAY_START_MINUTE) % 1440) + 1440) / 10);
-          if (endSlotExclusive <= startSlot) {
-            endSlotExclusive = startSlot + 1;
+        const scheduleBlocks: ScheduleBlockData[] = dayData.schedule
+          .map((segment) => {
+          const startMinuteOfDay = minuteOfDay(segment.startDatetime);
+          const endMinuteOfDay = minuteOfDay(segment.endDatetime);
+          const durationMinutes = endMinuteOfDay - startMinuteOfDay;
+          if (durationMinutes <= 0) {
+            return null;
+          }
+          const top = (startMinuteOfDay - DAY_START_MINUTE) * PX_PER_MINUTE;
+          const height = durationMinutes * PX_PER_MINUTE;
+          const startSlot = toSlot(startMinuteOfDay);
+          if (startSlot < 0 || startSlot >= 24 * 6) {
+            return null;
           }
           const job = jobsById.get(segment.jobId);
           return {
@@ -113,44 +134,52 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             title: job?.customerName ?? 'Unknown customer',
             subtitle: job?.town ?? 'Unknown town',
             state: job?.derivedState ?? 'TBS',
-            startLabel: minuteToLabel(startMinute),
-            endLabel: minuteToLabel(endMinute),
+            startLabel: minuteToLabel(startMinuteOfDay),
+            endLabel: minuteToLabel(endMinuteOfDay),
             scheduledHoursLabel: job?.scheduledEffectiveHours ?? '-',
             remainingHoursLabel: job?.remainingHours ?? '-',
             jobStateLabel: job?.derivedState ?? 'TBS',
-            startSlot,
-            endSlotExclusive,
+            topPx: top,
+            heightPx: height,
           };
-        });
+        })
+          .filter((block): block is ScheduleBlockData => block !== null);
 
-        const travelBlocks: ScheduleBlockData[] = dayData.travel.map((segment) => {
-          const startMinute = localMinuteFromIso(segment.startDatetime, companyTimezone);
-          const endMinute = localMinuteFromIso(segment.endDatetime, companyTimezone);
-          const startSlot = Math.floor((((startMinute - DAY_START_MINUTE) % 1440) + 1440) / 10);
-          let endSlotExclusive = Math.ceil((((endMinute - DAY_START_MINUTE) % 1440) + 1440) / 10);
-          if (endSlotExclusive <= startSlot) {
-            endSlotExclusive = startSlot + 1;
+        const travelBlocks: ScheduleBlockData[] = dayData.travel
+          .map((segment) => {
+          const startMinuteOfDay = minuteOfDay(segment.startDatetime);
+          const endMinuteOfDay = minuteOfDay(segment.endDatetime);
+          const durationMinutes = endMinuteOfDay - startMinuteOfDay;
+          if (durationMinutes <= 0) {
+            return null;
+          }
+          const top = (startMinuteOfDay - DAY_START_MINUTE) * PX_PER_MINUTE;
+          const height = durationMinutes * PX_PER_MINUTE;
+          const startSlot = toSlot(startMinuteOfDay);
+          if (startSlot < 0 || startSlot >= 24 * 6) {
+            return null;
           }
           return {
             id: segment.id,
             title: 'Travel',
             subtitle: '',
             state: 'TRAVEL',
-            startLabel: minuteToLabel(startMinute),
-            endLabel: minuteToLabel(endMinute),
+            startLabel: minuteToLabel(startMinuteOfDay),
+            endLabel: minuteToLabel(endMinuteOfDay),
             scheduledHoursLabel: '-',
             remainingHoursLabel: '-',
             jobStateLabel: 'Travel',
             travelLabel: segment.travelType.replaceAll('_', ' '),
-            startSlot,
-            endSlotExclusive,
+            topPx: top,
+            heightPx: height,
           };
-        });
+        })
+          .filter((block): block is ScheduleBlockData => block !== null);
 
         return {
           foreman,
           dayData,
-          blocks: [...scheduleBlocks, ...travelBlocks].sort((a, b) => a.startSlot - b.startSlot),
+          blocks: [...scheduleBlocks, ...travelBlocks].sort((a, b) => a.topPx - b.topPx),
         };
       }),
     [companyTimezone, dataByForeman, foremen, jobsById],
@@ -346,7 +375,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
 
         <section
           ref={scrollerRef}
-          className="h-[calc(100vh-180px)] overflow-auto rounded-lg border border-slate-200 bg-white"
+          className="h-[calc(100vh-180px)] overflow-x-auto overflow-y-auto rounded-lg border border-slate-200 bg-white"
         >
           <div
             className="flex flex-row min-w-0"

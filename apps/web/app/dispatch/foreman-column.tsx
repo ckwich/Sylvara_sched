@@ -1,6 +1,6 @@
 'use client';
 
-import type { MouseEvent, ReactNode, RefObject } from 'react';
+import type { MouseEvent, RefObject } from 'react';
 import { useRef } from 'react';
 import CrewAddPanel from './crew-add-panel';
 import { DAY_START_MINUTE, PX_PER_MINUTE } from './dispatch-utils';
@@ -29,6 +29,7 @@ type ForemanColumnProps = {
 };
 
 const TOTAL_SLOTS = 24 * 6;
+const TOTAL_HEIGHT_PX = TOTAL_SLOTS * 10 * PX_PER_MINUTE;
 
 function slotLineClass(slot: number): string {
   if (slot % 6 === 0) {
@@ -42,34 +43,6 @@ function slotLineClass(slot: number): string {
 
 export default function ForemanColumn(props: ForemanColumnProps) {
   const columnRef = useRef<HTMLDivElement | null>(null);
-  const blockByStart = new Map<number, ScheduleBlockData>();
-  for (const block of props.blocks) {
-    blockByStart.set(block.startSlot, block);
-  }
-
-  const rows: ReactNode[] = [];
-  for (let slot = 0; slot < TOTAL_SLOTS; slot += 1) {
-    const block = blockByStart.get(slot);
-    if (block) {
-      const span = Math.max(1, block.endSlotExclusive - block.startSlot);
-      rows.push(
-        <div key={`block-${block.id}-${slot}`} className={`${slotLineClass(slot)} relative`}>
-          <div aria-hidden className="pointer-events-none">
-            {Array.from({ length: span }).map((_, index) => (
-              <div key={`${block.id}-h-${index}`} className="h-[15px]" />
-            ))}
-          </div>
-          <div className="absolute inset-0 p-1">
-            <ScheduleBlock block={block} onRemove={props.onRemoveSegment} />
-          </div>
-        </div>,
-      );
-      slot += span - 1;
-      continue;
-    }
-
-    rows.push(<div key={`slot-${slot}`} className={`h-[15px] w-full hover:bg-blue-50 ${slotLineClass(slot)}`} />);
-  }
 
   function handleGridClick(event: MouseEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
@@ -125,7 +98,23 @@ export default function ForemanColumn(props: ForemanColumnProps) {
       </header>
 
       <div ref={columnRef} className="relative cursor-pointer" onClick={handleGridClick}>
-        {rows}
+        <div className="relative" style={{ height: `${TOTAL_HEIGHT_PX}px` }}>
+          {Array.from({ length: TOTAL_SLOTS }).map((_, slot) => (
+            <div
+              key={`slot-${slot}`}
+              className={`h-[15px] w-full hover:bg-blue-50 ${slotLineClass(slot)}`}
+            />
+          ))}
+          {props.blocks.map((block) => (
+            <div
+              key={`block-${block.id}`}
+              className="absolute left-0 right-0 p-1"
+              style={{ top: `${block.topPx}px`, height: `${block.heightPx}px` }}
+            >
+              <ScheduleBlock block={block} onRemove={props.onRemoveSegment} />
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );

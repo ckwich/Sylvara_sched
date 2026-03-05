@@ -13,8 +13,8 @@ export type ScheduleBlockData = {
   remainingHoursLabel: string;
   jobStateLabel: string;
   travelLabel?: string;
-  startSlot: number;
-  endSlotExclusive: number;
+  topPx: number;
+  heightPx: number;
 };
 
 type ScheduleBlockProps = {
@@ -36,13 +36,12 @@ function colorClassForState(state: BlockVisualState): string {
 }
 
 export default function ScheduleBlock(props: ScheduleBlockProps) {
-  const span = Math.max(1, props.block.endSlotExclusive - props.block.startSlot);
-  const isTall = span >= 5;
+  const isTall = props.block.heightPx >= 75;
 
   return (
     <details
       data-schedule-block="true"
-      className={`group rounded-md border shadow-sm ${colorClassForState(props.block.state)}`}
+      className={`group h-full rounded-md border shadow-sm ${colorClassForState(props.block.state)}`}
     >
       <summary className="cursor-pointer list-none px-2 py-1.5">
         <div className="flex items-center justify-between gap-2">
