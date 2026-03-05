@@ -138,6 +138,38 @@ export function useDispatchData(selectedDate: string, actorUserId: string | unde
     }
   }
 
+  async function reloadForemanDay(foremanId: string, date: string) {
+    const [schedule, members] = await Promise.all([
+      getForemanDaySchedule(foremanId, date),
+      getForemanRosterMembers(foremanId, date),
+    ]);
+
+    setDataByForeman((current) => ({
+      ...current,
+      [foremanId]: {
+        roster: schedule.roster
+          ? {
+              id: schedule.roster.id,
+              foremanPersonId: schedule.roster.foremanPersonId,
+              date: schedule.roster.date,
+              homeBaseId: schedule.roster.homeBaseId,
+              preferredStartMinute: schedule.roster.preferredStartMinute,
+              preferredEndMinute: schedule.roster.preferredEndMinute,
+              notes: null,
+            }
+          : null,
+        schedule: schedule.scheduleSegments,
+        travel: schedule.travelSegments ?? [],
+        crew: members.members,
+      },
+    }));
+  }
+
+  async function reloadJobs() {
+    const jobsResponse = await getJobs();
+    setJobs(jobsResponse.jobs);
+  }
+
   return {
     companyTimezone,
     foremen,
@@ -151,6 +183,7 @@ export function useDispatchData(selectedDate: string, actorUserId: string | unde
     crewErrorByForeman,
     loadDispatchData,
     handleAddCrew,
+    reloadForemanDay,
+    reloadJobs,
   };
 }
-

@@ -215,10 +215,47 @@ function buildActorHeaders(actorUserId: string | undefined): Record<string, stri
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
-  if (actorUserId) {
-    headers['x-actor-user-id'] = actorUserId;
-  }
   return headers;
+}
+
+function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
+  if (!headers) {
+    return {};
+  }
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  return headers as Record<string, string>;
+}
+
+function apiFetch(path: string, options?: RequestInit): Promise<Response> {
+  const secret = process.env.NEXT_PUBLIC_LAN_SHARED_SECRET?.trim();
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+  };
+
+  const actorId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID?.trim();
+  if (actorId) {
+    const method = (options?.method ?? 'GET').toUpperCase();
+    const isWrite = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method);
+    if (isWrite) {
+      headers['x-lan-user'] = actorId;
+    } else {
+      headers['x-actor-user-id'] = actorId;
+    }
+  }
+
+  return fetch(path, {
+    ...options,
+    headers: {
+      ...headers,
+      ...normalizeHeaders(options?.headers),
+    },
+  });
 }
 
 export async function getForemanSchedule(
@@ -228,7 +265,7 @@ export async function getForemanSchedule(
   const url = buildForemanScheduleUrl(foremanPersonId, date);
   let response: Response;
   try {
-    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
   } catch (error) {
     throw new ApiRequestError({
       status: null,
@@ -252,7 +289,7 @@ export async function getForemanActivity(
   const url = buildForemanActivityUrl(foremanPersonId, date);
   let response: Response;
   try {
-    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
   } catch (error) {
     throw new ApiRequestError({
       status: null,
@@ -277,17 +314,11 @@ export async function createScheduleSegment(
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
-  if (actorUserId) {
-    headers['x-actor-user-id'] = actorUserId;
-  }
-  if (lanUser) {
-    headers['x-lan-user'] = lanUser;
-  }
 
   const url = `${API_BASE_URL}/api/schedule-segments`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
@@ -313,17 +344,11 @@ export async function deleteScheduleSegment(
   lanUser: string | undefined,
 ): Promise<void> {
   const headers: Record<string, string> = {};
-  if (actorUserId) {
-    headers['x-actor-user-id'] = actorUserId;
-  }
-  if (lanUser) {
-    headers['x-lan-user'] = lanUser;
-  }
 
   const url = `${API_BASE_URL}/api/schedule-segments/${segmentId}`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'DELETE',
       headers,
     });
@@ -348,17 +373,11 @@ export async function restoreScheduleSegment(
   lanUser: string | undefined,
 ): Promise<void> {
   const headers: Record<string, string> = {};
-  if (actorUserId) {
-    headers['x-actor-user-id'] = actorUserId;
-  }
-  if (lanUser) {
-    headers['x-lan-user'] = lanUser;
-  }
 
   const url = `${API_BASE_URL}/api/schedule-segments/${segmentId}/restore`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'PATCH',
       headers,
     });
@@ -381,7 +400,7 @@ export async function getOrgSettings(): Promise<OrgSettingsResponse> {
   const url = buildOrgSettingsUrl();
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'GET',
       cache: 'no-store',
     });
@@ -409,17 +428,11 @@ export async function patchOrgSettingsTimezone(
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
-  if (actorUserId) {
-    headers['x-actor-user-id'] = actorUserId;
-  }
-  if (lanUser) {
-    headers['x-lan-user'] = lanUser;
-  }
 
   const url = buildOrgSettingsUrl();
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'PATCH',
       headers,
       body: JSON.stringify({ companyTimezone }),
@@ -444,7 +457,7 @@ export async function getJobs(state?: JobDerivedState): Promise<JobsResponse> {
   const url = buildJobsUrl(state);
   let response: Response;
   try {
-    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
   } catch (error) {
     throw new ApiRequestError({
       status: null,
@@ -466,7 +479,7 @@ export async function getResources(): Promise<GetResourcesResponse> {
   const url = `${API_BASE_URL}/api/resources`;
   let response: Response;
   try {
-    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
   } catch (error) {
     throw new ApiRequestError({
       status: null,
@@ -490,7 +503,7 @@ export async function createResource(
   const url = `${API_BASE_URL}/api/resources`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'POST',
       headers: buildActorHeaders(actorUserId),
       body: JSON.stringify(payload),
@@ -519,7 +532,7 @@ export async function updateResource(
   const url = `${API_BASE_URL}/api/resources/${id}`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'PATCH',
       headers: buildActorHeaders(actorUserId),
       body: JSON.stringify(payload),
@@ -544,7 +557,7 @@ export async function getHomeBases(): Promise<GetHomeBasesResponse> {
   const url = `${API_BASE_URL}/api/home-bases`;
   let response: Response;
   try {
-    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
   } catch (error) {
     throw new ApiRequestError({
       status: null,
@@ -568,7 +581,7 @@ export async function createHomeBase(
   const url = `${API_BASE_URL}/api/home-bases`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'POST',
       headers: buildActorHeaders(actorUserId),
       body: JSON.stringify(payload),
@@ -597,7 +610,7 @@ export async function updateHomeBase(
   const url = `${API_BASE_URL}/api/home-bases/${id}`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'PATCH',
       headers: buildActorHeaders(actorUserId),
       body: JSON.stringify(payload),
@@ -622,7 +635,7 @@ export async function getForemen(): Promise<GetForemenResponse> {
   const url = `${API_BASE_URL}/api/foremen`;
   let response: Response;
   try {
-    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
   } catch (error) {
     throw new ApiRequestError({
       status: null,
@@ -747,9 +760,6 @@ function buildWriteHeaders(actorUserId?: string): Record<string, string> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
-  if (actorUserId) {
-    headers['x-actor-user-id'] = actorUserId;
-  }
   return headers;
 }
 
@@ -760,7 +770,7 @@ export async function getForemanDaySchedule(
   const url = `${API_BASE_URL}/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}&includeTravel=true`;
   let response: Response;
   try {
-    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
   } catch (error) {
     throw new ApiRequestError({
       status: null,
@@ -784,7 +794,7 @@ export async function getForemanRoster(
   const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}`;
   let response: Response;
   try {
-    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
   } catch (error) {
     throw new ApiRequestError({
       status: null,
@@ -813,7 +823,7 @@ export async function getForemanRosterMembers(
   const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}/members`;
   let response: Response;
   try {
-    response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
   } catch (error) {
     throw new ApiRequestError({
       status: null,
@@ -838,7 +848,7 @@ export async function createForemanRoster(
   const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'POST',
       headers: buildWriteHeaders(actorUserId),
       body: JSON.stringify(payload),
@@ -868,7 +878,7 @@ export async function addForemanRosterMember(
   const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}/members`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'POST',
       headers: buildWriteHeaders(actorUserId),
       body: JSON.stringify(payload),
@@ -895,7 +905,7 @@ export async function createTravelSegment(
   const url = `${API_BASE_URL}/api/travel/create`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'POST',
       headers: buildWriteHeaders(actorUserId),
       body: JSON.stringify(payload),
@@ -930,7 +940,7 @@ export async function createScheduleAttempt(
     const url = `${API_BASE_URL}/api/schedule-segments`;
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await apiFetch(url, {
         method: 'POST',
         headers: buildWriteHeaders(payload.actorUserId),
         body: JSON.stringify({
@@ -974,7 +984,7 @@ export async function createScheduleAttempt(
   const oneClickUrl = `${API_BASE_URL}/api/schedule/one-click-attempt`;
   let response: Response;
   try {
-    response = await fetch(oneClickUrl, {
+    response = await apiFetch(oneClickUrl, {
       method: 'POST',
       headers: buildWriteHeaders(payload.actorUserId),
       body: JSON.stringify({
@@ -1006,9 +1016,8 @@ export async function removeScheduleSegment(segmentId: string, actorUserId?: str
   const url = `${API_BASE_URL}/api/schedule-segments/${segmentId}`;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method: 'DELETE',
-      headers: actorUserId ? { 'x-actor-user-id': actorUserId } : undefined,
     });
   } catch (error) {
     throw new ApiRequestError({
@@ -1024,3 +1033,4 @@ export async function removeScheduleSegment(segmentId: string, actorUserId?: str
     throw buildApiError(response.status, url, body ?? {});
   }
 }
+

@@ -11,6 +11,7 @@ import {
 } from '../../lib/api';
 import ForemanColumn from './foreman-column';
 import {
+  DAY_START_MINUTE,
   formatDateHeading,
   getErrorMessage,
   localMinuteFromIso,
@@ -49,6 +50,8 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
     crewErrorByForeman,
     loadDispatchData,
     handleAddCrew,
+    reloadForemanDay,
+    reloadJobs,
   } = useDispatchData(selectedDate, actorUserId);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
@@ -81,11 +84,11 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
   const axisRows = useMemo(
     () =>
       Array.from({ length: 24 * 2 }).map((_, index) => {
-        const minute = index * 30;
+        const minute = (DAY_START_MINUTE + index * 30) % 1440;
         const lineClass = minute % 60 === 0 ? 'border-slate-300' : 'border-slate-200';
         return (
           <div key={`axis-${minute}`} className={`h-[45px] border-t ${lineClass} pr-2 text-right text-xs text-slate-500`}>
-            {minute >= START_SCROLL_MINUTE ? minuteToLabel(minute) : ''}
+            {minuteToLabel(minute)}
           </div>
         );
       }),
@@ -99,6 +102,11 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         const scheduleBlocks: ScheduleBlockData[] = dayData.schedule.map((segment) => {
           const startMinute = localMinuteFromIso(segment.startDatetime, companyTimezone);
           const endMinute = localMinuteFromIso(segment.endDatetime, companyTimezone);
+          const startSlot = Math.floor((((startMinute - DAY_START_MINUTE) % 1440) + 1440) / 10);
+          let endSlotExclusive = Math.ceil((((endMinute - DAY_START_MINUTE) % 1440) + 1440) / 10);
+          if (endSlotExclusive <= startSlot) {
+            endSlotExclusive = startSlot + 1;
+          }
           const job = jobsById.get(segment.jobId);
           return {
             id: segment.id,
@@ -110,14 +118,19 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             scheduledHoursLabel: job?.scheduledEffectiveHours ?? '-',
             remainingHoursLabel: job?.remainingHours ?? '-',
             jobStateLabel: job?.derivedState ?? 'TBS',
-            startSlot: Math.floor(startMinute / 10),
-            endSlotExclusive: Math.max(Math.ceil(endMinute / 10), Math.floor(startMinute / 10) + 1),
+            startSlot,
+            endSlotExclusive,
           };
         });
 
         const travelBlocks: ScheduleBlockData[] = dayData.travel.map((segment) => {
           const startMinute = localMinuteFromIso(segment.startDatetime, companyTimezone);
           const endMinute = localMinuteFromIso(segment.endDatetime, companyTimezone);
+          const startSlot = Math.floor((((startMinute - DAY_START_MINUTE) % 1440) + 1440) / 10);
+          let endSlotExclusive = Math.ceil((((endMinute - DAY_START_MINUTE) % 1440) + 1440) / 10);
+          if (endSlotExclusive <= startSlot) {
+            endSlotExclusive = startSlot + 1;
+          }
           return {
             id: segment.id,
             title: 'Travel',
@@ -129,8 +142,8 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             remainingHoursLabel: '-',
             jobStateLabel: 'Travel',
             travelLabel: segment.travelType.replaceAll('_', ' '),
-            startSlot: Math.floor(startMinute / 10),
-            endSlotExclusive: Math.max(Math.ceil(endMinute / 10), Math.floor(startMinute / 10) + 1),
+            startSlot,
+            endSlotExclusive,
           };
         });
 
@@ -197,7 +210,6 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         return;
       }
 
-      await loadDispatchData(selectedDate);
       setSelectedSlot(null);
 
       if (result.segment && (input.travelBeforeMinutes > 0 || input.travelAfterMinutes > 0)) {
@@ -251,6 +263,8 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
           setPanelWarnings(warnings);
         }
       }
+
+      await Promise.all([reloadForemanDay(foremanId, selectedDate), reloadJobs()]);
 
       setPanelWarnings((result.warnings ?? []).map((warning) => WARNING_MESSAGES[warning.code] ?? warning.message));
     } catch (scheduleError) {
@@ -332,28 +346,21 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
 
         <section
           ref={scrollerRef}
-          className="h-[calc(100vh-180px)] overflow-y-auto rounded-lg border border-slate-200 bg-white"
+          className="h-[calc(100vh-180px)] overflow-auto rounded-lg border border-slate-200 bg-white"
         >
           <div
             className="flex flex-row min-w-0"
             style={{ display: 'flex', flexDirection: 'row', overflow: 'hidden', height: '100%' }}
           >
             <aside
-              className="sticky left-0 z-20 flex-none w-16 border-r border-slate-200 bg-white pt-[76px]"
-              style={{
-                position: 'sticky',
-                left: 0,
-                zIndex: 20,
-                background: 'white',
-                flexShrink: 0,
-                width: '4rem',
-              }}
+              className="flex-none w-16 border-r border-slate-200 bg-white pt-[76px]"
+              style={{ flexShrink: 0, width: '4rem' }}
             >
               {axisRows}
             </aside>
             <div
-              className="flex flex-row flex-1 overflow-x-auto"
-              style={{ display: 'flex', flexDirection: 'row', flex: 1, overflowX: 'auto' }}
+              className="flex flex-row flex-1"
+              style={{ display: 'flex', flexDirection: 'row', flex: 1 }}
             >
               {columns.map(({ foreman, blocks, dayData }) => (
                 <ForemanColumn
@@ -374,6 +381,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
                   onAddCrew={(input) => handleAddCrew(foreman.id, input)}
                   onSelectMinute={(input) => setSelectedSlot(input)}
                   onRemoveSegment={handleRemoveSegment}
+                  scrollContainerRef={scrollerRef}
                 />
               ))}
             </div>

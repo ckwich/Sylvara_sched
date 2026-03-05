@@ -1,7 +1,8 @@
 import { ApiRequestError } from '../../lib/api';
 
 export const PX_PER_MINUTE = 1.5;
-export const START_SCROLL_MINUTE = 5 * 60;
+export const DAY_START_MINUTE = 5 * 60;
+export const START_SCROLL_MINUTE = 0;
 
 export const WARNING_MESSAGES: Record<string, string> = {
   REQ_NOT_APPROVED: 'One or more permits are not yet approved.',
@@ -56,4 +57,3 @@ export function getErrorMessage(error: unknown): string {
   }
   return 'Request failed.';
 }
-

@@ -40,7 +40,10 @@ export default function ScheduleBlock(props: ScheduleBlockProps) {
   const isTall = span >= 5;
 
   return (
-    <details className={`group rounded-md border shadow-sm ${colorClassForState(props.block.state)}`}>
+    <details
+      data-schedule-block="true"
+      className={`group rounded-md border shadow-sm ${colorClassForState(props.block.state)}`}
+    >
       <summary className="cursor-pointer list-none px-2 py-1.5">
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-xs font-semibold">{props.block.title}</p>

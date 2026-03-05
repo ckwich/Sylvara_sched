@@ -1,7 +1,9 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode, RefObject } from 'react';
+import { useRef } from 'react';
 import CrewAddPanel from './crew-add-panel';
+import { DAY_START_MINUTE, PX_PER_MINUTE } from './dispatch-utils';
 import ScheduleBlock, { type ScheduleBlockData } from './schedule-block';
 
 type CrewMember = {
@@ -23,6 +25,7 @@ type ForemanColumnProps = {
   onAddCrew: (input: { personResourceId: string; role: 'CLIMBER' | 'GROUND' | 'OPERATOR' | 'OTHER'; homeBaseId?: string }) => Promise<void>;
   onSelectMinute: (input: { foremanId: string; minute: number }) => void;
   onRemoveSegment: (segmentId: string) => Promise<void>;
+  scrollContainerRef: RefObject<HTMLDivElement | null>;
 };
 
 const TOTAL_SLOTS = 24 * 6;
@@ -38,6 +41,7 @@ function slotLineClass(slot: number): string {
 }
 
 export default function ForemanColumn(props: ForemanColumnProps) {
+  const columnRef = useRef<HTMLDivElement | null>(null);
   const blockByStart = new Map<number, ScheduleBlockData>();
   for (const block of props.blocks) {
     blockByStart.set(block.startSlot, block);
@@ -64,15 +68,26 @@ export default function ForemanColumn(props: ForemanColumnProps) {
       continue;
     }
 
-    rows.push(
-      <button
-        key={`slot-${slot}`}
-        type="button"
-        onClick={() => props.onSelectMinute({ foremanId: props.foremanId, minute: slot * 10 })}
-        className={`h-[15px] w-full text-left hover:bg-blue-50 ${slotLineClass(slot)}`}
-        aria-label={`Add segment at minute ${slot * 10}`}
-      />,
-    );
+    rows.push(<div key={`slot-${slot}`} className={`h-[15px] w-full hover:bg-blue-50 ${slotLineClass(slot)}`} />);
+  }
+
+  function handleGridClick(event: MouseEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest('[data-schedule-block="true"]')) {
+      return;
+    }
+
+    const rect = columnRef.current?.getBoundingClientRect();
+    const scrollContainer = props.scrollContainerRef.current;
+    if (!rect || !scrollContainer) {
+      return;
+    }
+
+    const relativeY = event.clientY - rect.top + scrollContainer.scrollTop;
+    const rawMinute = DAY_START_MINUTE + Math.floor(relativeY / PX_PER_MINUTE);
+    const snappedMinute = Math.floor(rawMinute / 10) * 10;
+    const normalizedMinute = ((snappedMinute % 1440) + 1440) % 1440;
+    props.onSelectMinute({ foremanId: props.foremanId, minute: normalizedMinute });
   }
 
   return (
@@ -109,7 +124,9 @@ export default function ForemanColumn(props: ForemanColumnProps) {
         </details>
       </header>
 
-      <div className="relative">{rows}</div>
+      <div ref={columnRef} className="relative cursor-pointer" onClick={handleGridClick}>
+        {rows}
+      </div>
     </section>
   );
 }

@@ -1,3 +1,5 @@
+import 'dotenv/config';
+import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { prisma } from '@sylvara/db';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +27,17 @@ export function buildServer(
   authConfig?: ServerAuthConfig,
 ) {
   const app = Fastify();
+  app.register(cors, {
+    origin: (origin, cb) => {
+      if (!origin || origin.startsWith('http://localhost')) {
+        cb(null, true);
+      } else {
+        cb(new Error('Not allowed by CORS'), false);
+      }
+    },
+    credentials: true,
+  });
+
   const lanModeEnabled = authConfig?.lanModeEnabled ?? isLanModeEnabled(process.env.LAN_MODE);
   const lanSharedSecret = authConfig?.lanSharedSecret ?? process.env.LAN_SHARED_SECRET ?? null;
 
