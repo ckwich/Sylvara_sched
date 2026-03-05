@@ -35,6 +35,8 @@ export function buildServer(
         cb(new Error('Not allowed by CORS'), false);
       }
     },
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'x-lan-user', 'x-actor-user-id'],
     credentials: true,
   });
 

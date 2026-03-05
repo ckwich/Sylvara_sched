@@ -1,7 +1,5 @@
 import { localDateMinuteToUtc } from '@sylvara/shared';
 
-export const API_BASE_URL = '';
-
 type ApiErrorBody = {
   error?: {
     code?: string;
@@ -204,19 +202,19 @@ export type CreateHomeBasePayload = {
 export type UpdateHomeBasePayload = Partial<CreateHomeBasePayload> & { active?: boolean };
 
 export function buildOrgSettingsUrl(): string {
-  return `${API_BASE_URL}/api/org-settings`;
+  return `/api/org-settings`;
 }
 
 export function buildForemanScheduleUrl(foremanPersonId: string | number, date: string): string {
-  return `${API_BASE_URL}/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}`;
+  return `/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}`;
 }
 
 export function buildForemanActivityUrl(foremanPersonId: string | number, date: string): string {
-  return `${API_BASE_URL}/api/foremen/${foremanPersonId}/activity?date=${encodeURIComponent(date)}`;
+  return `/api/foremen/${foremanPersonId}/activity?date=${encodeURIComponent(date)}`;
 }
 
 export function buildJobsUrl(state?: JobDerivedState): string {
-  const base = `${API_BASE_URL}/api/jobs`;
+  const base = `/api/jobs`;
   if (!state) {
     return base;
   }
@@ -263,11 +261,15 @@ function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
 }
 
 function apiFetch(path: string, options?: RequestInit): Promise<Response> {
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.trim() ?? '';
   const secret = process.env.NEXT_PUBLIC_LAN_SHARED_SECRET?.trim();
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-    ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
-  };
+  const headers: Record<string, string> = {};
+  if (options?.body !== undefined) {
+    headers['content-type'] = 'application/json';
+  }
+  if (secret) {
+    headers.Authorization = `Bearer ${secret}`;
+  }
 
   const actorId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID?.trim();
   if (actorId) {
@@ -280,7 +282,9 @@ function apiFetch(path: string, options?: RequestInit): Promise<Response> {
     }
   }
 
-  return fetch(path, {
+  const url = path.startsWith('http://') || path.startsWith('https://') ? path : `${apiBase}${path}`;
+
+  return fetch(url, {
     ...options,
     headers: {
       ...headers,
@@ -346,7 +350,7 @@ export async function createScheduleSegment(
     'content-type': 'application/json',
   };
 
-  const url = `${API_BASE_URL}/api/schedule-segments`;
+  const url = `/api/schedule-segments`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -370,13 +374,13 @@ export async function createScheduleSegment(
 }
 
 export async function deleteScheduleSegment(
-  segmentId: number,
+  segmentId: string,
   actorUserId: string | undefined,
   lanUser: string | undefined,
 ): Promise<void> {
   const headers: Record<string, string> = {};
 
-  const url = `${API_BASE_URL}/api/schedule-segments/${segmentId}`;
+  const url = `/api/schedule-segments/${segmentId}`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -405,7 +409,7 @@ export async function restoreScheduleSegment(
 ): Promise<void> {
   const headers: Record<string, string> = {};
 
-  const url = `${API_BASE_URL}/api/schedule-segments/${segmentId}/restore`;
+  const url = `/api/schedule-segments/${segmentId}/restore`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -507,7 +511,7 @@ export async function getJobs(state?: JobDerivedState): Promise<JobsResponse> {
 }
 
 export async function getJob(jobId: string): Promise<JobDetail> {
-  const url = `${API_BASE_URL}/api/jobs/${jobId}`;
+  const url = `/api/jobs/${jobId}`;
   let response: Response;
   try {
     response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
@@ -549,7 +553,7 @@ export async function getJob(jobId: string): Promise<JobDetail> {
 }
 
 export async function createJob(payload: CreateJobPayload): Promise<{ id: string }> {
-  const url = `${API_BASE_URL}/api/jobs`;
+  const url = `/api/jobs`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -583,7 +587,7 @@ export async function createJob(payload: CreateJobPayload): Promise<{ id: string
 }
 
 export async function updateJob(jobId: string, payload: UpdateJobPayload): Promise<void> {
-  const url = `${API_BASE_URL}/api/jobs/${jobId}`;
+  const url = `/api/jobs/${jobId}`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -606,7 +610,7 @@ export async function updateJob(jobId: string, payload: UpdateJobPayload): Promi
 }
 
 export async function getResources(): Promise<GetResourcesResponse> {
-  const url = `${API_BASE_URL}/api/resources`;
+  const url = `/api/resources`;
   let response: Response;
   try {
     response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
@@ -630,7 +634,7 @@ export async function createResource(
   payload: CreateResourcePayload,
   actorUserId: string | undefined,
 ): Promise<ResourceRecord> {
-  const url = `${API_BASE_URL}/api/resources`;
+  const url = `/api/resources`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -659,7 +663,7 @@ export async function updateResource(
   payload: UpdateResourcePayload,
   actorUserId: string | undefined,
 ): Promise<ResourceRecord> {
-  const url = `${API_BASE_URL}/api/resources/${id}`;
+  const url = `/api/resources/${id}`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -684,7 +688,7 @@ export async function updateResource(
 }
 
 export async function getHomeBases(): Promise<GetHomeBasesResponse> {
-  const url = `${API_BASE_URL}/api/home-bases`;
+  const url = `/api/home-bases`;
   let response: Response;
   try {
     response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
@@ -708,7 +712,7 @@ export async function createHomeBase(
   payload: CreateHomeBasePayload,
   actorUserId: string | undefined,
 ): Promise<HomeBaseRecord> {
-  const url = `${API_BASE_URL}/api/home-bases`;
+  const url = `/api/home-bases`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -737,7 +741,7 @@ export async function updateHomeBase(
   payload: UpdateHomeBasePayload,
   actorUserId: string | undefined,
 ): Promise<HomeBaseRecord> {
-  const url = `${API_BASE_URL}/api/home-bases/${id}`;
+  const url = `/api/home-bases/${id}`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -762,7 +766,7 @@ export async function updateHomeBase(
 }
 
 export async function getForemen(): Promise<GetForemenResponse> {
-  const url = `${API_BASE_URL}/api/foremen`;
+  const url = `/api/foremen`;
   let response: Response;
   try {
     response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
@@ -897,7 +901,7 @@ export async function getForemanDaySchedule(
   foremanPersonId: string,
   date: string,
 ): Promise<DispatchForemanScheduleResponse> {
-  const url = `${API_BASE_URL}/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}&includeTravel=true`;
+  const url = `/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}&includeTravel=true`;
   let response: Response;
   try {
     response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
@@ -921,7 +925,7 @@ export async function getForemanRoster(
   foremanId: string,
   date: string,
 ): Promise<ForemanDayRoster | null> {
-  const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}`;
+  const url = `/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}`;
   let response: Response;
   try {
     response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
@@ -950,7 +954,7 @@ export async function getForemanRosterMembers(
   foremanId: string,
   date: string,
 ): Promise<ForemanRosterMembersResponse> {
-  const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}/members`;
+  const url = `/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}/members`;
   let response: Response;
   try {
     response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
@@ -975,7 +979,7 @@ export async function createForemanRoster(
   payload: CreateForemanRosterPayload,
   actorUserId?: string,
 ): Promise<ForemanDayRoster> {
-  const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters`;
+  const url = `/api/foremen/${foremanId}/rosters`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -1005,7 +1009,7 @@ export async function addForemanRosterMember(
   payload: AddRosterMemberPayload,
   actorUserId?: string,
 ): Promise<void> {
-  const url = `${API_BASE_URL}/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}/members`;
+  const url = `/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}/members`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -1032,7 +1036,7 @@ export async function createTravelSegment(
   payload: CreateTravelPayload,
   actorUserId?: string,
 ): Promise<DispatchTravelSegment> {
-  const url = `${API_BASE_URL}/api/travel/create`;
+  const url = `/api/travel/create`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -1067,7 +1071,7 @@ export async function createScheduleAttempt(
       payload.requestedStartMinute + payload.durationMinutes,
       timezone,
     ).toISOString();
-    const url = `${API_BASE_URL}/api/schedule-segments`;
+    const url = `/api/schedule-segments`;
     let response: Response;
     try {
       response = await apiFetch(url, {
@@ -1111,7 +1115,7 @@ export async function createScheduleAttempt(
     };
   }
 
-  const oneClickUrl = `${API_BASE_URL}/api/schedule/one-click-attempt`;
+  const oneClickUrl = `/api/schedule/one-click-attempt`;
   let response: Response;
   try {
     response = await apiFetch(oneClickUrl, {
@@ -1143,7 +1147,7 @@ export async function createScheduleAttempt(
 }
 
 export async function removeScheduleSegment(segmentId: string, actorUserId?: string): Promise<void> {
-  const url = `${API_BASE_URL}/api/schedule-segments/${segmentId}`;
+  const url = `/api/schedule-segments/${segmentId}`;
   let response: Response;
   try {
     response = await apiFetch(url, {
@@ -1163,4 +1167,5 @@ export async function removeScheduleSegment(segmentId: string, actorUserId?: str
     throw buildApiError(response.status, url, body ?? {});
   }
 }
+
 
