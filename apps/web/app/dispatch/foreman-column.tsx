@@ -25,6 +25,8 @@ type ForemanColumnProps = {
   onAddCrew: (input: { personResourceId: string; role: 'CLIMBER' | 'GROUND' | 'OPERATOR' | 'OTHER'; homeBaseId?: string }) => Promise<void>;
   onSelectMinute: (input: { foremanId: string; minute: number }) => void;
   onRemoveSegment: (segmentId: string) => Promise<void>;
+  onJobSaved: () => Promise<void>;
+  salesRepCodes: string[];
   scrollContainerRef: RefObject<HTMLDivElement | null>;
 };
 
@@ -111,7 +113,12 @@ export default function ForemanColumn(props: ForemanColumnProps) {
               className="absolute left-0 right-0 p-1"
               style={{ top: `${block.topPx}px`, height: `${block.heightPx}px` }}
             >
-              <ScheduleBlock block={block} onRemove={props.onRemoveSegment} />
+              <ScheduleBlock
+                block={block}
+                onRemove={props.onRemoveSegment}
+                onJobSaved={props.onJobSaved}
+                salesRepCodes={props.salesRepCodes}
+              />
             </div>
           ))}
         </div>

@@ -18,9 +18,16 @@ type BacklogSectionProps = {
   equipmentFilter: EquipmentFilter;
   isOpen: boolean;
   onToggle: (equipmentType: EquipmentType) => void;
+  onEditJob: (jobId: string) => void;
 };
 
-export default function BacklogSection({ section, equipmentFilter, isOpen, onToggle }: BacklogSectionProps) {
+export default function BacklogSection({
+  section,
+  equipmentFilter,
+  isOpen,
+  onToggle,
+  onEditJob,
+}: BacklogSectionProps) {
   if (equipmentFilter !== 'ALL' && section.equipmentType !== equipmentFilter) {
     return null;
   }
@@ -57,7 +64,15 @@ export default function BacklogSection({ section, equipmentFilter, isOpen, onTog
                 <tbody className="divide-y divide-slate-100">
                   {group.jobs.map((job) => (
                     <tr key={job.id} className="bg-white">
-                      <td className={rowCellClassName(false)}>{job.customerName}</td>
+                      <td className={rowCellClassName(false)}>
+                        <button
+                          type="button"
+                          onClick={() => onEditJob(job.id)}
+                          className="text-left font-medium text-blue-700 hover:underline"
+                        >
+                          {job.customerName}
+                        </button>
+                      </td>
                       <td className={rowCellClassName(false)}>{job.town}</td>
                       <td className={rowCellClassName(false)}>
                         <span

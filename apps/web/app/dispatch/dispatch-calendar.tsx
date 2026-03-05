@@ -47,7 +47,6 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
     error,
     crewBusyForemanId,
     crewErrorByForeman,
-    loadDispatchData,
     handleAddCrew,
     reloadForemanDay,
     reloadJobs,
@@ -69,6 +68,17 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
   }, [loading]);
 
   const jobsById = useMemo(() => new Map(jobs.map((job) => [job.id, job])), [jobs]);
+  const salesRepCodes = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          jobs
+            .map((job) => job.salesRepCode.trim())
+            .filter((repCode) => repCode.length > 0),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [jobs],
+  );
   const todayDate = useMemo(
     () =>
       new Intl.DateTimeFormat('en-CA', {
@@ -114,7 +124,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         const toSlot = (minuteOfDayValue: number) => Math.floor((minuteOfDayValue - DAY_START_MINUTE) / 10);
 
         const dayData = dataByForeman[foreman.id] ?? { roster: null, schedule: [], travel: [], crew: [] };
-        const scheduleBlocks: ScheduleBlockData[] = dayData.schedule
+        const scheduleBlocks = dayData.schedule
           .map((segment) => {
           const startMinuteOfDay = minuteOfDay(segment.startDatetime);
           const endMinuteOfDay = minuteOfDay(segment.endDatetime);
@@ -131,6 +141,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
           const job = jobsById.get(segment.jobId);
           return {
             id: segment.id,
+            jobId: segment.jobId,
             title: job?.customerName ?? 'Unknown customer',
             subtitle: job?.town ?? 'Unknown town',
             state: job?.derivedState ?? 'TBS',
@@ -145,9 +156,9 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             endMinuteOfDay,
           };
         })
-          .filter((block): block is ScheduleBlockData => block !== null);
+          .filter((block) => block !== null) as ScheduleBlockData[];
 
-        const travelBlocks: ScheduleBlockData[] = dayData.travel
+        const travelBlocks = dayData.travel
           .map((segment) => {
           const startMinuteOfDay = minuteOfDay(segment.startDatetime);
           const endMinuteOfDay = minuteOfDay(segment.endDatetime);
@@ -178,7 +189,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             endMinuteOfDay,
           };
         })
-          .filter((block): block is ScheduleBlockData => block !== null);
+          .filter((block) => block !== null) as ScheduleBlockData[];
 
         return {
           foreman,
@@ -307,12 +318,12 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
     }
   }
 
-  async function handleRemoveSegment(segmentId: string) {
+  async function handleRemoveSegment(foremanId: string, segmentId: string) {
     if (!window.confirm('Remove this segment?')) {
       return;
     }
     await removeScheduleSegment(segmentId, actorUserId);
-    await loadDispatchData(selectedDate);
+    await Promise.all([reloadForemanDay(foremanId, selectedDate), reloadJobs()]);
   }
 
   function setDate(date: string) {
@@ -419,7 +430,11 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
                   crewError={crewErrorByForeman[foreman.id] ?? null}
                   onAddCrew={(input) => handleAddCrew(foreman.id, input)}
                   onSelectMinute={(input) => setSelectedSlot(input)}
-                  onRemoveSegment={handleRemoveSegment}
+                  onRemoveSegment={(segmentId) => handleRemoveSegment(foreman.id, segmentId)}
+                  onJobSaved={async () => {
+                    await Promise.all([reloadForemanDay(foreman.id, selectedDate), reloadJobs()]);
+                  }}
+                  salesRepCodes={salesRepCodes}
                   scrollContainerRef={scrollerRef}
                 />
               ))}

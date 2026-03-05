@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import EditJobModal from '../jobs/edit-job-modal';
 
 type BlockVisualState = 'TBS' | 'PARTIALLY_SCHEDULED' | 'FULLY_SCHEDULED' | 'COMPLETED' | 'TRAVEL';
 
 export type ScheduleBlockData = {
   id: string;
+  jobId?: string;
   title: string;
   subtitle: string;
   state: BlockVisualState;
@@ -24,6 +26,8 @@ export type ScheduleBlockData = {
 type ScheduleBlockProps = {
   block: ScheduleBlockData;
   onRemove: (blockId: string) => Promise<void>;
+  onJobSaved: () => Promise<void>;
+  salesRepCodes: string[];
 };
 
 function colorClassForState(state: BlockVisualState): string {
@@ -55,6 +59,7 @@ function formatDuration(startMinuteOfDay: number, endMinuteOfDay: number): strin
 export default function ScheduleBlock(props: ScheduleBlockProps) {
   const isTall = props.block.heightPx >= 75;
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -124,8 +129,28 @@ export default function ScheduleBlock(props: ScheduleBlockProps) {
           >
             Remove
           </button>
+          {props.block.jobId ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditOpen(true);
+                setOpen(false);
+              }}
+              className="mt-2 block text-xs font-medium text-blue-700 hover:underline"
+            >
+              Edit Job
+            </button>
+          ) : null}
         </div>
       ) : null}
+
+      <EditJobModal
+        open={editOpen}
+        jobId={props.block.jobId ?? null}
+        salesRepCodes={props.salesRepCodes}
+        onClose={() => setEditOpen(false)}
+        onSaved={props.onJobSaved}
+      />
     </div>
   );
 }

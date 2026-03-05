@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ApiRequestError, createJob, getJobs, type JobDerivedState, type JobSummary } from '../../lib/api';
+import EditJobModal from '../jobs/edit-job-modal';
 import { buildSections } from './backlog-helpers';
 import BacklogSection from './backlog-section';
 import { NON_COMPLETED_STATES, STATE_LABELS, type EquipmentFilter, type EquipmentType } from './backlog-types';
@@ -29,10 +30,11 @@ export default function BacklogClient() {
     BUCKET: true,
   });
   const [newJobOpen, setNewJobOpen] = useState(false);
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [newJobSubmitting, setNewJobSubmitting] = useState(false);
   const [newJobError, setNewJobError] = useState<string | null>(null);
   const [newJobCustomRepInput, setNewJobCustomRepInput] = useState(false);
-  const [newJobForm, setNewJobForm] = useState({
+  const [newJobForm, setNewJobForm] = useState<NewJobFormState>({
     customerName: '',
     town: '',
     equipmentType: 'CRANE' as const,
@@ -499,6 +501,7 @@ export default function BacklogClient() {
           section={section}
           equipmentFilter={equipmentFilter}
           isOpen={sectionOpen[section.equipmentType]}
+          onEditJob={(jobId) => setEditingJobId(jobId)}
           onToggle={(equipmentType) =>
             setSectionOpen((current) => ({
               ...current,
@@ -507,6 +510,23 @@ export default function BacklogClient() {
           }
         />
       ))}
+
+      <EditJobModal
+        open={editingJobId !== null}
+        jobId={editingJobId}
+        salesRepCodes={newJobRepOptions}
+        onClose={() => setEditingJobId(null)}
+        onSaved={loadBaseJobs}
+      />
     </main>
   );
 }
+  type NewJobFormState = {
+    customerName: string;
+    town: string;
+    equipmentType: 'CRANE' | 'BUCKET';
+    estimateHoursCurrent: string;
+    amountDollars: string;
+    salesRepCode: string;
+    notesRaw: string;
+  };
