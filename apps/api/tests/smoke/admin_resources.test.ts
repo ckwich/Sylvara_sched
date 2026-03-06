@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { buildServer } from '../../src/server';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const PERSON_ID = '22222222-2222-4222-8222-222222222222';
@@ -59,7 +60,7 @@ describe('admin resources and rosters', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/resources',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         name: 'Foreman One',
         resourceType: 'PERSON',
@@ -112,7 +113,7 @@ describe('admin resources and rosters', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/resources',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         name: 'Crane 1090',
         resourceType: 'EQUIPMENT',
@@ -165,7 +166,7 @@ describe('admin resources and rosters', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/home-bases',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         name: 'Natick',
         addressLine1: '1 Main St',
@@ -227,7 +228,7 @@ describe('admin resources and rosters', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         date: '2026-03-04',
         homeBaseId: HOME_BASE_ID,
@@ -290,7 +291,7 @@ describe('admin resources and rosters', () => {
     const first = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters/2026-03-04/members`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         personResourceId: CREW_MEMBER_ID,
         role: 'GROUND',
@@ -302,7 +303,7 @@ describe('admin resources and rosters', () => {
     const second = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters/2026-03-04/members`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         personResourceId: CREW_MEMBER_ID,
         role: 'GROUND',

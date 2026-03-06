@@ -11,6 +11,7 @@
    - `apps/api/.env.example`
    - `apps/web/.env.example`
    - `packages/db/.env.example`
+   - Required auth env vars: `AUTH_SECRET`, `AUTH_URL`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`
 3. Start dev servers:
    - `corepack pnpm dev`
 4. Validate Prisma schema and migration state:
@@ -23,40 +24,24 @@
 
 ### LAN mode (internal office pilot)
 
-Use this when running the Scheduler from an always-on office host so coworkers can access it over LAN.
+LAN pilot now uses Auth.js Google OAuth for user auth. No browser-side shared secret is used.
 
-1. Set required env vars (example):
-   - `LAN_MODE=true`
-   - `LAN_SHARED_SECRET=<long-random-secret-min-24-chars>`
+1. Set env vars:
    - `HOST_BIND=0.0.0.0`
    - `WEB_PORT=3000`
    - `API_PORT=4000`
    - `PUBLIC_WEB_ORIGIN=http://schedule-pc:3000`
-2. LAN dev mode (watchers):
+   - `API_URL=http://localhost:4000` (server-side web proxy upstream)
+2. Start LAN services:
    - `corepack pnpm lan`
-3. LAN prod-ish mode (build + start):
-   - `corepack pnpm lan:build`
-   - `corepack pnpm lan:start`
-   - `corepack pnpm lan:check`
-   - `corepack pnpm lan:stop`
-4. API access in LAN mode:
-   - Browser still calls same-origin `/api/*` from the web app.
-   - API requires `Authorization: Bearer <LAN_SHARED_SECRET>` on `/api/*`, except `GET /api/health`.
-   - API writes also require `X-LAN-USER` (set from the web UI "LAN User" field).
-   - The web server proxy adds this header server-side in LAN mode.
-5. Windows Firewall:
-   - Allow inbound TCP `WEB_PORT` only (default `3000`) on the host machine.
-   - Keep `API_PORT` inbound blocked; API is reached through web same-origin proxy.
-6. From another office PC:
+   - or `corepack pnpm lan:build && corepack pnpm lan:start`
+3. API auth flow:
+   - Browser -> `apps/web/lib/api.ts` -> `/api/proxy`
+   - Proxy forwards Auth.js JWT bearer token to `apps/api`
+   - API verifies JWT with `AUTH_SECRET`
+4. From another office PC:
    - Open `http://<host-machine-name>:3000/dispatch`
    - Example: `http://SCHED-HOST:3000/dispatch`
-7. Keep the shared secret internal. This is LAN-only guardrail, not SSO.
-8. LAN User attribution:
-   - Each coworker enters their own `LAN User` value on `/dispatch` or `/company`.
-   - The value is saved in browser localStorage and sent as `X-LAN-USER` on writes.
-   - It is recorded in `activity_logs.actor_display` for audit context only (not authorization).
-9. Security caveat:
-   - This is not real authentication/authorization and must remain internal-only.
 
 ### LAN Pilot: first-time setup (quick demo)
 
@@ -69,6 +54,31 @@ Use this when running the Scheduler from an always-on office host so coworkers c
    - **Seed Demo Fixtures** (creates one actor/home base/foreman/roster/job fixture set)
    - **Reset Schedule Day** (runs the existing reset flow for a foreman/date)
 4. Reload the day in Dispatch after seed/reset to verify roster-linked results.
+
+## Authentication Setup
+
+1. Generate `AUTH_SECRET`:
+   - `openssl rand -base64 32`
+2. Create a Google OAuth app in Google Cloud Console:
+   - APIs & Services -> Credentials -> Create Credentials -> OAuth client ID
+   - App type: Web application
+3. Add authorized redirect URIs:
+   - `http://schedule-pc:3000/api/auth/callback/google`
+   - `http://localhost:3000/api/auth/callback/google`
+4. Set env vars:
+   - `AUTH_SECRET`
+   - `AUTH_URL`
+   - `AUTH_GOOGLE_ID`
+   - `AUTH_GOOGLE_SECRET`
+   - `API_URL` (web proxy upstream for `apps/web/app/api/proxy`)
+   - `CORS_ALLOWED_ORIGINS`
+   - `TEST_DATABASE_URL` (test-only)
+5. Promote first user to `MANAGER`:
+   - Example SQL:
+   - `UPDATE users SET role = 'MANAGER' WHERE email = 'you@irontreeservice.com';`
+6. Local vs LAN:
+   - Local dev: run on localhost with localhost OAuth redirect URI.
+   - LAN mode: run on office host URL (`schedule-pc`) with LAN redirect URI configured.
 
 ## Integration Tests (Real Postgres)
 
@@ -126,5 +136,5 @@ Warning: this command is destructive and intended for local dev/test use only. I
 
 - Stack is locked to Next.js + TypeScript monorepo with pnpm + Turborepo.
 - Database is PostgreSQL via Prisma.
-- Timezone and scheduling logic must use Luxon.
+- Timezone and scheduling logic must use shared time helpers in `packages/shared`.
 - Schedule segment restore API: `PATCH /api/schedule-segments/:segmentId/restore` returns `409 SEGMENT_NOT_DELETED` when the target segment is already active.

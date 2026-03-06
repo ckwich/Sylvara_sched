@@ -1,8 +1,8 @@
 import { EquipmentType, PrismaClient, ResourceType, UserRole } from '@prisma/client';
-import { localDateMinuteToUtc } from '@sylvara/shared';
+import { DEFAULT_TIMEZONE, localDateMinuteToUtc } from '@sylvara/shared';
 
 const ORG_SETTINGS_ID = '11111111-1111-4111-8111-111111111111';
-const COMPANY_TIMEZONE = 'America/New_York';
+const COMPANY_TIMEZONE = DEFAULT_TIMEZONE;
 
 if (process.env.NODE_ENV === 'production') {
   console.error('seed-lan-demo is disabled in production.');
@@ -49,10 +49,10 @@ async function wipeExistingData() {
   await prisma.travelSegment.deleteMany();
 
   // Requested wipe order starts here.
+  await prisma.vacatedSlot.deleteMany();
   await prisma.scheduleSegment.deleteMany();
   await prisma.foremanDayRosterMember.deleteMany();
   await prisma.foremanDayRoster.deleteMany();
-  await prisma.vacatedSlot.deleteMany();
   await prisma.requirement.deleteMany();
   await prisma.jobPreferredChannel.deleteMany();
   await prisma.jobAccessConstraint.deleteMany();
@@ -407,4 +407,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-

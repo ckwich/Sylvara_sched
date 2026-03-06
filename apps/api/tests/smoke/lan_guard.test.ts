@@ -107,7 +107,7 @@ describe('LAN guard', () => {
       url: `/api/jobs/${JOB_ID}/preferred-channels`,
       headers: {
         authorization: `Bearer ${LAN_SECRET}`,
-        'x-lan-user': 'Cole',
+        'x-lan-user': ACTOR_ID,
         'x-actor-user-id': ACTOR_ID,
       },
       payload: {
@@ -132,7 +132,8 @@ describe('LAN guard', () => {
       {
         prisma: {
           user: {
-            findFirst: async () => ({ id: ACTOR_ID }),
+            findUnique: async ({ where }: { where: { id: string } }) =>
+              where.id === ACTOR_ID ? { id: ACTOR_ID, active: true } : null,
           },
           job: {
             findUnique: async () => ({ id: JOB_ID }),
@@ -171,7 +172,7 @@ describe('LAN guard', () => {
       url: `/api/jobs/${JOB_ID}/preferred-channels`,
       headers: {
         authorization: `Bearer ${LAN_SECRET}`,
-        'x-lan-user': 'Cole',
+        'x-lan-user': ACTOR_ID,
       },
       payload: {
         channels: ['CALL', 'TEXT'],
@@ -179,7 +180,7 @@ describe('LAN guard', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(captured.actorDisplay).toBe('Cole');
+    expect(captured.actorDisplay).toBe(ACTOR_ID);
     expect(captured.channels).toEqual(['CALL', 'TEXT']);
     await app.close();
   });

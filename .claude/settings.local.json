@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(corepack pnpm:*)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

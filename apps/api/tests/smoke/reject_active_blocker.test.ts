@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const JOB_ID = '22222222-2222-4222-8222-222222222222';
@@ -32,7 +33,7 @@ describe('A5 reject active blocker', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         foremanPersonId: FOREMAN_ID,
@@ -77,7 +78,7 @@ describe('A5 reject active blocker', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' },
+      headers: lanAuthHeaders('POST', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'),
       payload: {
         jobId: JOB_ID,
         foremanPersonId: FOREMAN_ID,
@@ -95,4 +96,3 @@ describe('A5 reject active blocker', () => {
     await app.close();
   });
 });
-

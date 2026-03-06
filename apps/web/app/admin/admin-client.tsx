@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ApiRequestError,
   createHomeBase,
   createResource,
   getForemen,
@@ -13,17 +12,8 @@ import {
   type HomeBaseRecord,
   type ResourceRecord,
 } from '../../lib/api';
+import { getErrorMessage } from '../../lib/error-utils';
 import { ForemenPanel, HomeBasesPanel, ResourcesPanel, type AdminTab } from './admin-panels';
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof ApiRequestError) {
-    return error.message;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return 'Request failed.';
-}
 
 function hhmmToMinute(value: string): number | undefined {
   if (!value) {
@@ -43,7 +33,6 @@ const TAB_LABELS: Array<{ key: AdminTab; label: string }> = [
 ];
 
 export default function AdminClient() {
-  const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
   const [activeTab, setActiveTab] = useState<AdminTab>('resources');
 
   const [resources, setResources] = useState<ResourceRecord[]>([]);
@@ -129,7 +118,6 @@ export default function AdminClient() {
           resourceType: resourceForm.resourceType,
           isForeman: resourceForm.resourceType === 'PERSON' ? resourceForm.isForeman : undefined,
         },
-        actorUserId,
       );
 
       setResources((current) => [created, ...current]);
@@ -155,7 +143,7 @@ export default function AdminClient() {
       current.map((candidate) => (candidate.id === resource.id ? { ...candidate, active: nextActive } : candidate)),
     );
     try {
-      const updated = await updateResource(resource.id, { active: nextActive }, actorUserId);
+      const updated = await updateResource(resource.id, { active: nextActive });
       setResources((current) => current.map((candidate) => (candidate.id === resource.id ? updated : candidate)));
       setResourcesMessage('Saved ✓');
     } catch (error) {
@@ -201,7 +189,6 @@ export default function AdminClient() {
           openingTime,
           closingTime,
         },
-        actorUserId,
       );
 
       setHomeBases((current) => [created, ...current]);
@@ -231,7 +218,7 @@ export default function AdminClient() {
       current.map((candidate) => (candidate.id === homeBase.id ? { ...candidate, active: nextActive } : candidate)),
     );
     try {
-      const updated = await updateHomeBase(homeBase.id, { active: nextActive }, actorUserId);
+      const updated = await updateHomeBase(homeBase.id, { active: nextActive });
       setHomeBases((current) => current.map((candidate) => (candidate.id === homeBase.id ? updated : candidate)));
       setHomeBasesMessage('Saved ✓');
     } catch (error) {

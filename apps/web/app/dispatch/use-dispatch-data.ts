@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { DEFAULT_TIMEZONE } from '@sylvara/shared';
 import {
   addForemanRosterMember,
   createForemanRoster,
@@ -26,8 +27,8 @@ export type ForemanDayData = {
   crew: Array<{ id: string; personResourceId: string; role: string; resourceName: string }>;
 };
 
-export function useDispatchData(selectedDate: string, actorUserId: string | undefined) {
-  const [companyTimezone, setCompanyTimezone] = useState('America/New_York');
+export function useDispatchData(selectedDate: string) {
+  const [companyTimezone, setCompanyTimezone] = useState(DEFAULT_TIMEZONE);
   const [foremen, setForemen] = useState<ResourceRecord[]>([]);
   const [homeBases, setHomeBases] = useState<HomeBaseRecord[]>([]);
   const [people, setPeople] = useState<ResourceRecord[]>([]);
@@ -113,14 +114,13 @@ export function useDispatchData(selectedDate: string, actorUserId: string | unde
         if (!baseId) {
           throw new Error('HOME_BASE_REQUIRED: Select a home base before adding crew.');
         }
-        roster = await createForemanRoster(foremanId, { date: selectedDate, homeBaseId: baseId }, actorUserId);
+        roster = await createForemanRoster(foremanId, { date: selectedDate, homeBaseId: baseId });
       }
 
       await addForemanRosterMember(
         foremanId,
         selectedDate,
         { personResourceId: input.personResourceId, role: input.role },
-        actorUserId,
       );
       const members = await getForemanRosterMembers(foremanId, selectedDate);
       setDataByForeman((current) => ({

@@ -1,4 +1,4 @@
-import { localDateMinuteToUtc } from '@sylvara/shared';
+import { DEFAULT_TIMEZONE, localDateMinuteToUtc } from '@sylvara/shared';
 
 type ApiErrorBody = {
   error?: {
@@ -29,53 +29,10 @@ export class ApiRequestError extends Error {
   }
 }
 
-export type ForemanScheduleResponse = {
-  roster: {
-    id: number;
-    date: string;
-    homeBaseId: number | null;
-    preferredStartMinute: number | null;
-    preferredEndMinute: number | null;
-  } | null;
-  scheduleSegments: Array<{
-    id: number;
-    jobId: number;
-    segmentType: string;
-    startDatetime: string;
-    endDatetime: string;
-  }>;
-  travelSegments?: Array<{
-    id: number;
-    startDatetime: string;
-    endDatetime: string;
-    travelType: string;
-  }>;
-};
-
-export type CreateScheduleSegmentPayload = {
-  jobId: number;
-  rosterId: number;
-  startDatetime: string;
-  endDatetime: string;
-};
-
-export type OrgSettingsResponse = {
+type OrgSettingsResponse = {
   companyTimezone: string;
   operatingStartMinute: number | null;
   operatingEndMinute: number | null;
-};
-
-export type ForemanActivityEntry = {
-  createdAt: string;
-  action: string;
-  actorDisplay: string | null;
-  actorUserId: number | null;
-  segmentId: number | null;
-  jobId: number | null;
-};
-
-export type ForemanActivityResponse = {
-  entries: ForemanActivityEntry[];
 };
 
 export type JobDerivedState = 'TBS' | 'PARTIALLY_SCHEDULED' | 'FULLY_SCHEDULED' | 'COMPLETED';
@@ -99,12 +56,12 @@ export type JobSummary = {
   unmetRequirementCount: number;
 };
 
-export type JobsResponse = {
+type JobsResponse = {
   jobs: JobSummary[];
   total: number;
 };
 
-export type JobDetail = {
+type JobDetail = {
   id: string;
   customerName: string;
   town: string;
@@ -115,7 +72,7 @@ export type JobDetail = {
   notesRaw: string;
 };
 
-export type CreateJobPayload = {
+type CreateJobPayload = {
   customerName: string;
   town: string;
   equipmentType: 'CRANE' | 'BUCKET';
@@ -125,7 +82,7 @@ export type CreateJobPayload = {
   notesRaw?: string;
 };
 
-export type UpdateJobPayload = {
+type UpdateJobPayload = {
   customerName?: string;
   town?: string;
   equipmentType?: 'CRANE' | 'BUCKET';
@@ -163,15 +120,15 @@ export type HomeBaseRecord = {
   deletedAt: string | null;
 };
 
-export type GetResourcesResponse = {
+type GetResourcesResponse = {
   resources: ResourceRecord[];
 };
 
-export type GetHomeBasesResponse = {
+type GetHomeBasesResponse = {
   homeBases: HomeBaseRecord[];
 };
 
-export type GetForemenResponse = {
+type GetForemenResponse = {
   foremen: ResourceRecord[];
 };
 
@@ -205,14 +162,6 @@ export function buildOrgSettingsUrl(): string {
   return `/api/org-settings`;
 }
 
-export function buildForemanScheduleUrl(foremanPersonId: string | number, date: string): string {
-  return `/api/foremen/${foremanPersonId}/schedule?date=${encodeURIComponent(date)}`;
-}
-
-export function buildForemanActivityUrl(foremanPersonId: string | number, date: string): string {
-  return `/api/foremen/${foremanPersonId}/activity?date=${encodeURIComponent(date)}`;
-}
-
 export function buildJobsUrl(state?: JobDerivedState): string {
   const base = `/api/jobs`;
   if (!state) {
@@ -240,13 +189,6 @@ function buildApiError(status: number, url: string, body: ApiErrorBody): Error {
   });
 }
 
-function buildActorHeaders(actorUserId: string | undefined): Record<string, string> {
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-  };
-  return headers;
-}
-
 function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
   if (!headers) {
     return {};
@@ -261,174 +203,19 @@ function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
 }
 
 function apiFetch(path: string, options?: RequestInit): Promise<Response> {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL?.trim() ?? '';
-  const secret = process.env.NEXT_PUBLIC_LAN_SHARED_SECRET?.trim();
   const headers: Record<string, string> = {};
   if (options?.body !== undefined) {
     headers['content-type'] = 'application/json';
   }
-  if (secret) {
-    headers.Authorization = `Bearer ${secret}`;
-  }
+  const proxyPath = `/api/proxy?path=${encodeURIComponent(path)}`;
 
-  const actorId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID?.trim();
-  if (actorId) {
-    const method = (options?.method ?? 'GET').toUpperCase();
-    const isWrite = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method);
-    if (isWrite) {
-      headers['x-lan-user'] = actorId;
-    } else {
-      headers['x-actor-user-id'] = actorId;
-    }
-  }
-
-  const url = path.startsWith('http://') || path.startsWith('https://') ? path : `${apiBase}${path}`;
-
-  return fetch(url, {
+  return fetch(proxyPath, {
     ...options,
     headers: {
       ...headers,
       ...normalizeHeaders(options?.headers),
     },
   });
-}
-
-export async function getForemanSchedule(
-  foremanPersonId: string | number,
-  date: string,
-): Promise<ForemanScheduleResponse> {
-  const url = buildForemanScheduleUrl(foremanPersonId, date);
-  let response: Response;
-  try {
-    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
-  } catch (error) {
-    throw new ApiRequestError({
-      status: null,
-      url,
-      body: null,
-      message: 'NETWORK_ERROR: Request failed.',
-      networkErrorMessage: error instanceof Error ? error.message : String(error),
-    });
-  }
-  const body = (await parseJsonSafe(response)) as ForemanScheduleResponse | ApiErrorBody;
-  if (!response.ok) {
-    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
-  }
-  return body as ForemanScheduleResponse;
-}
-
-export async function getForemanActivity(
-  foremanPersonId: string | number,
-  date: string,
-): Promise<ForemanActivityResponse> {
-  const url = buildForemanActivityUrl(foremanPersonId, date);
-  let response: Response;
-  try {
-    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
-  } catch (error) {
-    throw new ApiRequestError({
-      status: null,
-      url,
-      body: null,
-      message: 'NETWORK_ERROR: Request failed.',
-      networkErrorMessage: error instanceof Error ? error.message : String(error),
-    });
-  }
-  const body = (await parseJsonSafe(response)) as ForemanActivityResponse | ApiErrorBody;
-  if (!response.ok) {
-    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
-  }
-  return body as ForemanActivityResponse;
-}
-
-export async function createScheduleSegment(
-  payload: CreateScheduleSegmentPayload,
-  actorUserId: string | undefined,
-  lanUser: string | undefined,
-): Promise<void> {
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-  };
-
-  const url = `/api/schedule-segments`;
-  let response: Response;
-  try {
-    response = await apiFetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-    });
-  } catch (error) {
-    throw new ApiRequestError({
-      status: null,
-      url,
-      body: null,
-      message: 'NETWORK_ERROR: Request failed.',
-      networkErrorMessage: error instanceof Error ? error.message : String(error),
-    });
-  }
-  const body = (await parseJsonSafe(response)) as ApiErrorBody;
-  if (!response.ok) {
-    throw buildApiError(response.status, url, body ?? {});
-  }
-}
-
-export async function deleteScheduleSegment(
-  segmentId: string,
-  actorUserId: string | undefined,
-  lanUser: string | undefined,
-): Promise<void> {
-  const headers: Record<string, string> = {};
-
-  const url = `/api/schedule-segments/${segmentId}`;
-  let response: Response;
-  try {
-    response = await apiFetch(url, {
-      method: 'DELETE',
-      headers,
-    });
-  } catch (error) {
-    throw new ApiRequestError({
-      status: null,
-      url,
-      body: null,
-      message: 'NETWORK_ERROR: Request failed.',
-      networkErrorMessage: error instanceof Error ? error.message : String(error),
-    });
-  }
-  const body = (await parseJsonSafe(response)) as ApiErrorBody;
-  if (!response.ok) {
-    throw buildApiError(response.status, url, body ?? {});
-  }
-}
-
-export async function restoreScheduleSegment(
-  segmentId: number,
-  actorUserId: string | undefined,
-  lanUser: string | undefined,
-): Promise<void> {
-  const headers: Record<string, string> = {};
-
-  const url = `/api/schedule-segments/${segmentId}/restore`;
-  let response: Response;
-  try {
-    response = await apiFetch(url, {
-      method: 'PATCH',
-      headers,
-    });
-  } catch (error) {
-    throw new ApiRequestError({
-      status: null,
-      url,
-      body: null,
-      message: 'NETWORK_ERROR: Request failed.',
-      networkErrorMessage: error instanceof Error ? error.message : String(error),
-    });
-  }
-  const body = (await parseJsonSafe(response)) as ApiErrorBody;
-  if (!response.ok) {
-    throw buildApiError(response.status, url, body ?? {});
-  }
 }
 
 export async function getOrgSettings(): Promise<OrgSettingsResponse> {
@@ -457,19 +244,12 @@ export async function getOrgSettings(): Promise<OrgSettingsResponse> {
 
 export async function patchOrgSettingsTimezone(
   companyTimezone: string,
-  actorUserId: string | undefined,
-  lanUser: string | undefined,
 ): Promise<OrgSettingsResponse> {
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-  };
-
   const url = buildOrgSettingsUrl();
   let response: Response;
   try {
     response = await apiFetch(url, {
       method: 'PATCH',
-      headers,
       body: JSON.stringify({ companyTimezone }),
     });
   } catch (error) {
@@ -632,14 +412,12 @@ export async function getResources(): Promise<GetResourcesResponse> {
 
 export async function createResource(
   payload: CreateResourcePayload,
-  actorUserId: string | undefined,
 ): Promise<ResourceRecord> {
   const url = `/api/resources`;
   let response: Response;
   try {
     response = await apiFetch(url, {
       method: 'POST',
-      headers: buildActorHeaders(actorUserId),
       body: JSON.stringify(payload),
     });
   } catch (error) {
@@ -661,14 +439,12 @@ export async function createResource(
 export async function updateResource(
   id: string,
   payload: UpdateResourcePayload,
-  actorUserId: string | undefined,
 ): Promise<ResourceRecord> {
   const url = `/api/resources/${id}`;
   let response: Response;
   try {
     response = await apiFetch(url, {
       method: 'PATCH',
-      headers: buildActorHeaders(actorUserId),
       body: JSON.stringify(payload),
     });
   } catch (error) {
@@ -710,14 +486,12 @@ export async function getHomeBases(): Promise<GetHomeBasesResponse> {
 
 export async function createHomeBase(
   payload: CreateHomeBasePayload,
-  actorUserId: string | undefined,
 ): Promise<HomeBaseRecord> {
   const url = `/api/home-bases`;
   let response: Response;
   try {
     response = await apiFetch(url, {
       method: 'POST',
-      headers: buildActorHeaders(actorUserId),
       body: JSON.stringify(payload),
     });
   } catch (error) {
@@ -739,14 +513,12 @@ export async function createHomeBase(
 export async function updateHomeBase(
   id: string,
   payload: UpdateHomeBasePayload,
-  actorUserId: string | undefined,
 ): Promise<HomeBaseRecord> {
   const url = `/api/home-bases/${id}`;
   let response: Response;
   try {
     response = await apiFetch(url, {
       method: 'PATCH',
-      headers: buildActorHeaders(actorUserId),
       body: JSON.stringify(payload),
     });
   } catch (error) {
@@ -880,7 +652,6 @@ export type CreateScheduleAttemptPayload = {
   companyTimezone?: string;
   homeBaseId?: string;
   rosterId?: string;
-  actorUserId?: string;
 };
 
 export type CreateScheduleAttemptResponse = {
@@ -889,13 +660,6 @@ export type CreateScheduleAttemptResponse = {
   warnings?: Array<{ code: string; message: string }>;
   error?: { code: string; message: string };
 };
-
-function buildWriteHeaders(actorUserId?: string): Record<string, string> {
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-  };
-  return headers;
-}
 
 export async function getForemanDaySchedule(
   foremanPersonId: string,
@@ -977,14 +741,12 @@ export async function getForemanRosterMembers(
 export async function createForemanRoster(
   foremanId: string,
   payload: CreateForemanRosterPayload,
-  actorUserId?: string,
 ): Promise<ForemanDayRoster> {
   const url = `/api/foremen/${foremanId}/rosters`;
   let response: Response;
   try {
     response = await apiFetch(url, {
       method: 'POST',
-      headers: buildWriteHeaders(actorUserId),
       body: JSON.stringify(payload),
     });
   } catch (error) {
@@ -1007,14 +769,12 @@ export async function addForemanRosterMember(
   foremanId: string,
   date: string,
   payload: AddRosterMemberPayload,
-  actorUserId?: string,
 ): Promise<void> {
   const url = `/api/foremen/${foremanId}/rosters/${encodeURIComponent(date)}/members`;
   let response: Response;
   try {
     response = await apiFetch(url, {
       method: 'POST',
-      headers: buildWriteHeaders(actorUserId),
       body: JSON.stringify(payload),
     });
   } catch (error) {
@@ -1034,14 +794,12 @@ export async function addForemanRosterMember(
 
 export async function createTravelSegment(
   payload: CreateTravelPayload,
-  actorUserId?: string,
 ): Promise<DispatchTravelSegment> {
   const url = `/api/travel/create`;
   let response: Response;
   try {
     response = await apiFetch(url, {
       method: 'POST',
-      headers: buildWriteHeaders(actorUserId),
       body: JSON.stringify(payload),
     });
   } catch (error) {
@@ -1064,7 +822,7 @@ export async function createScheduleAttempt(
   payload: CreateScheduleAttemptPayload,
 ): Promise<CreateScheduleAttemptResponse> {
   if (payload.rosterId) {
-    const timezone = payload.companyTimezone ?? 'America/New_York';
+    const timezone = payload.companyTimezone ?? DEFAULT_TIMEZONE;
     const startAt = localDateMinuteToUtc(payload.date, payload.requestedStartMinute, timezone).toISOString();
     const endAt = localDateMinuteToUtc(
       payload.date,
@@ -1076,7 +834,6 @@ export async function createScheduleAttempt(
     try {
       response = await apiFetch(url, {
         method: 'POST',
-        headers: buildWriteHeaders(payload.actorUserId),
         body: JSON.stringify({
           jobId: payload.jobId,
           rosterId: payload.rosterId,
@@ -1120,7 +877,6 @@ export async function createScheduleAttempt(
   try {
     response = await apiFetch(oneClickUrl, {
       method: 'POST',
-      headers: buildWriteHeaders(payload.actorUserId),
       body: JSON.stringify({
         jobId: payload.jobId,
         foremanPersonId: payload.foremanPersonId,
@@ -1146,7 +902,7 @@ export async function createScheduleAttempt(
   return body as CreateScheduleAttemptResponse;
 }
 
-export async function removeScheduleSegment(segmentId: string, actorUserId?: string): Promise<void> {
+export async function removeScheduleSegment(segmentId: string): Promise<void> {
   const url = `/api/schedule-segments/${segmentId}`;
   let response: Response;
   try {

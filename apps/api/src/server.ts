@@ -3,16 +3,8 @@ import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { prisma } from '@sylvara/db';
 import { fileURLToPath } from 'node:url';
-import { UNAUTHENTICATED_ERROR } from './http/actor.js';
-import {
-  getLanUserHeader,
-  hasActorIdHeader,
-  hasValidLanBearer,
-  isStrongLanSharedSecret,
-  isLanModeEnabled,
-  isWriteMethod,
-  MIN_LAN_SHARED_SECRET_LENGTH,
-} from './http/lan-guard.js';
+import { createJwtAuthPreHandler } from './http/jwt-auth.js';
+import { isLanModeEnabled, isStrongLanSharedSecret, MIN_LAN_SHARED_SECRET_LENGTH } from './http/lan-guard.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerJobRoutes } from './routes/jobs.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
@@ -22,14 +14,45 @@ type ServerAuthConfig = {
   lanSharedSecret: string | null;
 };
 
+const DEFAULT_CORS_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:3100',
+  'http://127.0.0.1:3100',
+];
+
+function resolveCorsOrigins(rawValue: string | undefined): Set<string> {
+  if (!rawValue || !rawValue.trim()) {
+    return new Set(DEFAULT_CORS_ORIGINS);
+  }
+  return new Set(
+    rawValue
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0),
+  );
+}
+
 export function buildServer(
   deps: { prisma: typeof prisma } = { prisma },
   authConfig?: ServerAuthConfig,
 ) {
   const app = Fastify();
+  const corsAllowedOrigins = resolveCorsOrigins(process.env.CORS_ALLOWED_ORIGINS);
   app.register(cors, {
     origin: (origin, cb) => {
-      if (!origin || origin.startsWith('http://localhost')) {
+      if (!origin) {
+        cb(null, true);
+        return;
+      }
+      let normalizedOrigin: string;
+      try {
+        normalizedOrigin = new URL(origin).origin;
+      } catch {
+        cb(new Error('Not allowed by CORS'), false);
+        return;
+      }
+      if (corsAllowedOrigins.has(normalizedOrigin)) {
         cb(null, true);
       } else {
         cb(new Error('Not allowed by CORS'), false);
@@ -42,7 +65,6 @@ export function buildServer(
 
   const lanModeEnabled = authConfig?.lanModeEnabled ?? isLanModeEnabled(process.env.LAN_MODE);
   const lanSharedSecret = authConfig?.lanSharedSecret ?? process.env.LAN_SHARED_SECRET ?? null;
-
   if (lanModeEnabled && !isStrongLanSharedSecret(lanSharedSecret)) {
     throw new Error(
       `LAN_SHARED_SECRET is required and must be at least ${MIN_LAN_SHARED_SECRET_LENGTH} characters when LAN_MODE=true`,
@@ -57,35 +79,13 @@ export function buildServer(
     return { ok: true };
   });
 
-  app.addHook('preHandler', async (request, reply) => {
-    if (!lanModeEnabled) {
-      return;
-    }
-
-    const path = request.raw.url?.split('?')[0] ?? '';
-    if (!path.startsWith('/api/')) {
-      return;
-    }
-    if (request.method === 'GET' && path === '/api/health') {
-      return;
-    }
-    if (!lanSharedSecret || !hasValidLanBearer(request, lanSharedSecret)) {
-      return reply.code(401).send(UNAUTHENTICATED_ERROR);
-    }
-    if (isWriteMethod(request.method)) {
-      if (!getLanUserHeader(request)) {
-        return reply.code(401).send(UNAUTHENTICATED_ERROR);
-      }
-      if (hasActorIdHeader(request)) {
-        return reply.code(400).send({
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'x-actor-user-id is not allowed in LAN mode.',
-          },
-        });
-      }
-    }
-  });
+  app.addHook(
+    'preHandler',
+    createJwtAuthPreHandler({
+      lanSharedSecret,
+      logWarning: (message) => app.log.warn(message),
+    }),
+  );
 
   registerSchedulingRoutes(app, { prisma: deps.prisma });
   registerAdminRoutes(app, { prisma: deps.prisma });

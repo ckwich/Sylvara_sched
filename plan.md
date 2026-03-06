@@ -755,11 +755,11 @@ Log all edits to:
   - For calls from `apps/web` → `apps/api` (Fastify), the web layer forwards the verified JWT as a `Bearer` token in the `Authorization` header. `apps/api` verifies the JWT signature using the shared `AUTH_SECRET` environment variable (set identically in both apps).
   - `apps/api` must have a Fastify `preHandler` hook that verifies the JWT and sets `request.actor` (`{ id, role }`) on every authenticated route. Unauthenticated requests return `401`.
   - The dev shim (`x-actor-user-id` header) must be **disabled in production** (guard with `NODE_ENV !== 'production'`) and must never be enabled in the LAN pilot build.
-- **Environment variables required (document in README; required in both apps):**
-  - `AUTH_SECRET` — shared JWT signing secret (generate with `openssl rand -base64 32`; same value in both `apps/web` and `apps/api`)
-  - `AUTH_GOOGLE_ID` — Google OAuth client ID
-  - `AUTH_GOOGLE_SECRET` — Google OAuth client secret
-  - `NEXTAUTH_URL` — full origin URL (e.g., `http://schedule-pc:3000`); required for OAuth redirect URI
+- **Environment variables required (document in README):**
+  - `AUTH_SECRET` — shared JWT signing secret (generate with `openssl rand -base64 32`; same value in both `apps/web` and `apps/api`). Auth.js v5 also accepts `NEXTAUTH_SECRET` as an alias, but we standardize on `AUTH_SECRET`.
+  - `AUTH_URL` — full origin URL (e.g., `http://schedule-pc:3000`); required for OAuth redirect URI. Auth.js v5 also accepts `NEXTAUTH_URL` as an alias, but we standardize on `AUTH_URL`.
+  - `AUTH_GOOGLE_ID` — Google OAuth client ID (apps/web)
+  - `AUTH_GOOGLE_SECRET` — Google OAuth client secret (apps/web)
 - **Google OAuth setup (one-time, performed by manager):**
   1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
   2. Enable the Google OAuth consent screen (Internal, restricted to your Workspace org).

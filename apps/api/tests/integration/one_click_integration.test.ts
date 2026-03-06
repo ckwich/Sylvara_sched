@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import { makePrisma, resetDb, seedBase } from './_helpers/db';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const prisma = makePrisma();
 const TEST_TZ = 'America/New_York';
@@ -48,7 +49,7 @@ describe('one-click scheduling integration (real postgres)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         foremanPersonId: foreman.id,
@@ -82,7 +83,7 @@ describe('one-click scheduling integration (real postgres)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         foremanPersonId: foreman.id,
@@ -109,7 +110,7 @@ describe('one-click scheduling integration (real postgres)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         foremanPersonId: foreman.id,
@@ -136,7 +137,7 @@ describe('one-click scheduling integration (real postgres)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         foremanPersonId: foreman.id,
@@ -154,4 +155,3 @@ describe('one-click scheduling integration (real postgres)', () => {
     await app.close();
   });
 });
-

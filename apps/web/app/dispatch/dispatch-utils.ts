@@ -1,4 +1,4 @@
-import { ApiRequestError } from '../../lib/api';
+export { getErrorMessage } from '../../lib/error-utils';
 
 export const PX_PER_MINUTE = 1.5;
 export const DAY_START_MINUTE = 5 * 60;
@@ -46,14 +46,4 @@ export function nextDate(date: string, deltaDays: number): string {
   const value = new Date(`${date}T00:00:00.000Z`);
   value.setUTCDate(value.getUTCDate() + deltaDays);
   return value.toISOString().slice(0, 10);
-}
-
-export function getErrorMessage(error: unknown): string {
-  if (error instanceof ApiRequestError) {
-    return error.message;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return 'Request failed.';
 }

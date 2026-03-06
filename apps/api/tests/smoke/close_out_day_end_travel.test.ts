@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const FOREMAN_ID = '33333333-3333-4333-8333-333333333333';
@@ -78,7 +79,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
@@ -94,7 +95,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
@@ -139,7 +140,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: { 'x-actor-user-id': 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' },
+      headers: lanAuthHeaders('POST', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'),
       payload: {
         foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
@@ -157,4 +158,3 @@ describe('A7 close out day END_OF_DAY travel', () => {
     await app.close();
   });
 });
-

@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { TravelType } from '@prisma/client';
 import { buildServer } from '../../src/server';
 import { createLinkedSegment, makePrisma, resetDb, seedBase } from './_helpers/db';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const prisma = makePrisma();
 const TEST_TZ = 'America/New_York';
@@ -46,7 +47,7 @@ describe('close-out-day integration (real postgres)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         foremanPersonId: foreman.id,
         date,
@@ -115,7 +116,7 @@ describe('close-out-day integration (real postgres)', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         foremanPersonId: foreman.id,
         date,
@@ -128,7 +129,7 @@ describe('close-out-day integration (real postgres)', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         foremanPersonId: foreman.id,
         date,
@@ -152,4 +153,3 @@ describe('close-out-day integration (real postgres)', () => {
     await app.close();
   });
 });
-

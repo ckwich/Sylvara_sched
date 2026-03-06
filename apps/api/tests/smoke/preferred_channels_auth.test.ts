@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient, PreferredChannel } from '@prisma/client';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const ACTOR_ID = '42424242-4242-4242-8242-424242424242';
 const JOB_ID = '22222222-2222-4222-8222-222222222222';
@@ -67,7 +68,7 @@ describe('preferred channels auth-backed actor attribution', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${JOB_ID}/preferred-channels`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         channels: ['CALL', 'TEXT'],
       },
@@ -102,7 +103,7 @@ describe('preferred channels auth-backed actor attribution', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/jobs/99999999-9999-4999-8999-999999999999/preferred-channels',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         channels: ['CALL'],
       },
@@ -122,7 +123,7 @@ describe('preferred channels auth-backed actor attribution', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${JOB_ID}/preferred-channels`,
-      headers: { 'x-actor-user-id': 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' },
+      headers: lanAuthHeaders('POST', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'),
       payload: {
         channels: ['CALL'],
       },
@@ -138,4 +139,3 @@ describe('preferred channels auth-backed actor attribution', () => {
     await app.close();
   });
 });
-

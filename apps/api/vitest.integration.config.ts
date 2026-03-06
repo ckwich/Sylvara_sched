@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     include: ['tests/integration/**/*.test.ts'],
     environment: 'node',
+    setupFiles: ['tests/fixtures/test-env.ts'],
     pool: 'forks',
     poolOptions: {
       forks: {

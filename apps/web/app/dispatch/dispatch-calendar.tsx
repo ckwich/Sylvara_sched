@@ -31,7 +31,6 @@ type DispatchCalendarProps = {
 export default function DispatchCalendar(props: DispatchCalendarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
   const selectedDate = searchParams.get('date') ?? props.initialDate;
   const devtoolsEnabled =
     process.env.NODE_ENV !== 'production' && searchParams.get('devtools') === 'true';
@@ -50,7 +49,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
     handleAddCrew,
     reloadForemanDay,
     reloadJobs,
-  } = useDispatchData(selectedDate, actorUserId);
+  } = useDispatchData(selectedDate);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
   const [selectedSlot, setSelectedSlot] = useState<{ foremanId: string; minute: number } | null>(null);
@@ -223,11 +222,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         if (!defaultHomeBase) {
           throw new Error('HOME_BASE_REQUIRED: No home base available for roster creation.');
         }
-        roster = await createForemanRoster(
-          foremanId,
-          { date: selectedDate, homeBaseId: defaultHomeBase.id },
-          actorUserId,
-        );
+        roster = await createForemanRoster(foremanId, { date: selectedDate, homeBaseId: defaultHomeBase.id });
       }
 
       const result = await createScheduleAttempt({
@@ -238,7 +233,6 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         durationMinutes: input.durationMinutes,
         companyTimezone,
         rosterId: roster.id,
-        actorUserId,
       });
 
       if (result.result === 'REJECT') {
@@ -275,7 +269,6 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
                 endDatetime: localDateMinuteToUtc(selectedDate, startMinute, companyTimezone).toISOString(),
                 relatedJobId: input.jobId,
               },
-              actorUserId,
             );
           } catch {
             warnings.push('Travel before block could not be created.');
@@ -296,7 +289,6 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
                 ).toISOString(),
                 relatedJobId: input.jobId,
               },
-              actorUserId,
             );
           } catch {
             warnings.push('Travel after block could not be created.');
@@ -322,7 +314,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
     if (!window.confirm('Remove this segment?')) {
       return;
     }
-    await removeScheduleSegment(segmentId, actorUserId);
+    await removeScheduleSegment(segmentId);
     await Promise.all([reloadForemanDay(foremanId, selectedDate), reloadJobs()]);
   }
 

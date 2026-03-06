@@ -3,6 +3,10 @@ export function placeholder() {
 }
 
 export {
+  DEFAULT_TIMEZONE,
+} from './constants';
+
+export {
   MINUTES_PER_DAY,
   formatMinuteToHHMM,
   isUtcOnLocalTenMinuteBoundary,
@@ -26,3 +30,6 @@ export type {
   ParsedNotesConfidence,
 } from './notes-parser';
 export { parseNotes } from './notes-parser';
+
+export type { UserRole } from './roles';
+export { ROLE_PERMISSIONS } from './roles';

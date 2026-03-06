@@ -1,6 +1,7 @@
 import { Prisma, EquipmentType, type PrismaClient } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const CUSTOMER_ID = '22222222-2222-4222-8222-222222222222';
@@ -173,7 +174,7 @@ describe('jobs CRUD routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/jobs',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         customerName: '  New Customer  ',
         equipmentType: 'CRANE',
@@ -200,7 +201,7 @@ describe('jobs CRUD routes', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/api/jobs/${JOB_ID}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('PATCH', ACTOR_ID),
       payload: {
         estimateHoursCurrent: 4,
       },
@@ -219,7 +220,7 @@ describe('jobs CRUD routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${JOB_ID}/complete`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         completedDate: '2026-03-05',
       },
@@ -239,7 +240,7 @@ describe('jobs CRUD routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${JOB_ID}/uncomplete`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -297,6 +298,7 @@ describe('jobs CRUD routes', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/api/jobs',
+      headers: lanAuthHeaders('GET', ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -319,7 +321,7 @@ describe('jobs CRUD routes', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/api/jobs/${JOB_ID}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('PATCH', ACTOR_ID),
       payload: {
         salesRepCode: ' a.b-9 ',
       },

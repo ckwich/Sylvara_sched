@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const ACTOR_1_ID = '11111111-1111-4111-8111-111111111111';
 const ACTOR_7_ID = '77777777-7777-4777-8777-777777777777';
@@ -23,6 +24,7 @@ describe('org settings endpoints', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/api/org-settings',
+      headers: lanAuthHeaders('GET', ACTOR_1_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -65,9 +67,7 @@ describe('org settings endpoints', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: '/api/org-settings',
-      headers: {
-        'x-actor-user-id': ACTOR_1_ID,
-      },
+      headers: lanAuthHeaders('PATCH', ACTOR_1_ID),
       payload: {
         companyTimezone: 'Not/A_Real_Zone',
       },
@@ -128,9 +128,7 @@ describe('org settings endpoints', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: '/api/org-settings',
-      headers: {
-        'x-actor-user-id': ACTOR_7_ID,
-      },
+      headers: lanAuthHeaders('PATCH', ACTOR_7_ID),
       payload: {
         companyTimezone: 'America/Chicago',
       },
@@ -191,9 +189,7 @@ describe('org settings endpoints', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: '/api/org-settings',
-      headers: {
-        'x-actor-user-id': ACTOR_9_ID,
-      },
+      headers: lanAuthHeaders('PATCH', ACTOR_9_ID),
       payload: {
         companyTimezone: 'America/Chicago',
       },
@@ -204,4 +200,3 @@ describe('org settings endpoints', () => {
     await app.close();
   });
 });
-

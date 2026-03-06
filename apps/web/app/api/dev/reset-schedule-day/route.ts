@@ -3,16 +3,19 @@ import path from 'node:path';
 
 type ResetRequest = {
   date: string;
-  foremanPersonId: number;
-  jobId?: number;
+  foremanPersonId: string;
+  jobId?: string;
   dryRun?: boolean;
 };
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function runCommand(command: string, args: string[], cwd: string): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
-      shell: process.platform === 'win32',
+      shell: false,
       env: process.env,
     });
     let output = '';
@@ -40,6 +43,24 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if (!DATE_RE.test(body.date)) {
+    return Response.json(
+      { error: { code: 'VALIDATION_ERROR', message: 'date must match YYYY-MM-DD format.' } },
+      { status: 400 },
+    );
+  }
+  if (!UUID_RE.test(body.foremanPersonId)) {
+    return Response.json(
+      { error: { code: 'VALIDATION_ERROR', message: 'foremanPersonId must be a UUID.' } },
+      { status: 400 },
+    );
+  }
+  if (body.jobId && !UUID_RE.test(body.jobId)) {
+    return Response.json(
+      { error: { code: 'VALIDATION_ERROR', message: 'jobId must be a UUID.' } },
+      { status: 400 },
+    );
+  }
 
   const repoRoot = path.resolve(process.cwd(), '..', '..');
   const args = [
@@ -56,7 +77,7 @@ export async function POST(request: Request) {
     args.push('--dryRun');
   }
 
-  const result = await runCommand('corepack', args, repoRoot);
+  const result = await runCommand(process.platform === 'win32' ? 'corepack.cmd' : 'corepack', args, repoRoot);
   if (result.code !== 0) {
     return Response.json(
       {

@@ -1,8 +1,14 @@
 import { Prisma, EquipmentType, JobBlockerStatus, RequirementStatus, type PrismaClient } from '@prisma/client';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { parseNotes, type ParsedNotes } from '@sylvara/shared';
-import { getActorDisplay, isUnauthenticatedError, requireActorUserId } from '../http/actor.js';
+import { DEFAULT_TIMEZONE, parseNotes, type ParsedNotes } from '@sylvara/shared';
+import {
+  notFoundError,
+  parseDateOnlyUtc,
+  requireActor,
+  requireMutationPermission,
+  validationError,
+} from '../http/route-helpers.js';
 import { computeScheduledEffectiveHours, deriveJobState } from '../scheduling/job-state.js';
 
 type AppDeps = {
@@ -83,31 +89,6 @@ const jobCompleteBodySchema = z.object({
   completionNotes: z.string().optional(),
 });
 
-function parseDateOnlyUtc(value: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) {
-    return null;
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() + 1 !== month ||
-    parsed.getUTCDate() !== day
-  ) {
-    return null;
-  }
-
-  return parsed;
-}
-
 function normalizeSalesRepCode(value: string): string {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
@@ -140,45 +121,6 @@ function fromCraneModelEnum(
   return 'EITHER';
 }
 
-function validationError(reply: FastifyReply, message: string, details: unknown) {
-  return reply.code(400).send({
-    error: {
-      code: 'VALIDATION_ERROR',
-      message,
-      details,
-    },
-  });
-}
-
-function notFoundError(reply: FastifyReply, code: string, message: string) {
-  return reply.code(404).send({
-    error: {
-      code,
-      message,
-      details: {},
-    },
-  });
-}
-
-async function requireActor(request: FastifyRequest, deps: AppDeps, reply: FastifyReply) {
-  try {
-    const actorUserId = await requireActorUserId(deps.prisma, request);
-    return { actorUserId, actorDisplay: getActorDisplay(request) };
-  } catch (error) {
-    if (isUnauthenticatedError(error)) {
-      reply.code(401).send({
-        error: {
-          code: 'UNAUTHENTICATED',
-          message: 'Authentication required.',
-          details: {},
-        },
-      });
-      return null;
-    }
-    throw error;
-  }
-}
-
 function toDecimalString(value: Prisma.Decimal | string | number | null): string | null {
   if (value === null) {
     return null;
@@ -201,7 +143,7 @@ async function getCompanyTimezone(prisma: PrismaClient): Promise<string> {
     where: { deletedAt: null },
     select: { companyTimezone: true },
   });
-  return settings?.companyTimezone ?? 'America/New_York';
+  return settings?.companyTimezone ?? DEFAULT_TIMEZONE;
 }
 
 async function aggregateScheduledHoursByJob(
@@ -510,8 +452,11 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/jobs', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -592,8 +537,11 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.patch('/api/jobs/:id', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -907,8 +855,11 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/jobs/:id/complete', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -977,8 +928,11 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/jobs/:id/uncomplete', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
       return;
     }
 

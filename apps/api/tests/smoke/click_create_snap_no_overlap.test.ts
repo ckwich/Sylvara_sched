@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const TEST_TZ = 'America/New_York';
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
@@ -128,7 +129,7 @@ describe('A3 click-to-create snap and no-overlap', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         foremanPersonId: FOREMAN_ID,
@@ -149,4 +150,3 @@ describe('A3 click-to-create snap and no-overlap', () => {
     await app.close();
   });
 });
-

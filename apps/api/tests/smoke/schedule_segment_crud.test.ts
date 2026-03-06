@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { buildServer } from '../../src/server';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const TEST_TZ = 'America/New_York';
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
@@ -264,7 +265,7 @@ describe('M2 schedule segment CRUD', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -287,7 +288,7 @@ describe('M2 schedule segment CRUD', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -300,7 +301,7 @@ describe('M2 schedule segment CRUD', () => {
     const moved = await app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${createdBody.segment.id}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('PATCH', ACTOR_ID),
       payload: {
         startDatetime: '2026-03-03T14:10:00.000Z',
         endDatetime: '2026-03-03T15:40:00.000Z',
@@ -320,7 +321,7 @@ describe('M2 schedule segment CRUD', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -333,7 +334,7 @@ describe('M2 schedule segment CRUD', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: `/api/schedule-segments/${createdBody.segment.id}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('DELETE', ACTOR_ID),
     });
 
     expect(deleted.statusCode).toBe(200);
@@ -348,7 +349,7 @@ describe('M2 schedule segment CRUD', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -362,7 +363,7 @@ describe('M2 schedule segment CRUD', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: `/api/schedule-segments/${createBody.segment.id}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('DELETE', ACTOR_ID),
     });
     const deleteBody = deleted.json();
     expect(deleteBody.jobState.state).toBe('TBS');
@@ -374,7 +375,7 @@ describe('M2 schedule segment CRUD', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -387,14 +388,14 @@ describe('M2 schedule segment CRUD', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: `/api/schedule-segments/${segmentId}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('DELETE', ACTOR_ID),
     });
     expect(deleted.statusCode).toBe(200);
 
     const restored = await app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${segmentId}/restore`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('PATCH', ACTOR_ID),
     });
     expect(restored.statusCode).toBe(200);
     expect(restored.json().ok).toBe(true);
@@ -406,7 +407,7 @@ describe('M2 schedule segment CRUD', () => {
     await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -417,7 +418,7 @@ describe('M2 schedule segment CRUD', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -435,7 +436,7 @@ describe('M2 schedule segment CRUD', () => {
     await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -446,7 +447,7 @@ describe('M2 schedule segment CRUD', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('POST', ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -459,7 +460,7 @@ describe('M2 schedule segment CRUD', () => {
     const update = await app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${secondId}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('PATCH', ACTOR_ID),
       payload: {
         startDatetime: '2026-03-03T14:30:00.000Z',
         endDatetime: '2026-03-03T15:30:00.000Z',
@@ -470,5 +471,3 @@ describe('M2 schedule segment CRUD', () => {
     await app.close();
   });
 });
-
-

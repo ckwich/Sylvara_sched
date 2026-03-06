@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { PreferredChannel } from '@prisma/client';
 import { buildServer } from '../../src/server';
 import { makePrisma, resetDb, seedBase } from './_helpers/db';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const prisma = makePrisma();
 const MISSING_JOB_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -28,7 +29,7 @@ describe('preferred channels integration (real postgres)', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${job.id}/preferred-channels`,
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         channels: ['CALL', 'TEXT'],
       },
@@ -80,7 +81,7 @@ describe('preferred channels integration (real postgres)', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${job.id}/preferred-channels`,
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         channels: ['FAX'],
       },
@@ -112,7 +113,7 @@ describe('preferred channels integration (real postgres)', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${MISSING_JOB_ID}/preferred-channels`,
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         channels: ['CALL'],
       },

@@ -1,6 +1,18 @@
 import type { FastifyRequest } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
-import { getLanUserHeader, isLanModeEnabled } from './lan-guard.js';
+import type { UserRole } from '@prisma/client';
+
+export type RequestActor = {
+  id: string;
+  role: UserRole;
+  display: string | null;
+};
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    actor?: RequestActor;
+  }
+}
 
 export const UNAUTHENTICATED_ERROR = {
   error: {
@@ -24,54 +36,22 @@ export async function requireActorUserId(
   prisma: Pick<PrismaClient, 'user'>,
   request: FastifyRequest,
 ): Promise<string> {
-  if (process.env.NODE_ENV === 'production') {
+  if (!request.actor?.id) {
     throw new UnauthenticatedError();
   }
-
-  if (isLanModeEnabled(process.env.LAN_MODE)) {
-    const lanUser = getLanUserHeader(request);
-    if (!lanUser) {
-      throw new UnauthenticatedError();
-    }
-
-    const user = await prisma.user.findFirst({
-      where: { active: true },
-      orderBy: { id: 'asc' },
-      select: { id: true },
-    });
-    if (!user) {
-      throw new UnauthenticatedError();
-    }
-    return user.id;
-  }
-
-  const rawHeader = request.headers['x-actor-user-id'];
-  const value = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-
-  if (!value) {
-    throw new UnauthenticatedError();
-  }
-
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
-    throw new UnauthenticatedError();
-  }
-  const actorUserId = value;
 
   const user = await prisma.user.findUnique({
-    where: { id: actorUserId },
-    select: { id: true },
+    where: { id: request.actor.id },
+    select: { id: true, active: true },
   });
 
-  if (!user) {
+  if (!user || user.active === false) {
     throw new UnauthenticatedError();
   }
 
-  return actorUserId;
+  return user.id;
 }
 
 export function getActorDisplay(request: FastifyRequest): string | null {
-  if (!isLanModeEnabled(process.env.LAN_MODE)) {
-    return null;
-  }
-  return getLanUserHeader(request);
+  return request.actor?.display ?? null;
 }

@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { DEFAULT_TIMEZONE } from '@sylvara/shared';
 import { ApiRequestError, getOrgSettings, patchOrgSettingsTimezone } from '../../lib/api';
 
 const COMMON_TIMEZONES = [
-  'America/New_York',
+  DEFAULT_TIMEZONE,
   'America/Chicago',
   'America/Denver',
   'America/Los_Angeles',
@@ -12,13 +13,7 @@ const COMMON_TIMEZONES = [
   'UTC',
 ];
 
-type CompanyClientProps = {
-  lanModeEnabled: boolean;
-};
-
-const LAN_USER_STORAGE_KEY = 'sylvara.lanUser';
-
-export default function CompanyClient({ lanModeEnabled }: CompanyClientProps) {
+export default function CompanyClient() {
   const [companyTimezone, setCompanyTimezone] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -26,18 +21,6 @@ export default function CompanyClient({ lanModeEnabled }: CompanyClientProps) {
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const [lanUser, setLanUser] = useState('');
-  const actorUserId = process.env.NEXT_PUBLIC_DEV_ACTOR_USER_ID;
-
-  useEffect(() => {
-    if (!lanModeEnabled || typeof window === 'undefined') {
-      return;
-    }
-    const stored = window.localStorage.getItem(LAN_USER_STORAGE_KEY);
-    if (stored) {
-      setLanUser(stored);
-    }
-  }, [lanModeEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,29 +53,16 @@ export default function CompanyClient({ lanModeEnabled }: CompanyClientProps) {
     setSaving(true);
     setError(null);
     setFieldError(null);
-    setSaveBanner(null);
-    setSaved(null);
+      setSaveBanner(null);
+      setSaved(null);
     try {
-      const normalizedLanUser = lanModeEnabled ? lanUser.trim() : '';
-      if (lanModeEnabled && !normalizedLanUser) {
-        setError('UNAUTHENTICATED: LAN User is required in LAN mode.');
-        setSaveBanner('Could not save: UNAUTHENTICATED Authentication required.');
-        return;
-      }
       if (!companyTimezone.trim()) {
         setFieldError('Timezone is required.');
         setSaveBanner('Could not save: VALIDATION_ERROR Timezone is required.');
         return;
       }
-      const response = await patchOrgSettingsTimezone(
-        companyTimezone,
-        actorUserId,
-        normalizedLanUser || undefined,
-      );
+      const response = await patchOrgSettingsTimezone(companyTimezone);
       setCompanyTimezone(response.companyTimezone);
-      if (lanModeEnabled) {
-        window.localStorage.setItem(LAN_USER_STORAGE_KEY, normalizedLanUser);
-      }
       setSaved('Saved.');
     } catch (saveError) {
       const message = saveError instanceof Error ? saveError.message : 'ORG_SETTINGS_ERROR: Failed to save settings.';
@@ -133,17 +103,6 @@ export default function CompanyClient({ lanModeEnabled }: CompanyClientProps) {
       ) : null}
       {saved ? <p style={{ color: 'green' }}>{saved}</p> : null}
       <form onSubmit={onSave} style={{ display: 'grid', gap: 8, maxWidth: 420 }}>
-        {lanModeEnabled ? (
-          <label>
-            LAN User
-            <input
-              type="text"
-              value={lanUser}
-              onChange={(event) => setLanUser(event.target.value)}
-              placeholder="Your name"
-            />
-          </label>
-        ) : null}
         <label>
           Common Timezones
           <select

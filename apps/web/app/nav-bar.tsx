@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { signOut } from 'next-auth/react';
 import { usePathname } from 'next/navigation';
 
 const NAV_ITEMS = [
@@ -33,6 +34,13 @@ export default function NavBar() {
               </Link>
             );
           })}
+          <button
+            type="button"
+            onClick={() => signOut({ callbackUrl: '/sign-in' })}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Sign out
+          </button>
         </div>
       </div>
     </nav>

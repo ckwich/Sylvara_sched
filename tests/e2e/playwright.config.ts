@@ -11,6 +11,15 @@ const databaseUrl =
 const e2eWebPort = process.env.E2E_WEB_PORT ?? '3100';
 const e2eApiPort = process.env.E2E_API_PORT ?? '4100';
 
+if (databaseUrl) {
+  process.env.DATABASE_URL = databaseUrl;
+}
+process.env.E2E_WEB_PORT = e2eWebPort;
+process.env.E2E_API_PORT = e2eApiPort;
+process.env.E2E_BASE_URL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${e2eWebPort}`;
+process.env.E2E_API_BASE_URL =
+  process.env.E2E_API_BASE_URL ?? `http://127.0.0.1:${e2eApiPort}`;
+
 export default defineConfig({
   testDir: '.',
   retries: 0,

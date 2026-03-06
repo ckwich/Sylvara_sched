@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { buildServer } from '../../src/server';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const SEGMENT_ID = '22222222-2222-4222-8222-222222222222';
@@ -90,7 +91,7 @@ describe('A9 vacated slot on move and shorten', () => {
     const response = await harness.app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${SEGMENT_ID}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('PATCH', ACTOR_ID),
       payload: {
         startDatetime: '2026-03-03T17:00:00.000Z',
         endDatetime: '2026-03-03T21:00:00.000Z',
@@ -114,7 +115,7 @@ describe('A9 vacated slot on move and shorten', () => {
     const response = await harness.app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${SEGMENT_ID}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('PATCH', ACTOR_ID),
       payload: {
         endDatetime: '2026-03-03T17:00:00.000Z',
       },
@@ -136,7 +137,7 @@ describe('A9 vacated slot on move and shorten', () => {
     const response = await harness.app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${SEGMENT_ID}`,
-      headers: { 'x-actor-user-id': ACTOR_ID },
+      headers: lanAuthHeaders('PATCH', ACTOR_ID),
       payload: {
         notes: 'Updated notes only',
       },

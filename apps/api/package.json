@@ -19,7 +19,8 @@
     "@sylvara/db": "workspace:*",
     "@sylvara/shared": "workspace:*",
     "dotenv": "^17.3.1",
-    "fastify": "^5.2.1",
+    "fastify": "^5.8.1",
+    "jose": "^6.2.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {

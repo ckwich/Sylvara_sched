@@ -2,7 +2,13 @@ import { Prisma, ResourceType, RosterMemberRole, type PrismaClient } from '@pris
 import { isValidMinuteOfDay } from '@sylvara/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { getActorDisplay, isUnauthenticatedError, requireActorUserId } from '../http/actor.js';
+import {
+  notFoundError,
+  parseDateOnlyUtc,
+  requireActor,
+  requireManagerPermission,
+  validationError,
+} from '../http/route-helpers.js';
 
 type AppDeps = {
   prisma: PrismaClient;
@@ -87,51 +93,6 @@ const deleteRosterMemberParamsSchema = z.object({
   personResourceId: uuidSchema,
 });
 
-function parseDateOnlyUtc(value: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) {
-    return null;
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() + 1 !== month ||
-    parsed.getUTCDate() !== day
-  ) {
-    return null;
-  }
-
-  return parsed;
-}
-
-function validationError(reply: FastifyReply, message: string, details: unknown) {
-  return reply.code(400).send({
-    error: {
-      code: 'VALIDATION_ERROR',
-      message,
-      details,
-    },
-  });
-}
-
-function notFoundError(reply: FastifyReply, code: string, message: string) {
-  return reply.code(404).send({
-    error: {
-      code,
-      message,
-      details: {},
-    },
-  });
-}
-
 function conflictError(reply: FastifyReply, code: string, message: string) {
   return reply.code(409).send({
     error: {
@@ -140,25 +101,6 @@ function conflictError(reply: FastifyReply, code: string, message: string) {
       details: {},
     },
   });
-}
-
-async function requireActor(request: FastifyRequest, deps: AppDeps, reply: FastifyReply) {
-  try {
-    const actorUserId = await requireActorUserId(deps.prisma, request);
-    return { actorUserId, actorDisplay: getActorDisplay(request) };
-  } catch (error) {
-    if (isUnauthenticatedError(error)) {
-      reply.code(401).send({
-        error: {
-          code: 'UNAUTHENTICATED',
-          message: 'Authentication required.',
-          details: {},
-        },
-      });
-      return null;
-    }
-    throw error;
-  }
 }
 
 function resourceUpdateDiff(input: {
@@ -236,8 +178,11 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/resources', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -282,8 +227,11 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.patch('/api/resources/:id', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -381,8 +329,11 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/home-bases', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -432,8 +383,11 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.patch('/api/home-bases/:id', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -645,8 +599,11 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/foremen/:foremanId/rosters', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -737,8 +694,11 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.post('/api/foremen/:foremanId/rosters/:date/members', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -827,8 +787,11 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   app.delete('/api/foremen/:foremanId/rosters/:date/members/:personResourceId', async (request, reply) => {
-    const actor = await requireActor(request, deps, reply);
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
       return;
     }
 

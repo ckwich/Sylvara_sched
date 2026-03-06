@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { SegmentType } from '@prisma/client';
 import { buildServer } from '../../src/server';
 import { createLinkedSegment, makePrisma, resetDb, seedBase } from './_helpers/db';
+import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
 
 const prisma = makePrisma();
 
@@ -44,7 +45,7 @@ describe('schedule segment integration (real postgres)', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         rosterId: roster.id,
@@ -61,6 +62,7 @@ describe('schedule segment integration (real postgres)', () => {
     const foremanRead = await app.inject({
       method: 'GET',
       url: `/api/foremen/${foreman.id}/schedule?date=2026-03-03`,
+      headers: lanAuthHeaders('GET', String(actor.id)),
     });
     expect(foremanRead.statusCode).toBe(200);
     const foremanBody = foremanRead.json();
@@ -73,6 +75,7 @@ describe('schedule segment integration (real postgres)', () => {
     const jobRead = await app.inject({
       method: 'GET',
       url: `/api/jobs/${job.id}/schedule-segments`,
+      headers: lanAuthHeaders('GET', String(actor.id)),
     });
     expect(jobRead.statusCode).toBe(200);
     const jobBody = jobRead.json();
@@ -92,6 +95,7 @@ describe('schedule segment integration (real postgres)', () => {
     const foremanWithOrphan = await app.inject({
       method: 'GET',
       url: `/api/foremen/${foreman.id}/schedule?date=2026-03-03`,
+      headers: lanAuthHeaders('GET', String(actor.id)),
     });
     expect(foremanWithOrphan.statusCode).toBe(200);
     expect(foremanWithOrphan.json().scheduleSegments).toHaveLength(1);
@@ -99,13 +103,14 @@ describe('schedule segment integration (real postgres)', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: `/api/schedule-segments/${createdSegmentId}`,
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('DELETE', String(actor.id)),
     });
     expect(deleted.statusCode).toBe(200);
 
     const foremanAfterDelete = await app.inject({
       method: 'GET',
       url: `/api/foremen/${foreman.id}/schedule?date=2026-03-03`,
+      headers: lanAuthHeaders('GET', String(actor.id)),
     });
     expect(foremanAfterDelete.statusCode).toBe(200);
     expect(foremanAfterDelete.json().scheduleSegments).toHaveLength(0);
@@ -120,7 +125,7 @@ describe('schedule segment integration (real postgres)', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         rosterId: roster.id,
@@ -133,7 +138,7 @@ describe('schedule segment integration (real postgres)', () => {
     const overlapCreate = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         rosterId: roster.id,
@@ -147,7 +152,7 @@ describe('schedule segment integration (real postgres)', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         rosterId: roster.id,
@@ -161,7 +166,7 @@ describe('schedule segment integration (real postgres)', () => {
     const overlapUpdate = await app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${secondId}`,
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('PATCH', String(actor.id)),
       payload: {
         startDatetime: '2026-03-03T14:30:00.000Z',
         endDatetime: '2026-03-03T15:30:00.000Z',
@@ -198,7 +203,7 @@ describe('schedule segment integration (real postgres)', () => {
     const patched = await app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${created.id}`,
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('PATCH', String(actor.id)),
       payload: {
         endDatetime: '2026-03-03T16:00:00.000Z',
       },
@@ -225,7 +230,7 @@ describe('schedule segment integration (real postgres)', () => {
     const createdDayOne = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         rosterId: roster.id,
@@ -248,7 +253,7 @@ describe('schedule segment integration (real postgres)', () => {
     const createdDayTwo = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         rosterId: rosterDayTwo.id,
@@ -262,6 +267,7 @@ describe('schedule segment integration (real postgres)', () => {
     const dayOneActivity = await app.inject({
       method: 'GET',
       url: `/api/foremen/${foreman.id}/activity?date=2026-03-03`,
+      headers: lanAuthHeaders('GET', String(actor.id)),
     });
     expect(dayOneActivity.statusCode).toBe(200);
     const dayOneBody = dayOneActivity.json() as {
@@ -283,7 +289,7 @@ describe('schedule segment integration (real postgres)', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('POST', String(actor.id)),
       payload: {
         jobId: job.id,
         rosterId: roster.id,
@@ -297,20 +303,21 @@ describe('schedule segment integration (real postgres)', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: `/api/schedule-segments/${segmentId}`,
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('DELETE', String(actor.id)),
     });
     expect(deleted.statusCode).toBe(200);
 
     const restored = await app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${segmentId}/restore`,
-      headers: { 'x-actor-user-id': String(actor.id) },
+      headers: lanAuthHeaders('PATCH', String(actor.id)),
     });
     expect(restored.statusCode).toBe(200);
 
     const foremanRead = await app.inject({
       method: 'GET',
       url: `/api/foremen/${foreman.id}/schedule?date=2026-03-03`,
+      headers: lanAuthHeaders('GET', String(actor.id)),
     });
     expect(foremanRead.statusCode).toBe(200);
     expect(foremanRead.json().scheduleSegments).toHaveLength(1);
