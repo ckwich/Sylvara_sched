@@ -6,6 +6,7 @@ import {
   addForemanRosterMember,
   createForemanRoster,
   getForemanDaySchedule,
+  getForemenSchedules,
   getForemanRosterMembers,
   getForemen,
   getHomeBases,
@@ -59,14 +60,26 @@ export function useDispatchData(selectedDate: string) {
           (resource) => resource.active && resource.resourceType === 'PERSON' && !resource.isForeman,
         ),
       );
-      setJobs(jobsResponse.jobs);
+      setJobs(jobsResponse.data);
 
-      const loaded = await Promise.all(
-        activeForemen.map(async (foreman) => {
-          const [schedule, members] = await Promise.all([
-            getForemanDaySchedule(foreman.id, date),
-            getForemanRosterMembers(foreman.id, date),
-          ]);
+      const [schedulesResponse, membersByForeman] = await Promise.all([
+        getForemenSchedules(
+          date,
+          activeForemen.map((foreman) => foreman.id),
+        ),
+        Promise.all(
+          activeForemen.map(async (foreman) => [foreman.id, await getForemanRosterMembers(foreman.id, date)] as const),
+        ),
+      ]);
+
+      const membersMap = new Map(membersByForeman);
+      const loaded = activeForemen.map((foreman) => {
+        const schedule = schedulesResponse.schedules[foreman.id] ?? {
+          roster: null,
+          scheduleSegments: [],
+          travelSegments: [],
+        };
+        const members = membersMap.get(foreman.id) ?? { members: [] };
           return [
             foreman.id,
             {
@@ -86,8 +99,7 @@ export function useDispatchData(selectedDate: string) {
               crew: members.members,
             } satisfies ForemanDayData,
           ] as const;
-        }),
-      );
+      });
 
       setDataByForeman(Object.fromEntries(loaded));
     } catch (loadError) {
@@ -167,7 +179,7 @@ export function useDispatchData(selectedDate: string) {
 
   async function reloadJobs() {
     const jobsResponse = await getJobs();
-    setJobs(jobsResponse.jobs);
+    setJobs(jobsResponse.data);
   }
 
   return {

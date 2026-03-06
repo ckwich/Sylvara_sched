@@ -137,19 +137,25 @@ function makeCrudPrisma() {
       },
     },
     $transaction: async <T>(
-      fn: (tx: {
-        customer: typeof prisma.customer;
-        job: typeof prisma.job;
-        estimateHistory: typeof prisma.estimateHistory;
-        activityLog: typeof prisma.activityLog;
-      }) => Promise<T>,
-    ) =>
-      fn({
+      input:
+        | ((tx: {
+            customer: typeof prisma.customer;
+            job: typeof prisma.job;
+            estimateHistory: typeof prisma.estimateHistory;
+            activityLog: typeof prisma.activityLog;
+          }) => Promise<T>)
+        | Promise<unknown>[],
+    ) => {
+      if (Array.isArray(input)) {
+        return Promise.all(input) as Promise<T>;
+      }
+      return input({
         customer: prisma.customer,
         job: prisma.job,
         estimateHistory: prisma.estimateHistory,
         activityLog: prisma.activityLog,
-      }),
+      });
+    },
   };
 
   return {
@@ -281,6 +287,7 @@ describe('jobs CRUD routes', () => {
               customer: { id: job2.customerId, name: 'B Customer' },
             },
           ],
+          count: async () => 2,
         },
         jobBlocker: {
           groupBy: async () => [{ jobId: job1.id, _count: { _all: 1 } }],
@@ -292,6 +299,7 @@ describe('jobs CRUD routes', () => {
           queryRawCalls += 1;
           return [{ job_id: job2.id, hours: 2 }];
         },
+        $transaction: async <T>(input: Promise<unknown>[]) => Promise.all(input) as Promise<T>,
       } as unknown as PrismaClient,
     });
 
@@ -304,9 +312,12 @@ describe('jobs CRUD routes', () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(queryRawCalls).toBe(1);
-    expect(body.jobs).toHaveLength(2);
-    const tbs = body.jobs.find((job: { id: string }) => job.id === job1.id);
-    const full = body.jobs.find((job: { id: string }) => job.id === job2.id);
+    expect(body.data).toHaveLength(2);
+    expect(body.pagination.total).toBe(2);
+    expect(body.pagination.page).toBe(1);
+    expect(body.pagination.pageSize).toBe(50);
+    const tbs = body.data.find((job: { id: string }) => job.id === job1.id);
+    const full = body.data.find((job: { id: string }) => job.id === job2.id);
     expect(tbs.derivedState).toBe('TBS');
     expect(full.derivedState).toBe('FULLY_SCHEDULED');
     expect(tbs.activeBlockerCount).toBe(1);

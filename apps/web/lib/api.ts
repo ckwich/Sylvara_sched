@@ -57,8 +57,23 @@ export type JobSummary = {
 };
 
 type JobsResponse = {
-  jobs: JobSummary[];
-  total: number;
+  data: JobSummary[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+};
+
+export type GetJobsQuery = {
+  page?: number;
+  pageSize?: number;
+  equipmentType?: 'CRANE' | 'BUCKET';
+  town?: string;
+  salesRepCode?: string;
+  search?: string;
+  includeCompleted?: boolean;
 };
 
 type JobDetail = {
@@ -162,12 +177,41 @@ export function buildOrgSettingsUrl(): string {
   return `/api/org-settings`;
 }
 
-export function buildJobsUrl(state?: JobDerivedState): string {
+export function buildJobsUrl(query?: GetJobsQuery | JobDerivedState): string {
   const base = `/api/jobs`;
-  if (!state) {
+  if (!query) {
     return base;
   }
-  return `${base}?state=${encodeURIComponent(state)}`;
+  if (typeof query === 'string') {
+    if (query === 'COMPLETED') {
+      return `${base}?includeCompleted=true`;
+    }
+    return base;
+  }
+  const params = new URLSearchParams();
+  if (query.page !== undefined) {
+    params.set('page', String(query.page));
+  }
+  if (query.pageSize !== undefined) {
+    params.set('pageSize', String(query.pageSize));
+  }
+  if (query.equipmentType !== undefined) {
+    params.set('equipmentType', query.equipmentType);
+  }
+  if (query.town !== undefined && query.town.trim()) {
+    params.set('town', query.town.trim());
+  }
+  if (query.salesRepCode !== undefined && query.salesRepCode.trim()) {
+    params.set('salesRepCode', query.salesRepCode.trim());
+  }
+  if (query.search !== undefined && query.search.trim()) {
+    params.set('search', query.search.trim());
+  }
+  if (query.includeCompleted !== undefined) {
+    params.set('includeCompleted', query.includeCompleted ? 'true' : 'false');
+  }
+  const queryString = params.toString();
+  return queryString ? `${base}?${queryString}` : base;
 }
 
 async function parseJsonSafe(response: Response): Promise<unknown> {
@@ -268,8 +312,8 @@ export async function patchOrgSettingsTimezone(
   return body as OrgSettingsResponse;
 }
 
-export async function getJobs(state?: JobDerivedState): Promise<JobsResponse> {
-  const url = buildJobsUrl(state);
+export async function getJobs(query?: GetJobsQuery | JobDerivedState): Promise<JobsResponse> {
+  const url = buildJobsUrl(query);
   let response: Response;
   try {
     response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
@@ -621,6 +665,10 @@ export type DispatchForemanScheduleResponse = {
   travelSegments?: DispatchTravelSegment[];
 };
 
+export type DispatchForemenSchedulesResponse = {
+  schedules: Record<string, DispatchForemanScheduleResponse>;
+};
+
 export type CreateForemanRosterPayload = {
   date: string;
   homeBaseId: string;
@@ -683,6 +731,35 @@ export async function getForemanDaySchedule(
     throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as DispatchForemanScheduleResponse;
+}
+
+export async function getForemenSchedules(
+  date: string,
+  foremanIds?: string[],
+): Promise<DispatchForemenSchedulesResponse> {
+  const params = new URLSearchParams();
+  params.set('date', date);
+  if (foremanIds && foremanIds.length > 0) {
+    params.set('foremanIds', foremanIds.join(','));
+  }
+  const url = `/api/foremen/schedules?${params.toString()}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as DispatchForemenSchedulesResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as DispatchForemenSchedulesResponse;
 }
 
 export async function getForemanRoster(

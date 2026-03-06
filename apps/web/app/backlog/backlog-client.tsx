@@ -1,21 +1,42 @@
 'use client';
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ApiRequestError, createJob, getJobs, type JobDerivedState, type JobSummary } from '../../lib/api';
+import {
+  ApiRequestError,
+  createJob,
+  getJobs,
+  type GetJobsQuery,
+  type JobDerivedState,
+  type JobSummary,
+} from '../../lib/api';
 import EditJobModal from '../jobs/edit-job-modal';
 import { buildSections } from './backlog-helpers';
 import BacklogSection from './backlog-section';
 import { NON_COMPLETED_STATES, STATE_LABELS, type EquipmentFilter, type EquipmentType } from './backlog-types';
 
-export default function BacklogClient() {
-  const ADD_NEW_REP_VALUE = '__ADD_NEW_REP__';
-  const [baseJobs, setBaseJobs] = useState<JobSummary[]>([]);
-  const [completedJobs, setCompletedJobs] = useState<JobSummary[]>([]);
-  const [completedLoaded, setCompletedLoaded] = useState(false);
+type NewJobFormState = {
+  customerName: string;
+  town: string;
+  equipmentType: 'CRANE' | 'BUCKET';
+  estimateHoursCurrent: string;
+  amountDollars: string;
+  salesRepCode: string;
+  notesRaw: string;
+};
 
+const DEFAULT_PAGE_SIZE = 50;
+const ADD_NEW_REP_VALUE = '__ADD_NEW_REP__';
+
+export default function BacklogClient() {
+  const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingCompleted, setLoadingCompleted] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
 
   const [equipmentFilter, setEquipmentFilter] = useState<EquipmentFilter>('ALL');
   const [selectedStates, setSelectedStates] = useState<Set<JobDerivedState>>(
@@ -23,12 +44,15 @@ export default function BacklogClient() {
   );
   const [pushUpOnly, setPushUpOnly] = useState(false);
   const [repFilter, setRepFilter] = useState('ALL');
-  const [search, setSearch] = useState('');
+  const [townFilter, setTownFilter] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [showCompleted, setShowCompleted] = useState(false);
   const [sectionOpen, setSectionOpen] = useState<Record<EquipmentType, boolean>>({
     CRANE: true,
     BUCKET: true,
   });
+
   const [newJobOpen, setNewJobOpen] = useState(false);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [newJobSubmitting, setNewJobSubmitting] = useState(false);
@@ -37,19 +61,47 @@ export default function BacklogClient() {
   const [newJobForm, setNewJobForm] = useState<NewJobFormState>({
     customerName: '',
     town: '',
-    equipmentType: 'CRANE' as const,
+    equipmentType: 'CRANE',
     estimateHoursCurrent: '',
     amountDollars: '',
     salesRepCode: '',
     notesRaw: '',
   });
 
-  async function loadBaseJobs(): Promise<void> {
-    setLoading(true);
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchInput]);
+
+  const requestQuery = useMemo<GetJobsQuery>(
+    () => ({
+      page,
+      pageSize,
+      includeCompleted: showCompleted,
+      ...(equipmentFilter !== 'ALL' ? { equipmentType: equipmentFilter } : {}),
+      ...(townFilter.trim() ? { town: townFilter.trim() } : {}),
+      ...(repFilter !== 'ALL' ? { salesRepCode: repFilter } : {}),
+      ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    }),
+    [page, pageSize, showCompleted, equipmentFilter, townFilter, repFilter, debouncedSearch],
+  );
+
+  async function loadJobs(query: GetJobsQuery, showInitialLoading = false): Promise<void> {
+    if (showInitialLoading) {
+      setLoading(true);
+    } else {
+      setIsFetching(true);
+    }
     setError(null);
+
     try {
-      const response = await getJobs();
-      setBaseJobs(response.jobs.filter((job) => job.derivedState !== 'COMPLETED'));
+      const response = await getJobs(query);
+      setJobs(response.data);
+      setTotal(response.pagination.total);
+      setTotalPages(response.pagination.totalPages);
     } catch (requestError) {
       const message =
         requestError instanceof ApiRequestError
@@ -60,12 +112,13 @@ export default function BacklogClient() {
       setError(message);
     } finally {
       setLoading(false);
+      setIsFetching(false);
     }
   }
 
   useEffect(() => {
-    void loadBaseJobs();
-  }, []);
+    void loadJobs(requestQuery, loading);
+  }, [requestQuery]);
 
   async function handleCreateJobSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,7 +159,8 @@ export default function BacklogClient() {
       });
       setNewJobCustomRepInput(false);
       setNewJobOpen(false);
-      await loadBaseJobs();
+      setPage(1);
+      await loadJobs({ ...requestQuery, page: 1 });
     } catch (requestError) {
       const message =
         requestError instanceof ApiRequestError
@@ -120,99 +174,39 @@ export default function BacklogClient() {
     }
   }
 
-  useEffect(() => {
-    if (!showCompleted || completedLoaded || loadingCompleted) {
-      return;
-    }
-
-    let cancelled = false;
-    setLoadingCompleted(true);
-    void getJobs('COMPLETED')
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-        setCompletedJobs(response.jobs.filter((job) => job.derivedState === 'COMPLETED'));
-        setCompletedLoaded(true);
-      })
-      .catch((requestError) => {
-        if (cancelled) {
-          return;
-        }
-        const message =
-          requestError instanceof ApiRequestError
-            ? requestError.message
-            : requestError instanceof Error
-              ? requestError.message
-              : 'Failed to load completed jobs.';
-        setError(message);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingCompleted(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [showCompleted, completedLoaded, loadingCompleted]);
-
-  const loadedJobs = useMemo(
-    () => (showCompleted ? [...baseJobs, ...completedJobs] : baseJobs),
-    [baseJobs, completedJobs, showCompleted],
-  );
   const newJobRepOptions = useMemo(
     () =>
       Array.from(
         new Set(
-          [...baseJobs, ...completedJobs]
+          jobs
             .map((job) => job.salesRepCode.trim())
             .filter((code) => code.length > 0),
         ),
       ).sort((a, b) => a.localeCompare(b)),
-    [baseJobs, completedJobs],
+    [jobs],
   );
 
-  const jobsBeforeRepFilter = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-    return loadedJobs.filter((job) => {
-      if (equipmentFilter !== 'ALL' && job.equipmentType !== equipmentFilter) {
-        return false;
-      }
-      if (job.derivedState !== 'COMPLETED' && !selectedStates.has(job.derivedState)) {
-        return false;
-      }
-      if (job.derivedState === 'COMPLETED' && !showCompleted) {
-        return false;
-      }
-      if (pushUpOnly && !job.pushUpIfPossible) {
-        return false;
-      }
-      if (!normalizedSearch) {
+  const visibleJobs = useMemo(
+    () =>
+      jobs.filter((job) => {
+        if (job.derivedState !== 'COMPLETED' && !selectedStates.has(job.derivedState)) {
+          return false;
+        }
+        if (pushUpOnly && !job.pushUpIfPossible) {
+          return false;
+        }
         return true;
-      }
-      return (
-        job.customerName.toLowerCase().includes(normalizedSearch) ||
-        job.town.toLowerCase().includes(normalizedSearch)
-      );
-    });
-  }, [equipmentFilter, loadedJobs, pushUpOnly, search, selectedStates, showCompleted]);
+      }),
+    [jobs, pushUpOnly, selectedStates],
+  );
 
   const repOptions = useMemo(
     () =>
-      Array.from(new Set(jobsBeforeRepFilter.map((job) => job.salesRepCode || 'UNASSIGNED'))).sort((a, b) =>
+      Array.from(new Set(jobs.map((job) => job.salesRepCode || 'UNASSIGNED'))).sort((a, b) =>
         a.localeCompare(b),
       ),
-    [jobsBeforeRepFilter],
+    [jobs],
   );
-
-  const visibleJobs = useMemo(() => {
-    if (repFilter === 'ALL') {
-      return jobsBeforeRepFilter;
-    }
-    return jobsBeforeRepFilter.filter((job) => (job.salesRepCode || 'UNASSIGNED') === repFilter);
-  }, [jobsBeforeRepFilter, repFilter]);
 
   const sections = useMemo(() => buildSections(visibleJobs), [visibleJobs]);
   const hasVisibleRows = sections.some((section) => section.groups.some((group) => group.jobs.length > 0));
@@ -394,7 +388,7 @@ export default function BacklogClient() {
       ) : null}
 
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-7">
           <div className="space-y-2">
             <p className="text-sm font-medium text-slate-700">Equipment</p>
             <div className="flex flex-wrap gap-2">
@@ -402,7 +396,10 @@ export default function BacklogClient() {
                 <button
                   key={option}
                   type="button"
-                  onClick={() => setEquipmentFilter(option)}
+                  onClick={() => {
+                    setEquipmentFilter(option);
+                    setPage(1);
+                  }}
                   className={`rounded-md px-3 py-1.5 text-sm ${
                     equipmentFilter === option ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
                   }`}
@@ -451,7 +448,10 @@ export default function BacklogClient() {
             <select
               className="rounded-md border border-slate-300 bg-white px-2 py-1.5"
               value={repFilter}
-              onChange={(event) => setRepFilter(event.target.value)}
+              onChange={(event) => {
+                setRepFilter(event.target.value);
+                setPage(1);
+              }}
             >
               <option value="ALL">All reps</option>
               {repOptions.map((repCode) => (
@@ -463,13 +463,27 @@ export default function BacklogClient() {
           </label>
 
           <label className="flex flex-col gap-1 text-sm text-slate-700">
+            Town
+            <input
+              type="text"
+              placeholder="Town"
+              className="rounded-md border border-slate-300 px-2 py-1.5"
+              value={townFilter}
+              onChange={(event) => {
+                setTownFilter(event.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm text-slate-700">
             Search
             <input
               type="text"
-              placeholder="Customer or town"
+              placeholder="Customer or address"
               className="rounded-md border border-slate-300 px-2 py-1.5"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
             />
           </label>
         </div>
@@ -479,13 +493,40 @@ export default function BacklogClient() {
             <input
               type="checkbox"
               checked={showCompleted}
-              onChange={(event) => setShowCompleted(event.target.checked)}
+              onChange={(event) => {
+                setShowCompleted(event.target.checked);
+                setPage(1);
+              }}
             />
             Show Completed
           </label>
-          {loadingCompleted ? <span className="text-sm text-slate-500">Loading completed jobs...</span> : null}
+          {isFetching ? <span className="text-sm text-slate-500">Loading...</span> : null}
         </div>
       </section>
+
+      <div className="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
+        <span className="text-slate-600">
+          {total} jobs total • Page {page} of {Math.max(totalPages, 1)}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+            disabled={page <= 1 || isFetching}
+            className="rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            onClick={() => setPage((current) => current + 1)}
+            disabled={isFetching || (totalPages > 0 && page >= totalPages)}
+            className="rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
 
       {error ? <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
 
@@ -516,17 +557,8 @@ export default function BacklogClient() {
         jobId={editingJobId}
         salesRepCodes={newJobRepOptions}
         onClose={() => setEditingJobId(null)}
-        onSaved={loadBaseJobs}
+        onSaved={() => loadJobs(requestQuery)}
       />
     </main>
   );
 }
-  type NewJobFormState = {
-    customerName: string;
-    town: string;
-    equipmentType: 'CRANE' | 'BUCKET';
-    estimateHoursCurrent: string;
-    amountDollars: string;
-    salesRepCode: string;
-    notesRaw: string;
-  };

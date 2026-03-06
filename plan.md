@@ -130,6 +130,34 @@ UX is a first-class priority for this scheduler module. The goal is **low-fricti
 - previous_estimate_hours, new_estimate_hours
 - note (text; optional)
 
+### 2.3.1 WeeklyBacklogSnapshot
+
+Stores a point-in-time capture of backlog metrics, taken once per week. Used to power the SUMM prior-week comparison and the year-over-year Comparable Report.
+
+**WeeklyBacklogSnapshot**
+- id (UUID)
+- snapshot_date (date — normalized to the Sunday that opens the captured week; ISO week anchor is Sunday)
+- year (integer — derived from snapshot_date for query convenience)
+- week_number (integer — ISO week number 1–53, derived from snapshot_date)
+- equipment_type: `CRANE | BUCKET`
+- sales_rep_code (text, nullable — NULL for equipment-level total rows; populated for per-rep rows)
+- scheduled_dollars (numeric, nullable — total $ of jobs with at least one active ScheduleSegment; NULL for historical pre-app rows)
+- tbs_dollars (numeric, nullable — total $ of TBS jobs with no active segments; NULL for historical pre-app rows)
+- total_dollars (numeric, nullable — scheduled_dollars + tbs_dollars; NULL for historical pre-app rows)
+- scheduled_hours (numeric — total estimate_hours_current of scheduled jobs)
+- tbs_hours (numeric — total estimate_hours_current of TBS jobs)
+- total_hours (numeric — scheduled_hours + tbs_hours)
+- crew_count (numeric — derived at snapshot time from active foreman Resources for this equipment type; supports fractional values e.g. 2.5)
+- crew_count_override (numeric, nullable — if set by a MANAGER, this value is used in place of crew_count for display and calculations; crew_count retains the derived value for audit purposes)
+- created_at
+- deleted_at (soft delete — Sylvara standard)
+
+**Unique constraint:** (snapshot_date, equipment_type, sales_rep_code) — NULL sales_rep_code is treated as a distinct value (use a partial unique index or NULLIF as appropriate in Prisma).
+
+**Dollar fields are nullable by design.** Historical snapshots seeded from the comparable spreadsheet populate only hour fields. Dollar accumulation begins from the app go-live date onward. The UI must handle NULL dollar fields gracefully — display "—" rather than $0.
+
+**Crew count derivation:** At snapshot time, count active (non-deleted, active=true) foreman Resources. For CRANE snapshots, count foremen whose primary equipment is CRANE (or who are unassigned to a specific type — use all active foremen if no equipment type is tracked on Resource). For BUCKET, same logic. If Resource does not track equipment type, use total active foreman count for both. A MANAGER may override the displayed crew_count for any snapshot via crew_count_override without losing the derived value.
+
 **Legacy scheduling fields**
 - approval_date (date)
 - approval_call (text)
@@ -615,16 +643,53 @@ Requirements are never hard filters but their statuses are shown inline on each 
 Resource availability warnings (inventory count) are shown inline if already modeled; not a hard filter in beta.
 
 ### 5.5 Reports
-- "Backlog in Dollars" report equivalent to SUMM:
-  - bucket sched/tbs/total
-  - crane sched/tbs/total
-  - grand totals
-  - % of totals
-  - days-of-backlog using editable "sales per day"
 
-- Weekly comparison:
-  - store weekly snapshot totals (by rep and equipment) to populate "previous week backlog $"
-  - snapshot schedule: weekly (manager can trigger manually too)
+#### SUMM — Backlog in Dollars (live, current week)
+
+Computed live from current job data at query time. Not stored — fully derived.
+
+**Table structure:**
+- One row per active sales rep (reps with at least one non-deleted, non-completed job)
+- Columns per rep:
+  - Bucket: Scheduled $, TBS $, Total $
+  - Crane: Scheduled $, TBS $, Total $
+  - Combined: Scheduled $, TBS $, Total $
+  - % of total (row's total as % of grand total)
+  - Prior week $ (from most recent WeeklyBacklogSnapshot for this rep, total_dollars combined across equipment types; display "—" if no snapshot exists or dollar field is NULL)
+- Footer: grand totals across all reps for each column
+
+**Below the table:**
+- Estimate of Sales Per Day: editable by MANAGER and SCHEDULER. Stored in OrgSettings.sales_per_day (numeric, nullable; no default). If not set, the Days Sales in Backlog metric displays "Set sales/day to enable" rather than a number.
+- Days Sales in Backlog (current week): total_dollars / sales_per_day
+- Days Sales in Backlog (prior week): prior week total_dollars / sales_per_day
+- Increase / (Decrease): current days - prior days
+
+**Snapshot trigger:**
+- Automatic weekly snapshot job runs every Monday at a configured time (default: 6:00 AM company timezone).
+- MANAGER can trigger manual snapshot from admin UI.
+- Snapshots are append-only. Re-running does not overwrite an existing week. Use the unique constraint to prevent duplicates; manual trigger should surface a warning if that week already exists.
+
+#### Comparable Report — Year-over-Year Weekly Hours
+
+A time-series view showing weekly backlog hours across multiple years, separately for Crane and Bucket. Sourced entirely from WeeklyBacklogSnapshot.
+
+**Display:**
+- Two sections: Crane and Bucket
+- Each section shows a line chart with one line per year (2019–current)
+- X-axis: week number (1–52/53)
+- Y-axis: total_hours (scheduled + TBS combined) for that equipment type, aggregated across all reps
+- Each data point also shows: scheduled_hours, tbs_hours, crew_count for tooltip/hover detail
+- Current year line is visually distinct (bold or different color)
+- Missing weeks (gaps in data) render as line breaks, not zero
+
+**Table view (collapsible, below each chart):**
+- Rows: On Board (scheduled_hours), TBS (tbs_hours), Total (total_hours), Crews (crew_count), Crew-Days (total_hours × crew_count)
+- Columns: week dates for the selected year range
+- Matches the exact layout of the Back_Log_Report_Comparable spreadsheet
+
+**Year range selector:** defaults to current year + all available prior years. User can toggle individual years on/off.
+
+**Data availability note (display in UI):** "Dollar figures available from [app go-live date] onward. Hour figures available from 2019 onward."
 
 ### 5.6 Customer Scheduling Notifications
 Notifications are intentional scheduler-triggered communication acts — not automatic side effects of schedule changes. Schedule changes (move, resize, delete) update VacatedSlot, ScheduleEvent, and ActivityLog internally. A customer notification is sent only when the scheduler explicitly triggers it via a "Notify Customer" action.

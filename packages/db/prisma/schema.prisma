@@ -264,6 +264,7 @@ model Job {
   travelSegments     TravelSegment[]
 
   @@index([equipmentType], map: "idx_jobs_equipment_type")
+  @@index([salesRepCode], map: "idx_jobs_sales_rep_code")
   @@index([town], map: "idx_jobs_town")
   @@index([completedDate], map: "idx_jobs_completed_date")
   @@index([customerId], map: "idx_jobs_customer_id")

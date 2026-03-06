@@ -30,16 +30,24 @@ const dateOnlySchema = z
 const decimalInputSchema = z.number().finite();
 
 const craneModelSchema = z.enum(['1090', '1060', 'EITHER']);
-const listStateSchema = z.enum(['TBS', 'PARTIALLY_SCHEDULED', 'FULLY_SCHEDULED', 'COMPLETED']);
+const includeCompletedQuerySchema = z
+  .union([z.literal('true'), z.literal('false'), z.boolean()])
+  .optional()
+  .transform((value) => value === true || value === 'true');
 
 const jobListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(50)
+    .transform((value) => Math.min(value, 200)),
   equipmentType: z.nativeEnum(EquipmentType).optional(),
-  state: listStateSchema.optional(),
-  pushUpIfPossible: z
-    .union([z.literal('true'), z.literal('false')])
-    .optional()
-    .transform((value) => (value === undefined ? undefined : value === 'true')),
-  salesRepCode: z.string().optional(),
+  town: z.string().trim().min(1).optional(),
+  salesRepCode: z.string().trim().min(1).optional(),
+  search: z.string().trim().min(1).optional(),
+  includeCompleted: includeCompletedQuerySchema.default(false),
 });
 
 const jobIdParamsSchema = z.object({
@@ -343,29 +351,72 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
 
     const normalizedSalesRepCode =
       query.data.salesRepCode !== undefined ? normalizeSalesRepCode(query.data.salesRepCode) : undefined;
+    const page = query.data.page;
+    const pageSize = query.data.pageSize;
+    const skip = (page - 1) * pageSize;
 
-    const jobs = await deps.prisma.job.findMany({
-      where: {
+    const where: Prisma.JobWhereInput = {
+      deletedAt: null,
+      customer: {
         deletedAt: null,
-        customer: {
-          deletedAt: null,
-        },
-        ...(query.data.equipmentType !== undefined ? { equipmentType: query.data.equipmentType } : {}),
-        ...(query.data.pushUpIfPossible !== undefined
-          ? { pushUpIfPossible: query.data.pushUpIfPossible }
-          : {}),
-        ...(normalizedSalesRepCode !== undefined ? { salesRepCode: normalizedSalesRepCode } : {}),
       },
-      include: {
-        customer: {
-          select: {
-            id: true,
-            name: true,
+      ...(query.data.equipmentType !== undefined ? { equipmentType: query.data.equipmentType } : {}),
+      ...(query.data.town !== undefined
+        ? {
+            town: {
+              contains: query.data.town,
+              mode: 'insensitive',
+            },
+          }
+        : {}),
+      ...(normalizedSalesRepCode !== undefined
+        ? {
+            salesRepCode: {
+              equals: normalizedSalesRepCode,
+              mode: 'insensitive',
+            },
+          }
+        : {}),
+      ...(query.data.search !== undefined
+        ? {
+            OR: [
+              {
+                customer: {
+                  name: {
+                    contains: query.data.search,
+                    mode: 'insensitive',
+                  },
+                },
+              },
+              {
+                jobSiteAddress: {
+                  contains: query.data.search,
+                  mode: 'insensitive',
+                },
+              },
+            ],
+          }
+        : {}),
+      ...(query.data.includeCompleted ? {} : { completedDate: null }),
+    };
+
+    const [jobs, total] = await deps.prisma.$transaction([
+      deps.prisma.job.findMany({
+        where,
+        include: {
+          customer: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-      },
-      orderBy: [{ equipmentType: 'asc' }, { salesRepCode: 'asc' }, { jobSiteAddress: 'asc' }],
-    });
+        orderBy: [{ createdAt: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      deps.prisma.job.count({ where }),
+    ]);
 
     const jobIds = jobs.map((job) => job.id);
     const [hoursByJobId, activeBlockers, unmetRequirements] = await Promise.all([
@@ -428,12 +479,14 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
       };
     });
 
-    const filteredRows =
-      query.data.state === undefined ? rows : rows.filter((row) => row.derivedState === query.data.state);
-
     return reply.code(200).send({
-      jobs: filteredRows,
-      total: filteredRows.length,
+      data: rows,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: total === 0 ? 0 : Math.ceil(total / pageSize),
+      },
     });
   });
 

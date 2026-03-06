@@ -16,6 +16,11 @@ const foremanActivityQuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
+const foremanSchedulesQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  foremanIds: z.string().optional(),
+});
+
 function extractNumericDiffValue(diff: Prisma.JsonValue | null, key: string): number | null {
   if (!diff || typeof diff !== 'object' || Array.isArray(diff)) {
     return null;
@@ -25,6 +30,159 @@ function extractNumericDiffValue(diff: Prisma.JsonValue | null, key: string): nu
 }
 
 export function registerForemanReadRoutes(app: FastifyInstance, deps: AppDeps) {
+  app.get('/api/foremen/schedules', async (request, reply) => {
+    const query = foremanSchedulesQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid foreman schedules query.',
+          details: query.error.flatten(),
+        },
+      });
+    }
+
+    const parsedIds =
+      query.data.foremanIds === undefined
+        ? null
+        : query.data.foremanIds
+            .split(',')
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0);
+    if (parsedIds !== null) {
+      for (const foremanId of parsedIds) {
+        const parsedId = uuidSchema.safeParse(foremanId);
+        if (!parsedId.success) {
+          return reply.code(400).send({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: 'Invalid foremanIds query.',
+              details: parsedId.error.flatten(),
+            },
+          });
+        }
+      }
+    }
+
+    const serviceDate = dateOnlyToUtc(query.data.date);
+    const orgSettings = await deps.prisma.orgSettings.findFirst({
+      where: { deletedAt: null },
+      select: { companyTimezone: true },
+    });
+    const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
+    const { startUtc: dayStartUtc, endUtc: dayEndUtc } = localDayBoundsUtc(query.data.date, timezone);
+
+    const foremanIds =
+      parsedIds ??
+      (
+        await deps.prisma.resource.findMany({
+          where: {
+            deletedAt: null,
+            resourceType: 'PERSON',
+            isForeman: true,
+            active: true,
+          },
+          select: { id: true },
+        })
+      ).map((row) => row.id);
+
+    if (foremanIds.length === 0) {
+      return reply.code(200).send({ schedules: {} });
+    }
+
+    const rosters = await deps.prisma.foremanDayRoster.findMany({
+      where: {
+        deletedAt: null,
+        date: serviceDate,
+        foremanPersonId: {
+          in: foremanIds,
+        },
+      },
+    });
+    const rosterIds = rosters.map((roster) => roster.id);
+    const rosterById = new Map(rosters.map((roster) => [roster.id, roster]));
+    const rosterIdByForemanId = new Map(rosters.map((roster) => [roster.foremanPersonId, roster.id]));
+
+    const travelSegments = await deps.prisma.travelSegment.findMany({
+      where: {
+        foremanPersonId: { in: foremanIds },
+        deletedAt: null,
+        startDatetime: { lt: dayEndUtc },
+        endDatetime: { gt: dayStartUtc },
+      },
+      orderBy: { startDatetime: 'asc' },
+    });
+
+    const scheduleSegments =
+      rosterIds.length > 0
+        ? await deps.prisma.scheduleSegment.findMany({
+            where: {
+              deletedAt: null,
+              startDatetime: { lt: dayEndUtc },
+              endDatetime: { gt: dayStartUtc },
+              segmentRosterLink: {
+                is: {
+                  deletedAt: null,
+                  rosterId: { in: rosterIds },
+                  roster: {
+                    deletedAt: null,
+                  },
+                },
+              },
+            },
+            include: {
+              segmentRosterLink: {
+                select: {
+                  rosterId: true,
+                },
+              },
+            },
+            orderBy: { startDatetime: 'asc' },
+          })
+        : [];
+
+    const scheduleByRosterId = new Map<string, typeof scheduleSegments>();
+    for (const segment of scheduleSegments) {
+      const rosterId = segment.segmentRosterLink?.rosterId;
+      if (!rosterId) {
+        continue;
+      }
+      const existing = scheduleByRosterId.get(rosterId);
+      if (existing) {
+        existing.push(segment);
+      } else {
+        scheduleByRosterId.set(rosterId, [segment]);
+      }
+    }
+
+    const travelByForemanId = new Map<string, typeof travelSegments>();
+    for (const segment of travelSegments) {
+      const existing = travelByForemanId.get(segment.foremanPersonId);
+      if (existing) {
+        existing.push(segment);
+      } else {
+        travelByForemanId.set(segment.foremanPersonId, [segment]);
+      }
+    }
+
+    const schedules = Object.fromEntries(
+      foremanIds.map((foremanId) => {
+        const rosterId = rosterIdByForemanId.get(foremanId);
+        const roster = rosterId ? rosterById.get(rosterId) ?? null : null;
+        return [
+          foremanId,
+          {
+            roster,
+            scheduleSegments: rosterId ? scheduleByRosterId.get(rosterId) ?? [] : [],
+            travelSegments: travelByForemanId.get(foremanId) ?? [],
+          },
+        ] as const;
+      }),
+    );
+
+    return reply.code(200).send({ schedules });
+  });
+
   app.get('/api/foremen/:foremanPersonId/schedule', async (request, reply) => {
     const paramsSchema = z.object({ foremanPersonId: uuidSchema });
     const params = paramsSchema.safeParse(request.params);
