@@ -178,7 +178,7 @@ model RiskReason {
 model CustomerRisk {
   id          String             @id @default(uuid()) @db.Uuid
   customerId  String             @map("customer_id") @db.Uuid
-  severity    Int
+  severity    Int?
   narrative   String?
   status      CustomerRiskStatus
   ownerUserId String?            @map("owner_user_id") @db.Uuid
@@ -230,6 +230,15 @@ model Job {
   winterFlag            Boolean                @default(false) @map("winter_flag")
   frozenGroundFlag      Boolean                @default(false) @map("frozen_ground_flag")
   notesRaw              String                 @default("") @map("notes_raw")
+  hasClimb              Boolean                @default(false) @map("has_climb")
+  isSigned              Boolean                @default(false) @map("is_signed")
+  hasStumpLanguage      Boolean                @default(false) @map("has_stump_language")
+  stumpLanguage         String?                @map("stump_language")
+  importSource          String?                @map("import_source")
+  importRow             Int?                   @map("import_row")
+  unable                Boolean                @default(false)
+  linkedEquipmentNote   String?                @map("linked_equipment_note")
+  linkedJobId           String?                @map("linked_job_id") @db.Uuid
   notesLastParsedAt     DateTime?              @map("notes_last_parsed_at") @db.Timestamptz(6)
   notesParseConfidence  Json?                  @map("notes_parse_confidence")
   pushUpIfPossible      Boolean                @default(false) @map("push_up_if_possible")
@@ -249,6 +258,8 @@ model Job {
   deletedAt             DateTime?              @map("deleted_at") @db.Timestamptz(6)
 
   customer           Customer              @relation(fields: [customerId], references: [id])
+  linkedJob          Job?                  @relation("job_linked_job", fields: [linkedJobId], references: [id])
+  linkedFromJobs     Job[]                 @relation("job_linked_job")
   completedByUser    User?                 @relation("job_completed_by", fields: [completedByUserId], references: [id])
   confirmedByUser    User?                 @relation("job_confirmed_by", fields: [confirmedByUserId], references: [id])
   contactOwnerUser   User?                 @relation("job_contact_owner", fields: [contactOwnerUserId], references: [id])
@@ -355,12 +366,12 @@ model ScheduleSegment {
   scheduledHoursOverride Decimal?    @map("scheduled_hours_override") @db.Decimal(10, 2)
   deletedAt              DateTime?   @map("deleted_at") @db.Timestamptz(6)
   notes                  String?
-  createdByUserId        String      @map("created_by_user_id") @db.Uuid
+  createdByUserId        String?     @map("created_by_user_id") @db.Uuid
   createdAt              DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   job                  Job                   @relation(fields: [jobId], references: [id])
-  createdByUser        User                  @relation("schedule_segment_created_by", fields: [createdByUserId], references: [id])
+  createdByUser        User?                 @relation("schedule_segment_created_by", fields: [createdByUserId], references: [id])
   resourceReservations ResourceReservation[]
   segmentRosterLink    SegmentRosterLink?
   vacatedSlotsSource   VacatedSlot[]         @relation("vacated_slot_source_segment")
