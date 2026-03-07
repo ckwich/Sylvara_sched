@@ -3,14 +3,23 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { DEFAULT_TIMEZONE } from '@sylvara/shared';
 import { UNAUTHENTICATED_ERROR } from '../../http/actor.js';
-import { requireActor, requireManagerPermission } from '../../http/route-helpers.js';
+import {
+  requireActor,
+  requireManagerPermission,
+  requireMutationPermission,
+} from '../../http/route-helpers.js';
 import type { AppDeps } from './_shared.js';
 
 const ORG_SETTINGS_ID = '11111111-1111-4111-8111-111111111111';
 
-const orgSettingsPatchSchema = z.object({
-  companyTimezone: z.string().min(1),
-});
+const orgSettingsPatchSchema = z
+  .object({
+    companyTimezone: z.string().min(1).optional(),
+    sales_per_day: z.number().positive().nullable().optional(),
+  })
+  .refine((value) => value.companyTimezone !== undefined || value.sales_per_day !== undefined, {
+    message: 'At least one field is required.',
+  });
 
 function isValidIanaTimeZone(timeZone: string): boolean {
   try {
@@ -28,6 +37,7 @@ export function registerOrgSettingsRoutes(app: FastifyInstance, deps: AppDeps) {
         companyTimezone: true,
         operatingStartMinute: true,
         operatingEndMinute: true,
+        salesPerDay: true,
       },
     });
 
@@ -35,6 +45,7 @@ export function registerOrgSettingsRoutes(app: FastifyInstance, deps: AppDeps) {
       companyTimezone: settings?.companyTimezone ?? DEFAULT_TIMEZONE,
       operatingStartMinute: settings?.operatingStartMinute ?? null,
       operatingEndMinute: settings?.operatingEndMinute ?? null,
+      sales_per_day: settings?.salesPerDay?.toNumber() ?? null,
     });
   });
 
@@ -48,7 +59,12 @@ export function registerOrgSettingsRoutes(app: FastifyInstance, deps: AppDeps) {
     if (!actor) {
       return;
     }
-    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+    const wantsTimezoneUpdate = typeof (request.body as { companyTimezone?: unknown } | null)?.companyTimezone === 'string';
+    if (wantsTimezoneUpdate) {
+      if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+        return;
+      }
+    } else if (!requireMutationPermission({ role: actor.actorRole, reply })) {
       return;
     }
     const actorUserId = actor.actorUserId;
@@ -65,7 +81,7 @@ export function registerOrgSettingsRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    if (!isValidIanaTimeZone(parsed.data.companyTimezone)) {
+    if (parsed.data.companyTimezone !== undefined && !isValidIanaTimeZone(parsed.data.companyTimezone)) {
       return reply.code(400).send({
         error: {
           code: 'VALIDATION_ERROR',
@@ -80,15 +96,32 @@ export function registerOrgSettingsRoutes(app: FastifyInstance, deps: AppDeps) {
         where: { id: ORG_SETTINGS_ID },
         create: {
           id: ORG_SETTINGS_ID,
-          companyTimezone: parsed.data.companyTimezone,
+          companyTimezone: parsed.data.companyTimezone ?? DEFAULT_TIMEZONE,
+          salesPerDay:
+            parsed.data.sales_per_day === undefined
+              ? null
+              : parsed.data.sales_per_day === null
+                ? null
+                : new Prisma.Decimal(parsed.data.sales_per_day),
         },
         update: {
-          companyTimezone: parsed.data.companyTimezone,
+          ...(parsed.data.companyTimezone !== undefined
+            ? { companyTimezone: parsed.data.companyTimezone }
+            : {}),
+          ...(parsed.data.sales_per_day !== undefined
+            ? {
+                salesPerDay:
+                  parsed.data.sales_per_day === null
+                    ? null
+                    : new Prisma.Decimal(parsed.data.sales_per_day),
+              }
+            : {}),
         },
         select: {
           companyTimezone: true,
           operatingStartMinute: true,
           operatingEndMinute: true,
+          salesPerDay: true,
         },
       });
 
@@ -100,8 +133,13 @@ export function registerOrgSettingsRoutes(app: FastifyInstance, deps: AppDeps) {
           actorUserId,
           actorDisplay,
           diff: {
-            companyTimezone: settings.companyTimezone,
-          },
+            ...(parsed.data.companyTimezone !== undefined
+              ? { companyTimezone: settings.companyTimezone }
+              : {}),
+            ...(parsed.data.sales_per_day !== undefined
+              ? { sales_per_day: settings.salesPerDay?.toNumber() ?? null }
+              : {}),
+          } as Prisma.InputJsonValue,
         },
       });
 
@@ -112,6 +150,7 @@ export function registerOrgSettingsRoutes(app: FastifyInstance, deps: AppDeps) {
       companyTimezone: updated.companyTimezone,
       operatingStartMinute: updated.operatingStartMinute,
       operatingEndMinute: updated.operatingEndMinute,
+      sales_per_day: updated.salesPerDay?.toNumber() ?? null,
     });
   });
 }

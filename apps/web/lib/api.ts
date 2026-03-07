@@ -33,6 +33,7 @@ type OrgSettingsResponse = {
   companyTimezone: string;
   operatingStartMinute: number | null;
   operatingEndMinute: number | null;
+  sales_per_day: number | null;
 };
 
 export type JobDerivedState = 'TBS' | 'PARTIALLY_SCHEDULED' | 'FULLY_SCHEDULED' | 'COMPLETED';
@@ -295,6 +296,32 @@ export async function patchOrgSettingsTimezone(
     response = await apiFetch(url, {
       method: 'PATCH',
       body: JSON.stringify({ companyTimezone }),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as OrgSettingsResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as OrgSettingsResponse;
+}
+
+export async function patchOrgSettingsSalesPerDay(
+  salesPerDay: number | null,
+): Promise<OrgSettingsResponse> {
+  const url = buildOrgSettingsUrl();
+  let response: Response;
+  try {
+    response = await apiFetch(url, {
+      method: 'PATCH',
+      body: JSON.stringify({ sales_per_day: salesPerDay }),
     });
   } catch (error) {
     throw new ApiRequestError({
@@ -709,6 +736,62 @@ export type CreateScheduleAttemptResponse = {
   error?: { code: string; message: string };
 };
 
+export type SummReportRow = {
+  sales_rep_code: string;
+  bucket_scheduled_dollars: number;
+  bucket_tbs_dollars: number;
+  bucket_total_dollars: number;
+  crane_scheduled_dollars: number;
+  crane_tbs_dollars: number;
+  crane_total_dollars: number;
+  combined_scheduled_dollars: number;
+  combined_tbs_dollars: number;
+  combined_total_dollars: number;
+  pct_of_total: number;
+  prior_week_dollars: number | null;
+};
+
+export type SummReportResponse = {
+  report_date: string;
+  sales_per_day: number | null;
+  rows: SummReportRow[];
+  totals: {
+    bucket_scheduled_dollars: number;
+    bucket_tbs_dollars: number;
+    bucket_total_dollars: number;
+    crane_scheduled_dollars: number;
+    crane_tbs_dollars: number;
+    crane_total_dollars: number;
+    combined_scheduled_dollars: number;
+    combined_tbs_dollars: number;
+    combined_total_dollars: number;
+    prior_week_dollars: number | null;
+  };
+  days_sales_in_backlog: number | null;
+  prior_week_days_sales: number | null;
+  days_sales_change: number | null;
+};
+
+export type ComparableWeekPoint = {
+  scheduled_hours: number;
+  tbs_hours: number;
+  total_hours: number;
+  crew_count: number;
+  crew_days: number;
+  snapshot_date: string;
+};
+
+export type ComparableReportResponse = {
+  available_years: number[];
+  crane: Record<number, Record<number, ComparableWeekPoint | null>>;
+  bucket: Record<number, Record<number, ComparableWeekPoint | null>>;
+};
+
+export type ComparableReportQuery = {
+  years?: number[];
+  equipment?: 'CRANE' | 'BUCKET' | 'ALL';
+};
+
 export async function getForemanDaySchedule(
   foremanPersonId: string,
   date: string,
@@ -999,6 +1082,68 @@ export async function removeScheduleSegment(segmentId: string): Promise<void> {
   if (!response.ok) {
     throw buildApiError(response.status, url, body ?? {});
   }
+}
+
+function buildComparableReportUrl(query?: ComparableReportQuery): string {
+  const base = '/api/reports/comparable';
+  if (!query) {
+    return base;
+  }
+
+  const params = new URLSearchParams();
+  if (query.years && query.years.length > 0) {
+    params.set('years', query.years.join(','));
+  }
+  if (query.equipment && query.equipment !== 'ALL') {
+    params.set('equipment', query.equipment);
+  }
+
+  const queryString = params.toString();
+  return queryString ? `${base}?${queryString}` : base;
+}
+
+export async function getSummReport(): Promise<SummReportResponse> {
+  const url = '/api/reports/summ';
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as SummReportResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as SummReportResponse;
+}
+
+export async function getComparableReport(
+  query?: ComparableReportQuery,
+): Promise<ComparableReportResponse> {
+  const url = buildComparableReportUrl(query);
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ComparableReportResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as ComparableReportResponse;
 }
 
 

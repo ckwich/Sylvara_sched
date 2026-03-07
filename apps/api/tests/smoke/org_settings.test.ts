@@ -32,6 +32,7 @@ describe('org settings endpoints', () => {
       companyTimezone: 'America/New_York',
       operatingStartMinute: 480,
       operatingEndMinute: 1020,
+      sales_per_day: null,
     });
     await app.close();
   });
@@ -114,6 +115,7 @@ describe('org settings endpoints', () => {
                   companyTimezone: create.companyTimezone,
                   operatingStartMinute: null,
                   operatingEndMinute: null,
+                  salesPerDay: null,
                 };
               },
             },
@@ -171,6 +173,7 @@ describe('org settings endpoints', () => {
                   companyTimezone: staged.timezone,
                   operatingStartMinute: null,
                   operatingEndMinute: null,
+                  salesPerDay: null,
                 };
               },
             },

@@ -7,6 +7,7 @@ import { createJwtAuthPreHandler } from './http/jwt-auth.js';
 import { isLanModeEnabled, isStrongLanSharedSecret, MIN_LAN_SHARED_SECRET_LENGTH } from './http/lan-guard.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerJobRoutes } from './routes/jobs.js';
+import { registerReportRoutes } from './routes/reports.js';
 import { registerSnapshotRoutes } from './routes/snapshots.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
 import { startWeeklySnapshotJob } from './jobs/weekly-snapshot-job.js';
@@ -92,6 +93,7 @@ export function buildServer(
   registerSchedulingRoutes(app, { prisma: deps.prisma });
   registerAdminRoutes(app, { prisma: deps.prisma });
   registerJobRoutes(app, { prisma: deps.prisma });
+  registerReportRoutes(app, { prisma: deps.prisma });
   registerSnapshotRoutes(app, { prisma: deps.prisma });
 
   return app;
