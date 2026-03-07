@@ -271,6 +271,28 @@ model Job {
   @@map("jobs")
 }
 
+model WeeklyBacklogSnapshot {
+  id                String        @id @default(uuid()) @db.Uuid
+  snapshotDate      DateTime      @map("snapshot_date") @db.Date
+  year              Int
+  weekNumber        Int           @map("week_number")
+  equipmentType     EquipmentType @map("equipment_type")
+  salesRepCode      String?       @map("sales_rep_code")
+  scheduledDollars  Decimal?      @map("scheduled_dollars") @db.Decimal(12, 2)
+  tbsDollars        Decimal?      @map("tbs_dollars") @db.Decimal(12, 2)
+  totalDollars      Decimal?      @map("total_dollars") @db.Decimal(12, 2)
+  scheduledHours    Decimal       @map("scheduled_hours") @db.Decimal(10, 2)
+  tbsHours          Decimal       @map("tbs_hours") @db.Decimal(10, 2)
+  totalHours        Decimal       @map("total_hours") @db.Decimal(10, 2)
+  crewCount         Decimal       @map("crew_count") @db.Decimal(10, 2)
+  crewCountOverride Decimal?      @map("crew_count_override") @db.Decimal(10, 2)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt         DateTime?     @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([snapshotDate, equipmentType, salesRepCode], map: "uq_weekly_snapshot_date_equipment_rep")
+  @@map("weekly_backlog_snapshots")
+}
+
 model EstimateHistory {
   id                    String   @id @default(uuid()) @db.Uuid
   jobId                 String   @map("job_id") @db.Uuid
@@ -710,6 +732,7 @@ model OrgSettings {
   companyTimezone    String    @default("America/New_York") @map("company_timezone")
   operatingStartMinute Int?      @map("operating_start_minute")
   operatingEndMinute   Int?      @map("operating_end_minute")
+  salesPerDay         Decimal?  @map("sales_per_day") @db.Decimal(12, 2)
   operatingStartTime   DateTime? @map("operating_start_time") @db.Time(6)
   operatingEndTime     DateTime? @map("operating_end_time") @db.Time(6)
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)

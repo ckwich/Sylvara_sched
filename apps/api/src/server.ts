@@ -7,7 +7,9 @@ import { createJwtAuthPreHandler } from './http/jwt-auth.js';
 import { isLanModeEnabled, isStrongLanSharedSecret, MIN_LAN_SHARED_SECRET_LENGTH } from './http/lan-guard.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerJobRoutes } from './routes/jobs.js';
+import { registerSnapshotRoutes } from './routes/snapshots.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
+import { startWeeklySnapshotJob } from './jobs/weekly-snapshot-job.js';
 
 type ServerAuthConfig = {
   lanModeEnabled: boolean;
@@ -90,6 +92,7 @@ export function buildServer(
   registerSchedulingRoutes(app, { prisma: deps.prisma });
   registerAdminRoutes(app, { prisma: deps.prisma });
   registerJobRoutes(app, { prisma: deps.prisma });
+  registerSnapshotRoutes(app, { prisma: deps.prisma });
 
   return app;
 }
@@ -100,14 +103,33 @@ if (isEntrypoint) {
   const app = buildServer();
   const port = Number(process.env.API_PORT ?? 4000);
   const host = process.env.HOST_BIND ?? process.env.API_HOST ?? '127.0.0.1';
+  let stopWeeklySnapshotJob: (() => void) | null = null;
 
   app
     .listen({ port, host })
-    .then(() => {
+    .then(async () => {
+      await prisma.$queryRaw`SELECT 1`;
+      stopWeeklySnapshotJob = startWeeklySnapshotJob({
+        prisma,
+        logInfo: (message) => app.log.info(message),
+        logError: (message, error) => app.log.error({ err: error }, message),
+      });
       app.log.info(`API listening on ${host}:${port}`);
     })
     .catch((error) => {
       app.log.error(error);
       process.exit(1);
     });
+
+  const shutdown = async () => {
+    stopWeeklySnapshotJob?.();
+    await app.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => {
+    void shutdown();
+  });
+  process.on('SIGTERM', () => {
+    void shutdown();
+  });
 }
