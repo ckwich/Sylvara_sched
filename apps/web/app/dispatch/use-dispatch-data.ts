@@ -4,7 +4,10 @@ import { useEffect, useState } from 'react';
 import { DEFAULT_TIMEZONE } from '@sylvara/shared';
 import {
   addForemanRosterMember,
+  dismissConflict,
   createForemanRoster,
+  getConflictDismissals,
+  getConflicts,
   getForemanDaySchedule,
   getForemenSchedules,
   getForemanRosterMembers,
@@ -14,6 +17,7 @@ import {
   getOrgSettings,
   getResources,
   type DispatchForemanScheduleResponse,
+  type DispatchConflict,
   type ForemanDayRoster,
   type HomeBaseRecord,
   type JobSummary,
@@ -39,6 +43,8 @@ export function useDispatchData(selectedDate: string) {
   const [error, setError] = useState<string | null>(null);
   const [crewBusyForemanId, setCrewBusyForemanId] = useState<string | null>(null);
   const [crewErrorByForeman, setCrewErrorByForeman] = useState<Record<string, string | null>>({});
+  const [conflicts, setConflicts] = useState<DispatchConflict[]>([]);
+  const [dismissedConflictKeys, setDismissedConflictKeys] = useState<Set<string>>(new Set());
 
   async function loadDispatchData(date: string) {
     setLoading(true);
@@ -62,7 +68,7 @@ export function useDispatchData(selectedDate: string) {
       );
       setJobs(jobsResponse.data);
 
-      const [schedulesResponse, membersByForeman] = await Promise.all([
+      const [schedulesResponse, membersByForeman, conflictsResponse, dismissalsResponse] = await Promise.all([
         getForemenSchedules(
           date,
           activeForemen.map((foreman) => foreman.id),
@@ -70,6 +76,8 @@ export function useDispatchData(selectedDate: string) {
         Promise.all(
           activeForemen.map(async (foreman) => [foreman.id, await getForemanRosterMembers(foreman.id, date)] as const),
         ),
+        getConflicts(date),
+        getConflictDismissals(date),
       ]);
 
       const membersMap = new Map(membersByForeman);
@@ -102,6 +110,10 @@ export function useDispatchData(selectedDate: string) {
       });
 
       setDataByForeman(Object.fromEntries(loaded));
+      setConflicts(conflictsResponse.conflicts);
+      setDismissedConflictKeys(
+        new Set(dismissalsResponse.dismissals.map((dismissal) => `${dismissal.conflictType}:${dismissal.conflictKey}`)),
+      );
     } catch (loadError) {
       setError(getErrorMessage(loadError));
     } finally {
@@ -182,6 +194,18 @@ export function useDispatchData(selectedDate: string) {
     setJobs(jobsResponse.data);
   }
 
+  async function dismissDispatchConflict(input: { conflictType: string; conflictKey: string }) {
+    await dismissConflict({
+      date: selectedDate,
+      conflictType: input.conflictType,
+      conflictKey: input.conflictKey,
+    });
+    const dismissals = await getConflictDismissals(selectedDate);
+    setDismissedConflictKeys(
+      new Set(dismissals.dismissals.map((dismissal) => `${dismissal.conflictType}:${dismissal.conflictKey}`)),
+    );
+  }
+
   return {
     companyTimezone,
     foremen,
@@ -193,9 +217,12 @@ export function useDispatchData(selectedDate: string) {
     error,
     crewBusyForemanId,
     crewErrorByForeman,
+    conflicts,
+    dismissedConflictKeys,
     loadDispatchData,
     handleAddCrew,
     reloadForemanDay,
     reloadJobs,
+    dismissDispatchConflict,
   };
 }

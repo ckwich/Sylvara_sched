@@ -46,11 +46,15 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
     error,
     crewBusyForemanId,
     crewErrorByForeman,
+    conflicts,
+    dismissedConflictKeys,
     handleAddCrew,
     reloadForemanDay,
     reloadJobs,
+    dismissDispatchConflict,
   } = useDispatchData(selectedDate);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [conflictsOpen, setConflictsOpen] = useState(false);
 
   const [selectedSlot, setSelectedSlot] = useState<{ foremanId: string; minute: number } | null>(null);
   const [panelSubmitting, setPanelSubmitting] = useState(false);
@@ -153,6 +157,14 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             heightPx: height,
             startMinuteOfDay,
             endMinuteOfDay,
+            hasConflict:
+              !!job &&
+              conflicts.some(
+                (conflict) =>
+                  (conflict.type === 'EQUIPMENT_DOUBLE_BOOKING' || conflict.type === 'JOB_OVERLAP') &&
+                  conflict.foreman_ids.includes(foreman.id) &&
+                  conflict.affected_entities.some((entity) => entity.id === segment.jobId || entity.type === 'RESOURCE'),
+              ),
           };
         })
           .filter((block) => block !== null) as ScheduleBlockData[];
@@ -186,6 +198,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             heightPx: height,
             startMinuteOfDay,
             endMinuteOfDay,
+            hasConflict: false,
           };
         })
           .filter((block) => block !== null) as ScheduleBlockData[];
@@ -196,8 +209,20 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
           blocks: [...scheduleBlocks, ...travelBlocks].sort((a, b) => a.topPx - b.topPx),
         };
       }),
-    [companyTimezone, dataByForeman, foremen, jobsById],
+    [companyTimezone, conflicts, dataByForeman, foremen, jobsById],
   );
+
+  const conflictCounts = useMemo(() => {
+    const unresolved = conflicts.filter((conflict) => {
+      const key = `${conflict.type}:${conflict.affected_entities[0]?.id ?? conflict.message}`;
+      return !dismissedConflictKeys.has(key);
+    });
+    return {
+      errors: unresolved.filter((conflict) => conflict.severity === 'ERROR').length,
+      warnings: unresolved.filter((conflict) => conflict.severity === 'WARNING').length,
+      all: conflicts,
+    };
+  }, [conflicts, dismissedConflictKeys]);
 
 
   async function handleSchedule(input: {
@@ -342,6 +367,19 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">Dispatch</h1>
             <p className="text-sm text-slate-500">{formatDateHeading(selectedDate)}</p>
+            <button
+              type="button"
+              onClick={() => setConflictsOpen((open) => !open)}
+              className={`mt-2 rounded-md px-2 py-1 text-xs font-medium ${
+                conflictCounts.errors > 0
+                  ? 'bg-red-100 text-red-700'
+                  : conflictCounts.warnings > 0
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              Conflicts: {conflictCounts.errors + conflictCounts.warnings}
+            </button>
           </div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => setDate(nextDate(selectedDate, -1))} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
@@ -371,6 +409,63 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             <p>Timezone: {companyTimezone}</p>
             <p>Foremen loaded: {foremen.length}</p>
             <p>Jobs loaded: {jobs.length}</p>
+          </section>
+        ) : null}
+
+        {conflictsOpen ? (
+          <section className="mb-3 rounded-md border border-slate-200 bg-white p-3 text-sm">
+            <h2 className="font-semibold text-slate-900">Conflict Summary</h2>
+            {conflictCounts.all.length === 0 ? (
+              <p className="mt-2 text-slate-600">No active conflicts for this date.</p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {conflictCounts.all.map((conflict, index) => {
+                  const conflictKey = `${conflict.type}:${conflict.affected_entities[0]?.id ?? conflict.message}`;
+                  const dismissed = dismissedConflictKeys.has(conflictKey);
+                  return (
+                    <li
+                      key={`${conflict.type}-${index}`}
+                      className={`rounded border px-3 py-2 ${
+                        dismissed ? 'border-slate-200 bg-slate-50 text-slate-500' : 'border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${
+                            conflict.severity === 'ERROR'
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          {conflict.type}
+                        </span>
+                        {!dismissed ? (
+                          <button
+                            type="button"
+                            className="text-xs text-slate-600 underline"
+                            onClick={() =>
+                              dismissDispatchConflict({
+                                conflictType: conflict.type,
+                                conflictKey: conflict.affected_entities[0]?.id ?? conflict.message,
+                              })
+                            }
+                          >
+                            Dismiss
+                          </button>
+                        ) : null}
+                      </div>
+                      <p className="mt-1">{conflict.message}</p>
+                      {conflict.affected_entities.length > 0 ? (
+                        <p className="mt-1 text-xs">
+                          Affected:{' '}
+                          {conflict.affected_entities.map((entity) => entity.name).join(', ')}
+                        </p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
         ) : null}
 

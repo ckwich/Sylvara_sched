@@ -1,9 +1,13 @@
-import { Prisma, SegmentType } from '@prisma/client';
+import { Prisma, SegmentType, type PrismaClient } from '@prisma/client';
 import { DEFAULT_TIMEZONE, wallClockHoursBetween } from '@sylvara/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { UNAUTHENTICATED_ERROR } from '../../http/actor.js';
 import { requireActor, requireMutationPermission } from '../../http/route-helpers.js';
+import {
+  checkPersonConflict,
+  checkResourceAvailability,
+} from '../../services/availability-service.js';
 import { computeScheduledEffectiveHours } from '../../scheduling/job-state.js';
 import {
   crossesLocalMidnight,
@@ -32,6 +36,17 @@ const updateSegmentBodySchema = z.object({
   endDatetime: z.string().datetime({ offset: true }).optional(),
   scheduledHoursOverride: z.number().positive().nullable().optional(),
   notes: z.string().nullable().optional(),
+});
+const segmentIdParamsSchema = z.object({
+  segmentId: uuidSchema,
+});
+const reservationIdParamsSchema = z.object({
+  segmentId: uuidSchema,
+  reservationId: uuidSchema,
+});
+const createReservationBodySchema = z.object({
+  resourceId: uuidSchema,
+  quantity: z.number().int().min(1).optional().default(1),
 });
 
 type VacatedWindow = {
@@ -137,7 +152,288 @@ async function createVacatedSlots(input: {
   }
 }
 
+async function collectAvailabilityWarnings(input: {
+  prisma: PrismaClient;
+  serviceDate: string;
+  rosterId: string;
+}): Promise<Array<{ code: string; message: string }>> {
+  const prismaAny = input.prisma as unknown as {
+    resourceReservation?: { findMany?: (...args: unknown[]) => Promise<Array<{ resourceId: string }>> };
+    foremanDayRosterMember?: { findMany?: (...args: unknown[]) => Promise<Array<{ personResourceId: string }>> };
+  };
+  if (!prismaAny.resourceReservation?.findMany || !prismaAny.foremanDayRosterMember?.findMany) {
+    return [];
+  }
+
+  const [reservations, rosterMembers] = await Promise.all([
+    input.prisma.resourceReservation.findMany({
+      where: {
+        deletedAt: null,
+        scheduleSegment: {
+          deletedAt: null,
+          segmentRosterLink: {
+            is: {
+              roster: {
+                date: new Date(`${input.serviceDate}T00:00:00.000Z`),
+                deletedAt: null,
+              },
+            },
+          },
+        },
+      },
+      select: {
+        resourceId: true,
+      },
+    }),
+    input.prisma.foremanDayRosterMember.findMany({
+      where: {
+        rosterId: input.rosterId,
+        deletedAt: null,
+      },
+      select: {
+        personResourceId: true,
+      },
+    }),
+  ]);
+
+  const warnings: Array<{ code: string; message: string }> = [];
+  const resourceIds = Array.from(new Set(reservations.map((item) => item.resourceId)));
+  for (const resourceId of resourceIds) {
+    const warning = await checkResourceAvailability(input.prisma, input.serviceDate, resourceId);
+    if (warning) {
+      warnings.push({
+        code: warning.code,
+        message: `${warning.resourceName} reserved ${warning.reserved} > available ${warning.available}.`,
+      });
+    }
+  }
+
+  const personIds = Array.from(new Set(rosterMembers.map((item) => item.personResourceId)));
+  for (const personId of personIds) {
+    const warning = await checkPersonConflict(input.prisma, input.serviceDate, personId);
+    if (warning) {
+      warnings.push({
+        code: warning.code,
+        message: `${warning.resourceName} appears on multiple rosters for ${input.serviceDate}.`,
+      });
+    }
+  }
+
+  return warnings;
+}
+
 export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
+  app.get('/api/schedule-segments/:segmentId/reservations', async (request, reply) => {
+    const params = segmentIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid segment id.',
+          details: params.error.flatten(),
+        },
+      });
+    }
+
+    const reservations = await deps.prisma.resourceReservation.findMany({
+      where: {
+        scheduleSegmentId: params.data.segmentId,
+        deletedAt: null,
+      },
+      include: {
+        resource: true,
+      },
+      orderBy: {
+        id: 'asc',
+      },
+    });
+
+    return reply.code(200).send({ reservations });
+  });
+
+  app.post('/api/schedule-segments/:segmentId/reservations', async (request, reply) => {
+    const actor = await requireActor({
+      prisma: deps.prisma,
+      request,
+      reply,
+      unauthenticatedBody: UNAUTHENTICATED_ERROR,
+    });
+    if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const params = segmentIdParamsSchema.safeParse(request.params);
+    const body = createReservationBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid reservation payload.',
+          details: {
+            params: params.success ? undefined : params.error.flatten(),
+            body: body.success ? undefined : body.error.flatten(),
+          },
+        },
+      });
+    }
+
+    const [segment, resource] = await Promise.all([
+      deps.prisma.scheduleSegment.findFirst({
+        where: {
+          id: params.data.segmentId,
+          deletedAt: null,
+        },
+        select: { id: true },
+      }),
+      deps.prisma.resource.findFirst({
+        where: {
+          id: body.data.resourceId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          resourceType: true,
+          inventoryQuantity: true,
+          name: true,
+        },
+      }),
+    ]);
+
+    if (!segment) {
+      return reply.code(404).send({
+        error: {
+          code: 'SEGMENT_NOT_FOUND',
+          message: 'Schedule segment not found.',
+          details: {},
+        },
+      });
+    }
+    if (!resource) {
+      return reply.code(404).send({
+        error: {
+          code: 'RESOURCE_NOT_FOUND',
+          message: 'Resource not found.',
+          details: {},
+        },
+      });
+    }
+
+    const requestedQuantity = body.data.quantity;
+    if (resource.resourceType === 'PERSON' && requestedQuantity !== 1) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'PERSON reservations must have quantity 1.',
+          details: {},
+        },
+      });
+    }
+    if (resource.resourceType === 'EQUIPMENT' && requestedQuantity > resource.inventoryQuantity) {
+      return reply.code(400).send({
+        error: {
+          code: 'RESOURCE_CAPACITY_EXCEEDED',
+          message: 'Requested quantity exceeds inventory quantity.',
+          details: {
+            requested: requestedQuantity,
+            available: resource.inventoryQuantity,
+          },
+        },
+      });
+    }
+
+    const reservation = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const existing = await tx.resourceReservation.findFirst({
+        where: {
+          scheduleSegmentId: segment.id,
+          resourceId: resource.id,
+        },
+        select: { id: true, deletedAt: true },
+      });
+
+      if (existing) {
+        return tx.resourceReservation.update({
+          where: { id: existing.id },
+          data: {
+            quantity: resource.resourceType === 'PERSON' ? 1 : requestedQuantity,
+            deletedAt: null,
+          },
+          include: {
+            resource: true,
+          },
+        });
+      }
+
+      return tx.resourceReservation.create({
+        data: {
+          scheduleSegmentId: segment.id,
+          resourceId: resource.id,
+          quantity: resource.resourceType === 'PERSON' ? 1 : requestedQuantity,
+        },
+        include: {
+          resource: true,
+        },
+      });
+    });
+
+    return reply.code(201).send({ reservation });
+  });
+
+  app.delete('/api/schedule-segments/:segmentId/reservations/:reservationId', async (request, reply) => {
+    const actor = await requireActor({
+      prisma: deps.prisma,
+      request,
+      reply,
+      unauthenticatedBody: UNAUTHENTICATED_ERROR,
+    });
+    if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const params = reservationIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid reservation id.',
+          details: params.error.flatten(),
+        },
+      });
+    }
+
+    const existing = await deps.prisma.resourceReservation.findFirst({
+      where: {
+        id: params.data.reservationId,
+        scheduleSegmentId: params.data.segmentId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+    if (!existing) {
+      return reply.code(404).send({
+        error: {
+          code: 'RESERVATION_NOT_FOUND',
+          message: 'Reservation not found.',
+          details: {},
+        },
+      });
+    }
+
+    await deps.prisma.resourceReservation.update({
+      where: { id: existing.id },
+      data: { deletedAt: new Date() },
+    });
+
+    return reply.code(204).send();
+  });
+
   app.get('/api/jobs/:jobId/schedule-segments', async (request, reply) => {
     const paramsSchema = z.object({ jobId: uuidSchema });
     const params = paramsSchema.safeParse(request.params);
@@ -383,10 +679,16 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       jobId: body.jobId,
       timezone,
     });
+    const warnings = await collectAvailabilityWarnings({
+      prisma: deps.prisma,
+      serviceDate: rosterLocalDate,
+      rosterId: body.rosterId,
+    });
 
     return reply.code(200).send({
       segment: created,
       jobState,
+      warnings,
     });
   });
 

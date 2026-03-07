@@ -792,6 +792,29 @@ export type ComparableReportQuery = {
   equipment?: 'CRANE' | 'BUCKET' | 'ALL';
 };
 
+export type DispatchConflict = {
+  type: 'EQUIPMENT_DOUBLE_BOOKING' | 'PERSON_CONFLICT' | 'CAPACITY_WARNING' | 'JOB_OVERLAP';
+  severity: 'ERROR' | 'WARNING';
+  message: string;
+  affected_entities: Array<{ id: string; name: string; type: string }>;
+  foreman_ids: string[];
+};
+
+export type DispatchConflictsResponse = {
+  date: string;
+  conflicts: DispatchConflict[];
+};
+
+export type ConflictDismissal = {
+  id: string;
+  dismissedByUserId: string;
+  conflictDate: string;
+  conflictType: string;
+  conflictKey: string;
+  dismissedAt: string;
+  deletedAt: string | null;
+};
+
 export async function getForemanDaySchedule(
   foremanPersonId: string,
   date: string,
@@ -1144,6 +1167,76 @@ export async function getComparableReport(
     throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as ComparableReportResponse;
+}
+
+export async function getConflicts(date: string): Promise<DispatchConflictsResponse> {
+  const url = `/api/conflicts?date=${encodeURIComponent(date)}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as DispatchConflictsResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as DispatchConflictsResponse;
+}
+
+export async function dismissConflict(input: {
+  date: string;
+  conflictType: string;
+  conflictKey: string;
+}): Promise<{ dismissal: ConflictDismissal }> {
+  const url = '/api/conflicts/dismiss';
+  let response: Response;
+  try {
+    response = await apiFetch(url, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { dismissal?: ConflictDismissal } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as { dismissal: ConflictDismissal };
+}
+
+export async function getConflictDismissals(date: string): Promise<{ dismissals: ConflictDismissal[] }> {
+  const url = `/api/conflicts/dismissals?date=${encodeURIComponent(date)}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { dismissals?: ConflictDismissal[] } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as { dismissals: ConflictDismissal[] };
 }
 
 

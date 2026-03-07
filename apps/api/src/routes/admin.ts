@@ -6,6 +6,7 @@ import {
   notFoundError,
   parseDateOnlyUtc,
   requireActor,
+  requireMutationPermission,
   requireManagerPermission,
   validationError,
 } from '../http/route-helpers.js';
@@ -26,6 +27,7 @@ const minuteOfDaySchema = z
 
 const resourcesQuerySchema = z.object({
   type: z.nativeEnum(ResourceType).optional(),
+  active: z.coerce.boolean().optional(),
 });
 
 const createResourceBodySchema = z.object({
@@ -33,6 +35,7 @@ const createResourceBodySchema = z.object({
   resourceType: z.nativeEnum(ResourceType),
   isForeman: z.boolean().optional(),
   active: z.boolean().optional(),
+  inventoryQuantity: z.number().int().min(1).optional(),
 });
 
 const updateResourceBodySchema = z
@@ -68,6 +71,9 @@ const updateHomeBaseBodySchema = createHomeBaseBodySchema
 const foremanIdParamsSchema = z.object({
   foremanId: uuidSchema,
 });
+const rosterLookupQuerySchema = z.object({
+  date: dateOnlySchema,
+});
 
 const createRosterBodySchema = z.object({
   date: dateOnlySchema,
@@ -79,7 +85,7 @@ const createRosterBodySchema = z.object({
 
 const rosterMemberParamsSchema = z.object({
   foremanId: uuidSchema,
-  date: dateOnlySchema,
+  rosterKey: z.string(),
 });
 
 const createRosterMemberBodySchema = z.object({
@@ -89,8 +95,13 @@ const createRosterMemberBodySchema = z.object({
 
 const deleteRosterMemberParamsSchema = z.object({
   foremanId: uuidSchema,
-  date: dateOnlySchema,
-  personResourceId: uuidSchema,
+  rosterKey: z.string(),
+  memberId: uuidSchema,
+});
+
+const deleteRosterParamsSchema = z.object({
+  foremanId: uuidSchema,
+  rosterId: uuidSchema,
 });
 
 function conflictError(reply: FastifyReply, code: string, message: string) {
@@ -159,6 +170,34 @@ function isUniqueConstraintError(error: unknown): boolean {
   );
 }
 
+async function findRosterByKey(input: {
+  prisma: PrismaClient;
+  foremanId: string;
+  rosterKey: string;
+}) {
+  if (uuidSchema.safeParse(input.rosterKey).success) {
+    return input.prisma.foremanDayRoster.findFirst({
+      where: {
+        id: input.rosterKey,
+        foremanPersonId: input.foremanId,
+        deletedAt: null,
+      },
+    });
+  }
+
+  const parsedDate = parseDateOnlyUtc(input.rosterKey);
+  if (!parsedDate) {
+    return null;
+  }
+  return input.prisma.foremanDayRoster.findFirst({
+    where: {
+      foremanPersonId: input.foremanId,
+      date: parsedDate,
+      deletedAt: null,
+    },
+  });
+}
+
 export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
   app.get('/api/resources', async (request, reply) => {
     const query = resourcesQuerySchema.safeParse(request.query);
@@ -170,6 +209,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
       where: {
         deletedAt: null,
         ...(query.data.type ? { resourceType: query.data.type } : {}),
+        ...(query.data.active !== undefined ? { active: query.data.active } : {}),
       },
       orderBy: [{ resourceType: 'asc' }, { name: 'asc' }],
     });
@@ -198,7 +238,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
         data: {
           name: payload.name,
           resourceType,
-          inventoryQuantity: resourceType === ResourceType.PERSON ? 1 : 1,
+          inventoryQuantity: resourceType === ResourceType.PERSON ? 1 : (payload.inventoryQuantity ?? 1),
           isForeman: resourceType === ResourceType.PERSON ? (payload.isForeman ?? false) : false,
           active: payload.active ?? true,
         },
@@ -260,22 +300,15 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
       return notFoundError(reply, 'RESOURCE_NOT_FOUND', 'Resource not found.');
     }
 
-    if (existing.resourceType === ResourceType.PERSON && body.data.inventoryQuantity !== undefined) {
-      return reply.code(400).send({
-        error: {
-          code: 'PERSON_INVENTORY_IMMUTABLE',
-          message: 'PERSON resource inventoryQuantity cannot be changed.',
-          details: {},
-        },
-      });
-    }
-
-    const updateData: { name?: string; active?: boolean } = {};
+    const updateData: { name?: string; active?: boolean; inventoryQuantity?: number } = {};
     if (body.data.name !== undefined) {
       updateData.name = body.data.name;
     }
     if (body.data.active !== undefined) {
       updateData.active = body.data.active;
+    }
+    if (existing.resourceType !== ResourceType.PERSON && body.data.inventoryQuantity !== undefined) {
+      updateData.inventoryQuantity = body.data.inventoryQuantity;
     }
 
     const resource = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -313,6 +346,53 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     });
 
     return reply.code(200).send({ resource });
+  });
+
+  app.delete('/api/resources/:id', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const params = resourceIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid resource id.', params.error.flatten());
+    }
+
+    const existing = await deps.prisma.resource.findFirst({
+      where: {
+        id: params.data.id,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'RESOURCE_NOT_FOUND', 'Resource not found.');
+    }
+
+    const deletedAt = new Date();
+    await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.resource.update({
+        where: { id: existing.id },
+        data: { deletedAt },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'Resource',
+          entityId: existing.id,
+          actionType: 'DELETED',
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+          diff: { deletedAt } as Prisma.InputJsonValue,
+        },
+      });
+    });
+
+    return reply.code(204).send();
   });
 
   app.get('/api/home-bases', async (_request, reply) => {
@@ -498,6 +578,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
         deletedAt: null,
         resourceType: ResourceType.PERSON,
         isForeman: true,
+        active: true,
       },
       orderBy: {
         name: 'asc',
@@ -507,13 +588,17 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     return reply.code(200).send({ foremen });
   });
 
-  app.get('/api/foremen/:foremanId/rosters/:date', async (request, reply) => {
-    const params = rosterMemberParamsSchema.safeParse(request.params);
-    if (!params.success) {
-      return validationError(reply, 'Invalid roster lookup request.', params.error.flatten());
+  app.get('/api/foremen/:foremanId/rosters', async (request, reply) => {
+    const params = foremanIdParamsSchema.safeParse(request.params);
+    const query = rosterLookupQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      return validationError(reply, 'Invalid roster lookup request.', {
+        params: params.success ? undefined : params.error.flatten(),
+        query: query.success ? undefined : query.error.flatten(),
+      });
     }
 
-    const date = parseDateOnlyUtc(params.data.date);
+    const date = parseDateOnlyUtc(query.data.date);
     if (!date) {
       return validationError(reply, 'Invalid roster date.', {});
     }
@@ -542,26 +627,35 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     return reply.code(200).send({ roster });
   });
 
-  app.get('/api/foremen/:foremanId/rosters/:date/members', async (request, reply) => {
+  app.get('/api/foremen/:foremanId/rosters/:rosterKey', async (request, reply) => {
+    const params = rosterMemberParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid roster lookup request.', params.error.flatten());
+    }
+
+    const roster = await findRosterByKey({
+      prisma: deps.prisma,
+      foremanId: params.data.foremanId,
+      rosterKey: params.data.rosterKey,
+    });
+
+    if (!roster) {
+      return notFoundError(reply, 'ROSTER_NOT_FOUND', 'Roster not found.');
+    }
+
+    return reply.code(200).send({ roster });
+  });
+
+  app.get('/api/foremen/:foremanId/rosters/:rosterKey/members', async (request, reply) => {
     const params = rosterMemberParamsSchema.safeParse(request.params);
     if (!params.success) {
       return validationError(reply, 'Invalid roster members lookup request.', params.error.flatten());
     }
 
-    const date = parseDateOnlyUtc(params.data.date);
-    if (!date) {
-      return validationError(reply, 'Invalid roster date.', {});
-    }
-
-    const roster = await deps.prisma.foremanDayRoster.findFirst({
-      where: {
-        foremanPersonId: params.data.foremanId,
-        date,
-        deletedAt: null,
-      },
-      select: {
-        id: true,
-      },
+    const roster = await findRosterByKey({
+      prisma: deps.prisma,
+      foremanId: params.data.foremanId,
+      rosterKey: params.data.rosterKey,
     });
 
     if (!roster) {
@@ -603,7 +697,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     if (!actor) {
       return;
     }
-    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -654,7 +748,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     });
 
     if (existingRoster) {
-      return reply.code(200).send({ roster: existingRoster });
+      return conflictError(reply, 'ROSTER_ALREADY_EXISTS', 'Roster already exists for foreman and date.');
     }
 
     const roster = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -693,12 +787,12 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     return reply.code(201).send({ roster });
   });
 
-  app.post('/api/foremen/:foremanId/rosters/:date/members', async (request, reply) => {
+  app.post('/api/foremen/:foremanId/rosters/:rosterKey/members', async (request, reply) => {
     const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
       return;
     }
-    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -711,25 +805,13 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const serviceDate = parseDateOnlyUtc(params.data.date);
-    if (!serviceDate) {
-      return validationError(reply, 'Invalid roster date.', {});
-    }
-
-    const roster = await deps.prisma.foremanDayRoster.findFirst({
-      where: {
-        foremanPersonId: params.data.foremanId,
-        date: serviceDate,
-        deletedAt: null,
-      },
-      select: {
-        id: true,
-        date: true,
-        foremanPersonId: true,
-      },
+    const roster = await findRosterByKey({
+      prisma: deps.prisma,
+      foremanId: params.data.foremanId,
+      rosterKey: params.data.rosterKey,
     });
     if (!roster) {
-      return notFoundError(reply, 'ROSTER_NOT_FOUND', 'Roster not found for foreman and date.');
+      return notFoundError(reply, 'ROSTER_NOT_FOUND', 'Roster not found.');
     }
 
     const person = await deps.prisma.resource.findFirst({
@@ -764,7 +846,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
             actorDisplay: actor.actorDisplay,
             diff: {
               rosterId: created.rosterId,
-              date: params.data.date,
+              date: roster.date.toISOString().slice(0, 10),
               personResourceId: created.personResourceId,
               role: created.role,
             },
@@ -786,12 +868,12 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     }
   });
 
-  app.delete('/api/foremen/:foremanId/rosters/:date/members/:personResourceId', async (request, reply) => {
+  app.delete('/api/foremen/:foremanId/rosters/:rosterKey/members/:memberId', async (request, reply) => {
     const actor = await requireActor({ request, reply, prisma: deps.prisma });
     if (!actor) {
       return;
     }
-    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
       return;
     }
 
@@ -800,27 +882,19 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
       return validationError(reply, 'Invalid roster member delete request.', params.error.flatten());
     }
 
-    const serviceDate = parseDateOnlyUtc(params.data.date);
-    if (!serviceDate) {
-      return validationError(reply, 'Invalid roster date.', {});
-    }
-
-    const roster = await deps.prisma.foremanDayRoster.findFirst({
-      where: {
-        foremanPersonId: params.data.foremanId,
-        date: serviceDate,
-        deletedAt: null,
-      },
-      select: { id: true },
+    const roster = await findRosterByKey({
+      prisma: deps.prisma,
+      foremanId: params.data.foremanId,
+      rosterKey: params.data.rosterKey,
     });
     if (!roster) {
-      return notFoundError(reply, 'ROSTER_NOT_FOUND', 'Roster not found for foreman and date.');
+      return notFoundError(reply, 'ROSTER_NOT_FOUND', 'Roster not found.');
     }
 
     const member = await deps.prisma.foremanDayRosterMember.findFirst({
       where: {
+        id: params.data.memberId,
         rosterId: roster.id,
-        personResourceId: params.data.personResourceId,
         deletedAt: null,
       },
       select: { id: true },
@@ -830,8 +904,9 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     }
 
     await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.foremanDayRosterMember.delete({
+      await tx.foremanDayRosterMember.update({
         where: { id: member.id },
+        data: { deletedAt: new Date() },
       });
 
       await tx.activityLog.create({
@@ -843,9 +918,68 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
           actorDisplay: actor.actorDisplay,
           diff: {
             rosterId: roster.id,
-            date: params.data.date,
-            personResourceId: params.data.personResourceId,
+            memberId: member.id,
           },
+        },
+      });
+    });
+
+    return reply.code(204).send();
+  });
+
+  app.delete('/api/foremen/:foremanId/rosters/:rosterId', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const params = deleteRosterParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid roster delete request.', params.error.flatten());
+    }
+
+    const roster = await deps.prisma.foremanDayRoster.findFirst({
+      where: {
+        id: params.data.rosterId,
+        foremanPersonId: params.data.foremanId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+    if (!roster) {
+      return notFoundError(reply, 'ROSTER_NOT_FOUND', 'Roster not found.');
+    }
+
+    const deletedAt = new Date();
+    await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.foremanDayRoster.update({
+        where: { id: roster.id },
+        data: { deletedAt },
+      });
+
+      await tx.foremanDayRosterMember.updateMany({
+        where: { rosterId: roster.id, deletedAt: null },
+        data: { deletedAt },
+      });
+
+      await tx.segmentRosterLink.updateMany({
+        where: { rosterId: roster.id, deletedAt: null },
+        data: { deletedAt },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'ForemanDayRoster',
+          entityId: roster.id,
+          actionType: 'DELETED',
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+          diff: { deletedAt } as Prisma.InputJsonValue,
         },
       });
     });

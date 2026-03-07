@@ -1,10 +1,14 @@
-import { Prisma, SegmentType } from '@prisma/client';
+import { Prisma, SegmentType, type PrismaClient } from '@prisma/client';
 import { resolveAnchorMinute } from '@sylvara/db';
 import { DEFAULT_TIMEZONE } from '@sylvara/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { UNAUTHENTICATED_ERROR } from '../../http/actor.js';
 import { requireActor, requireMutationPermission } from '../../http/route-helpers.js';
+import {
+  checkPersonConflict,
+  checkResourceAvailability,
+} from '../../services/availability-service.js';
 import {
   findFirstFittingStartMinute,
   findStartAtClickedTime,
@@ -61,6 +65,74 @@ function splitToLocalDayIntervals(input: {
       },
     ];
   });
+}
+
+async function collectAvailabilityWarnings(input: {
+  prisma: PrismaClient;
+  serviceDate: string;
+  rosterId: string;
+}): Promise<Array<{ code: string; message: string }>> {
+  const prismaAny = input.prisma as unknown as {
+    resourceReservation?: { findMany?: (...args: unknown[]) => Promise<Array<{ resourceId: string }>> };
+    foremanDayRosterMember?: { findMany?: (...args: unknown[]) => Promise<Array<{ personResourceId: string }>> };
+  };
+  if (!prismaAny.resourceReservation?.findMany || !prismaAny.foremanDayRosterMember?.findMany) {
+    return [];
+  }
+
+  const [reservations, rosterMembers] = await Promise.all([
+    input.prisma.resourceReservation.findMany({
+      where: {
+        deletedAt: null,
+        scheduleSegment: {
+          deletedAt: null,
+          segmentRosterLink: {
+            is: {
+              roster: {
+                date: new Date(`${input.serviceDate}T00:00:00.000Z`),
+                deletedAt: null,
+              },
+            },
+          },
+        },
+      },
+      select: {
+        resourceId: true,
+      },
+    }),
+    input.prisma.foremanDayRosterMember.findMany({
+      where: {
+        rosterId: input.rosterId,
+        deletedAt: null,
+      },
+      select: {
+        personResourceId: true,
+      },
+    }),
+  ]);
+
+  const warnings: Array<{ code: string; message: string }> = [];
+  for (const resourceId of Array.from(new Set(reservations.map((item) => item.resourceId)))) {
+    const warning = await checkResourceAvailability(input.prisma, input.serviceDate, resourceId);
+    if (warning) {
+      warnings.push({
+        code: warning.code,
+        message: `${warning.resourceName} reserved ${warning.reserved} > available ${warning.available}.`,
+      });
+    }
+  }
+
+  for (const personId of Array.from(new Set(rosterMembers.map((item) => item.personResourceId)))) {
+    const warning = await checkPersonConflict(input.prisma, input.serviceDate, personId);
+    if (warning) {
+      warnings.push({
+        code: warning.code,
+        message: `${warning.resourceName} appears on multiple rosters for ${input.serviceDate}.`,
+      });
+    }
+  }
+
+  return warnings;
 }
 
 export function registerOneClickRoutes(app: FastifyInstance, deps: AppDeps) {
@@ -318,9 +390,15 @@ export function registerOneClickRoutes(app: FastifyInstance, deps: AppDeps) {
       return segment;
     });
 
+    const availabilityWarnings = await collectAvailabilityWarnings({
+      prisma: deps.prisma,
+      serviceDate: body.date,
+      rosterId: roster.id,
+    });
+
     return reply.code(200).send({
       result: 'ACCEPT',
-      warnings,
+      warnings: [...warnings, ...availabilityWarnings],
       segment: result,
     });
   });

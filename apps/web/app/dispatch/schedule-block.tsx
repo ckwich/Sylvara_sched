@@ -21,6 +21,7 @@ export type ScheduleBlockData = {
   heightPx: number;
   startMinuteOfDay: number;
   endMinuteOfDay: number;
+  hasConflict: boolean;
 };
 
 type ScheduleBlockProps = {
@@ -94,7 +95,9 @@ export default function ScheduleBlock(props: ScheduleBlockProps) {
     <div
       ref={rootRef}
       data-schedule-block="true"
-      className={`group relative h-full rounded-md border shadow-sm ${colorClassForState(props.block.state)}`}
+      className={`group relative h-full rounded-md border shadow-sm ${
+        props.block.hasConflict ? 'ring-2 ring-red-400 ring-offset-1' : ''
+      } ${colorClassForState(props.block.state)}`}
     >
       <button
         type="button"
