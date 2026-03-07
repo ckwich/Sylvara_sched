@@ -127,7 +127,14 @@ async function createVacatedSlots(input: {
   sourceSegmentId: string;
   equipmentType: 'CRANE' | 'BUCKET';
   timezone: string;
-}) {
+}): Promise<Array<{ id: string; sourceAction: 'DELETED' | 'MOVED' | 'SHORTENED'; startDatetime: Date; endDatetime: Date; slotHours: Prisma.Decimal }>> {
+  const createdSlots: Array<{
+    id: string;
+    sourceAction: 'DELETED' | 'MOVED' | 'SHORTENED';
+    startDatetime: Date;
+    endDatetime: Date;
+    slotHours: Prisma.Decimal;
+  }> = [];
   for (const window of input.windows) {
     const slotHours = computeWallClockHours({
       startDatetime: window.startDatetime,
@@ -138,7 +145,7 @@ async function createVacatedSlots(input: {
       continue;
     }
 
-    await input.tx.vacatedSlot.create({
+    const created = (await input.tx.vacatedSlot.create({
       data: {
         sourceSegmentId: input.sourceSegmentId,
         sourceAction: window.sourceAction,
@@ -148,8 +155,27 @@ async function createVacatedSlots(input: {
         equipmentType: input.equipmentType,
         status: 'OPEN',
       },
-    });
+      select: {
+        id: true,
+        sourceAction: true,
+        startDatetime: true,
+        endDatetime: true,
+        slotHours: true,
+      },
+    })) as
+      | {
+          id: string;
+          sourceAction: 'DELETED' | 'MOVED' | 'SHORTENED';
+          startDatetime: Date;
+          endDatetime: Date;
+          slotHours: Prisma.Decimal;
+        }
+      | undefined;
+    if (created?.id) {
+      createdSlots.push(created);
+    }
   }
+  return createdSlots;
 }
 
 async function collectAvailabilityWarnings(input: {
@@ -889,13 +915,32 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
         },
       });
 
-      await createVacatedSlots({
+      const createdVacatedSlots = await createVacatedSlots({
         tx,
         windows: vacatedWindows,
         sourceSegmentId: existing.id,
         equipmentType: jobForVacatedSlot.equipmentType,
         timezone,
       });
+      for (const vacatedSlot of createdVacatedSlots) {
+        await tx.activityLog.create({
+          data: {
+            entityType: 'VacatedSlot',
+            entityId: vacatedSlot.id,
+            actionType: 'VACATED_SLOT_CREATED',
+            actorUserId,
+            actorDisplay,
+            diff: {
+              sourceSegmentId: existing.id,
+              sourceAction: vacatedSlot.sourceAction,
+              startDatetime: vacatedSlot.startDatetime,
+              endDatetime: vacatedSlot.endDatetime,
+              slotHours: vacatedSlot.slotHours.toString(),
+              equipmentType: jobForVacatedSlot.equipmentType,
+            },
+          },
+        });
+      }
 
       await tx.scheduleEvent.create({
         data: {
@@ -931,7 +976,10 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
         },
       });
 
-      return segment;
+      return {
+        segment,
+        vacatedSlotId: createdVacatedSlots[0]?.id ?? null,
+      };
     });
 
     const jobState = await getDerivedJobState({
@@ -941,8 +989,9 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
     });
 
     return reply.code(200).send({
-      segment: updated,
+      segment: updated.segment,
       jobState,
+      vacatedSlotId: updated.vacatedSlotId,
     });
   });
 
@@ -1016,13 +1065,13 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
     const deletedAt = new Date();
-    await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const deletedResult = await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.scheduleSegment.update({
         where: { id: existing.id },
         data: { deletedAt },
       });
 
-      await createVacatedSlots({
+      const createdVacatedSlots = await createVacatedSlots({
         tx,
         windows: [
           {
@@ -1035,6 +1084,25 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
         equipmentType: jobForVacatedSlot.equipmentType,
         timezone,
       });
+      for (const vacatedSlot of createdVacatedSlots) {
+        await tx.activityLog.create({
+          data: {
+            entityType: 'VacatedSlot',
+            entityId: vacatedSlot.id,
+            actionType: 'VACATED_SLOT_CREATED',
+            actorUserId,
+            actorDisplay,
+            diff: {
+              sourceSegmentId: existing.id,
+              sourceAction: vacatedSlot.sourceAction,
+              startDatetime: vacatedSlot.startDatetime,
+              endDatetime: vacatedSlot.endDatetime,
+              slotHours: vacatedSlot.slotHours.toString(),
+              equipmentType: jobForVacatedSlot.equipmentType,
+            },
+          },
+        });
+      }
 
       await tx.scheduleEvent.create({
         data: {
@@ -1063,6 +1131,10 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
           },
         },
       });
+
+      return {
+        vacatedSlotId: createdVacatedSlots[0]?.id ?? null,
+      };
     });
 
     const jobState = await getDerivedJobState({
@@ -1074,6 +1146,7 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
     return reply.code(200).send({
       ok: true,
       jobState,
+      vacatedSlotId: deletedResult.vacatedSlotId,
     });
   });
 

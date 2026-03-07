@@ -11,6 +11,7 @@ import { registerJobRoutes } from './routes/jobs.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSnapshotRoutes } from './routes/snapshots.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
+import { registerPushupRoutes } from './routes/pushup.js';
 import { startWeeklySnapshotJob } from './jobs/weekly-snapshot-job.js';
 
 type ServerAuthConfig = {
@@ -97,6 +98,7 @@ export function buildServer(
   registerJobRoutes(app, { prisma: deps.prisma });
   registerReportRoutes(app, { prisma: deps.prisma });
   registerSnapshotRoutes(app, { prisma: deps.prisma });
+  registerPushupRoutes(app, { prisma: deps.prisma });
 
   return app;
 }

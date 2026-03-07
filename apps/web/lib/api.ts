@@ -736,6 +736,41 @@ export type CreateScheduleAttemptResponse = {
   error?: { code: string; message: string };
 };
 
+export type PushupVacatedSlotSummary = {
+  id: string;
+  startDatetime: string;
+  endDatetime: string;
+  slotHours: number;
+  equipmentType: 'CRANE' | 'BUCKET';
+  status: 'OPEN' | 'USED' | 'DISMISSED';
+};
+
+export type PushupCandidate = {
+  jobId: string;
+  customerId: string;
+  customerName: string;
+  jobSiteAddress: string;
+  town: string;
+  equipmentType: 'CRANE' | 'BUCKET';
+  craneModelSuitability: 'MODEL_1090' | 'MODEL_1060' | 'EITHER' | null;
+  estimateHoursCurrent: number;
+  remainingHours: number;
+  allocatedHours: number;
+  approvalDate: string | null;
+  salesRepCode: string;
+  winterFlag: boolean;
+  frozenGroundFlag: boolean;
+  activeBlockers: Array<{ id: string; reason: string; notes: string | null }>;
+  requirements: Array<{ id: string; requirementType: string; status: string }>;
+  frictionScore: number;
+  tier: 1 | 2;
+};
+
+export type PushupCandidatesResponse = {
+  vacatedSlot: PushupVacatedSlotSummary;
+  candidates: PushupCandidate[];
+};
+
 export type SummReportRow = {
   sales_rep_code: string;
   bucket_scheduled_dollars: number;
@@ -1085,12 +1120,109 @@ export async function createScheduleAttempt(
   return body as CreateScheduleAttemptResponse;
 }
 
-export async function removeScheduleSegment(segmentId: string): Promise<void> {
+export async function removeScheduleSegment(segmentId: string): Promise<{ vacatedSlotId: string | null }> {
   const url = `/api/schedule-segments/${segmentId}`;
   let response: Response;
   try {
     response = await apiFetch(url, {
       method: 'DELETE',
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { vacatedSlotId?: string | null } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return { vacatedSlotId: (body as { vacatedSlotId?: string | null })?.vacatedSlotId ?? null };
+}
+
+export async function getPushupCandidates(vacatedSlotId: string): Promise<PushupCandidatesResponse> {
+  const url = `/api/pushup/candidates?vacatedSlotId=${encodeURIComponent(vacatedSlotId)}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as PushupCandidatesResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as PushupCandidatesResponse;
+}
+
+export async function getOpenPushupSlots(): Promise<PushupVacatedSlotSummary[]> {
+  const url = '/api/pushup/open';
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as PushupVacatedSlotSummary[] | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as PushupVacatedSlotSummary[];
+}
+
+export async function applyPushupSuggestion(payload: {
+  vacatedSlotId: string;
+  jobId: string;
+  allocatedHours: number;
+  startDatetime: string;
+}): Promise<CreateScheduleAttemptResponse & { vacatedSlotId?: string | null }> {
+  const url = '/api/pushup/apply';
+  let response: Response;
+  try {
+    response = await apiFetch(url, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as (CreateScheduleAttemptResponse & {
+    vacatedSlotId?: string | null;
+  }) | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as CreateScheduleAttemptResponse & { vacatedSlotId?: string | null };
+}
+
+export async function dismissPushupSuggestion(vacatedSlotId: string): Promise<void> {
+  const url = '/api/pushup/dismiss';
+  let response: Response;
+  try {
+    response = await apiFetch(url, {
+      method: 'POST',
+      body: JSON.stringify({ vacatedSlotId }),
     });
   } catch (error) {
     throw new ApiRequestError({

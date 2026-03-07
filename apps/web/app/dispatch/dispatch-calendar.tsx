@@ -4,6 +4,7 @@ import { localDateMinuteToUtc, utcToLocalParts } from '@sylvara/shared';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  getOpenPushupSlots,
   createForemanRoster,
   createScheduleAttempt,
   createTravelSegment,
@@ -22,6 +23,7 @@ import {
 } from './dispatch-utils';
 import JobSelectorPanel from './job-selector-panel';
 import type { ScheduleBlockData } from './schedule-block';
+import PushupModal from './pushup-modal';
 import { useDispatchData } from './use-dispatch-data';
 
 type DispatchCalendarProps = {
@@ -60,7 +62,10 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
   const [panelSubmitting, setPanelSubmitting] = useState(false);
   const [panelRejection, setPanelRejection] = useState<string | null>(null);
   const [panelWarnings, setPanelWarnings] = useState<string[]>([]);
+  const [openPushupSlotIds, setOpenPushupSlotIds] = useState<string[]>([]);
+  const [activePushupSlotId, setActivePushupSlotId] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const pushupOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const scroller = scrollerRef.current;
@@ -69,6 +74,38 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
     }
     scroller.scrollTop = START_SCROLL_MINUTE * PX_PER_MINUTE;
   }, [loading]);
+
+  useEffect(
+    () => () => {
+      if (pushupOpenTimerRef.current) {
+        clearTimeout(pushupOpenTimerRef.current);
+        pushupOpenTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
+  async function reloadOpenPushupSlots() {
+    try {
+      const slots = await getOpenPushupSlots();
+      const visible = slots.filter((slot) => {
+        const localDate = new Intl.DateTimeFormat('en-CA', {
+          timeZone: companyTimezone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(new Date(slot.startDatetime));
+        return localDate === selectedDate;
+      });
+      setOpenPushupSlotIds(visible.map((slot) => slot.id));
+    } catch {
+      setOpenPushupSlotIds([]);
+    }
+  }
+
+  useEffect(() => {
+    void reloadOpenPushupSlots();
+  }, [selectedDate, companyTimezone]);
 
   const jobsById = useMemo(() => new Map(jobs.map((job) => [job.id, job])), [jobs]);
   const salesRepCodes = useMemo(
@@ -339,8 +376,17 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
     if (!window.confirm('Remove this segment?')) {
       return;
     }
-    await removeScheduleSegment(segmentId);
+    const response = await removeScheduleSegment(segmentId);
     await Promise.all([reloadForemanDay(foremanId, selectedDate), reloadJobs()]);
+    await reloadOpenPushupSlots();
+    if (response.vacatedSlotId) {
+      if (pushupOpenTimerRef.current) {
+        clearTimeout(pushupOpenTimerRef.current);
+      }
+      pushupOpenTimerRef.current = setTimeout(() => {
+        setActivePushupSlotId(response.vacatedSlotId ?? null);
+      }, 800);
+    }
   }
 
   function setDate(date: string) {
@@ -398,6 +444,22 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
               aria-label="Toggle diagnostics"
             >
               ?
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (openPushupSlotIds.length > 0) {
+                  setActivePushupSlotId(openPushupSlotIds[0]);
+                }
+              }}
+              disabled={openPushupSlotIds.length === 0}
+              className={`rounded-md border px-3 py-1.5 text-sm ${
+                openPushupSlotIds.length > 0
+                  ? 'border-amber-300 bg-amber-50 text-amber-800'
+                  : 'border-slate-200 bg-slate-100 text-slate-400'
+              }`}
+            >
+              Show push-up suggestions {openPushupSlotIds.length > 0 ? `(${openPushupSlotIds.length})` : ''}
             </button>
           </div>
         </div>
@@ -541,6 +603,18 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         submitting={panelSubmitting}
         rejection={panelRejection}
         warnings={panelWarnings}
+      />
+      <PushupModal
+        open={activePushupSlotId !== null}
+        vacatedSlotId={activePushupSlotId}
+        onClose={() => setActivePushupSlotId(null)}
+        onApplied={async () => {
+          await Promise.all([
+            ...foremen.map((foreman) => reloadForemanDay(foreman.id, selectedDate)),
+            reloadJobs(),
+            reloadOpenPushupSlots(),
+          ]);
+        }}
       />
     </main>
   );
