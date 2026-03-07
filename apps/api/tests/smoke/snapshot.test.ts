@@ -105,13 +105,13 @@ describe('snapshot trigger route', () => {
     expect(body.status).toBe('CREATED');
     expect(body.counts.totalRows).toBe(4);
     expect(body.counts.repRows).toBe(2);
-    expect(body.snapshot_date).toBe('2026-03-01');
+    expect(body.snapshot_date).toBe('2026-02-28');
 
     const craneDateRows = mock.snapshots.filter(
       (row) =>
         row.equipmentType === 'CRANE' &&
         row.snapshotDate instanceof Date &&
-        row.snapshotDate.toISOString().slice(0, 10) === '2026-03-01',
+        row.snapshotDate.toISOString().slice(0, 10) === '2026-02-28',
     );
     expect(craneDateRows.length).toBeGreaterThan(0);
 
@@ -126,7 +126,7 @@ describe('snapshot trigger route', () => {
   test('POST /api/snapshots/trigger duplicate week returns 409 SNAPSHOT_DUPLICATE', async () => {
     const mock = buildSnapshotPrisma();
     mock.snapshots.push({
-      snapshotDate: new Date('2026-03-01T00:00:00.000Z'),
+      snapshotDate: new Date('2026-02-28T00:00:00.000Z'),
       equipmentType: 'CRANE',
       salesRepCode: null,
     });

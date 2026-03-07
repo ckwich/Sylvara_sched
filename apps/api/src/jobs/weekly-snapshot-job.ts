@@ -9,14 +9,10 @@ type SnapshotJobDeps = {
   logError: (message: string, error?: unknown) => void;
 };
 
-function localWeekday(parts: { year: number; month: number; day: number }): number {
-  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
-}
-
 export function startWeeklySnapshotJob(deps: SnapshotJobDeps): () => void {
   let lastRunDateKey: string | null = null;
 
-  const task = cron.schedule('* * * * *', async () => {
+  const task = cron.schedule('0 6 * * 6', async () => {
     try {
       const settings = await deps.prisma.orgSettings.findFirst({
         where: { deletedAt: null },
@@ -25,11 +21,6 @@ export function startWeeklySnapshotJob(deps: SnapshotJobDeps): () => void {
       const timezone = settings?.companyTimezone ?? DEFAULT_TIMEZONE;
       const now = new Date();
       const localNow = utcToLocalParts(now, timezone);
-      const isSunday = localWeekday(localNow) === 0;
-      const isSixAM = localNow.hour === 6 && localNow.minute === 0;
-      if (!isSunday || !isSixAM) {
-        return;
-      }
 
       const runDateKey = `${localNow.year}-${String(localNow.month).padStart(2, '0')}-${String(localNow.day).padStart(2, '0')}`;
       if (lastRunDateKey === runDateKey) {

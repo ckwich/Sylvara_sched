@@ -40,10 +40,11 @@ function shiftDateOnly(dateOnly: string, dayDelta: number): string {
   return shifted.toISOString().slice(0, 10);
 }
 
-function toSundayAnchorDateOnly(inputDate: Date, timezone: string): string {
+function toSaturdayAnchorDateOnly(inputDate: Date, timezone: string): string {
   const localDate = utcToLocalDateStr(inputDate, timezone);
-  const dow = localDayOfWeek(localDate); // Sunday=0
-  return shiftDateOnly(localDate, -dow);
+  const dow = localDayOfWeek(localDate); // Sunday=0 ... Saturday=6
+  const daysToSubtract = (dow + 1) % 7;
+  return shiftDateOnly(localDate, -daysToSubtract);
 }
 
 function isoWeekYearAndNumber(value: Date): { year: number; weekNumber: number } {
@@ -183,8 +184,8 @@ export async function captureSnapshot(prisma: PrismaClient, date = new Date()): 
   });
   const timezone = settings?.companyTimezone ?? DEFAULT_TIMEZONE;
 
-  const sundayDateOnly = toSundayAnchorDateOnly(date, timezone);
-  const snapshotDate = parseDateOnlyUtc(sundayDateOnly);
+  const saturdayDateOnly = toSaturdayAnchorDateOnly(date, timezone);
+  const snapshotDate = parseDateOnlyUtc(saturdayDateOnly);
   const iso = isoWeekYearAndNumber(snapshotDate);
 
   const existingTotals = await prisma.weeklyBacklogSnapshot.findFirst({
@@ -199,7 +200,7 @@ export async function captureSnapshot(prisma: PrismaClient, date = new Date()): 
   if (existingTotals) {
     return {
       status: 'DUPLICATE',
-      snapshot_date: sundayDateOnly,
+      snapshot_date: saturdayDateOnly,
       existingSnapshotDate: formatDateOnly(existingTotals.snapshotDate),
     };
   }
@@ -215,7 +216,7 @@ export async function captureSnapshot(prisma: PrismaClient, date = new Date()): 
   if (existingBucketTotals) {
     return {
       status: 'DUPLICATE',
-      snapshot_date: sundayDateOnly,
+      snapshot_date: saturdayDateOnly,
       existingSnapshotDate: formatDateOnly(existingBucketTotals.snapshotDate),
     };
   }
@@ -261,7 +262,7 @@ export async function captureSnapshot(prisma: PrismaClient, date = new Date()): 
 
   return {
     status: 'CREATED',
-    snapshot_date: sundayDateOnly,
+    snapshot_date: saturdayDateOnly,
     counts: {
       repRows,
       totalRows,

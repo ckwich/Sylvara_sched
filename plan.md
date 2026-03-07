@@ -136,7 +136,7 @@ Stores a point-in-time capture of backlog metrics, taken once per week. Used to 
 
 **WeeklyBacklogSnapshot**
 - id (UUID)
-- snapshot_date (date — normalized to the Sunday that opens the captured week; ISO week anchor is Sunday)
+- snapshot_date (date — normalized to the Saturday that opens the captured week; ISO week anchor is Saturday)
 - year (integer — derived from snapshot_date for query convenience)
 - week_number (integer — ISO week number 1–53, derived from snapshot_date)
 - equipment_type: `CRANE | BUCKET`
@@ -665,7 +665,7 @@ Computed live from current job data at query time. Not stored — fully derived.
 - Increase / (Decrease): current days - prior days
 
 **Snapshot trigger:**
-- Automatic weekly snapshot job runs every Monday at a configured time (default: 6:00 AM company timezone).
+- Automatic weekly snapshot job runs every Saturday at a configured time (default: 6:00 AM company timezone).
 - MANAGER can trigger manual snapshot from admin UI.
 - Snapshots are append-only. Re-running does not overwrite an existing week. Use the unique constraint to prevent duplicates; manual trigger should surface a warning if that week already exists.
 
