@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ApiRequestError, getJob, updateJob } from '../../lib/api';
+import NotesReview from './[jobId]/notes-review';
 
 type EditJobModalProps = {
   open: boolean;
@@ -274,6 +275,8 @@ export default function EditJobModal(props: EditJobModalProps) {
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             />
           </label>
+
+          <NotesReview jobId={props.jobId} />
 
           {error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
         </div>

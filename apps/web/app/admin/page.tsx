@@ -1,5 +1,20 @@
-import AdminClient from './admin-client';
+import { auth } from '@/auth';
+import AdminListsClient from './admin-lists-client';
 
-export default function AdminPage() {
-  return <AdminClient />;
+export default async function AdminPage() {
+  const session = await auth();
+  const role = session?.user?.role ?? null;
+
+  if (role !== 'MANAGER') {
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-8">
+        <h1 className="text-2xl font-semibold text-slate-900">Admin</h1>
+        <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Manager permissions are required to view admin-managed lists.
+        </p>
+      </main>
+    );
+  }
+
+  return <AdminListsClient />;
 }

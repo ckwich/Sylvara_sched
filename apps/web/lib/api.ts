@@ -55,6 +55,8 @@ export type JobSummary = {
   pushUpIfPossible: boolean;
   activeBlockerCount: number;
   unmetRequirementCount: number;
+  notesLastParsedAt: string | null;
+  legacyParseItemCount: number;
 };
 
 type JobsResponse = {
@@ -88,6 +90,40 @@ type JobDetail = {
   notesRaw: string;
 };
 
+export type NotesReviewEvent = {
+  id: string;
+  eventType: 'RESCHEDULE_TO' | 'TBS_FROM' | 'DATE_SWAP';
+  fromAt: string | null;
+  toAt: string | null;
+  rawSnippet: string | null;
+  actorCode: string | null;
+  source: string | null;
+};
+
+export type NotesReviewRequirement = {
+  id: string;
+  requirementType: string;
+  requirementTypeLabel: string;
+  status: string;
+  rawSnippet: string | null;
+  source: string | null;
+};
+
+export type NotesReviewData = {
+  job: {
+    id: string;
+    notesRaw: string;
+    notesLastParsedAt: string | null;
+    winterFlag: boolean;
+    frozenGroundFlag: boolean;
+    requiresSpiderLift: boolean;
+    hasClimb: boolean;
+    pushUpIfPossible: boolean;
+  };
+  scheduleEvents: NotesReviewEvent[];
+  requirements: NotesReviewRequirement[];
+};
+
 type CreateJobPayload = {
   customerName: string;
   town: string;
@@ -106,6 +142,11 @@ type UpdateJobPayload = {
   amountDollars?: number;
   salesRepCode?: string;
   notesRaw?: string;
+  winterFlag?: boolean;
+  frozenGroundFlag?: boolean;
+  requiresSpiderLift?: boolean;
+  hasClimb?: boolean;
+  pushUpIfPossible?: boolean;
 };
 
 export type ResourceRecord = {
@@ -173,6 +214,88 @@ export type CreateHomeBasePayload = {
 };
 
 export type UpdateHomeBasePayload = Partial<CreateHomeBasePayload> & { active?: boolean };
+
+export type AdminListRecord = {
+  id: string;
+  code: string;
+  label: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type SeasonalFreezeWindowRecord = {
+  id: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  notes: string | null;
+  active: boolean;
+  createdByUserId: string | null;
+  createdAt: string;
+  deletedAt: string | null;
+};
+
+export type CreateAdminListPayload = {
+  code: string;
+  label: string;
+  active?: boolean;
+};
+
+export type UpdateAdminListPayload = {
+  label?: string;
+  active?: boolean;
+};
+
+export type CreateSeasonalFreezeWindowPayload = {
+  label: string;
+  startDate: string;
+  endDate: string;
+  notes?: string;
+  active?: boolean;
+};
+
+export type UpdateSeasonalFreezeWindowPayload = {
+  label?: string;
+  startDate?: string;
+  endDate?: string;
+  notes?: string;
+  active?: boolean;
+};
+
+export type AdminImportSummary = {
+  importSources: Array<{
+    importSource: string | null;
+    jobsCount: number;
+  }>;
+  totals: {
+    segmentsCreated: number;
+    scheduleEventsCreated: number;
+    requirementsCreated: number;
+  };
+  unable: {
+    count: number;
+    jobs: Array<{
+      id: string;
+      customerName: string;
+      town: string;
+    }>;
+  };
+  unresolvedLinkedPairs: {
+    count: number;
+    jobs: Array<{
+      id: string;
+      customerName: string;
+      jobSiteAddress: string;
+      town: string;
+      linkedEquipmentNote: string | null;
+    }>;
+  };
+  pendingNotesReview: {
+    count: number;
+  };
+};
 
 export function buildOrgSettingsUrl(): string {
   return `/api/org-settings`;
@@ -460,6 +583,112 @@ export async function updateJob(jobId: string, payload: UpdateJobPayload): Promi
   }
 }
 
+export async function getJobNotesReview(jobId: string): Promise<NotesReviewData> {
+  const url = `/api/jobs/${jobId}/notes-review`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as NotesReviewData | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as NotesReviewData;
+}
+
+export async function markJobNotesReviewed(jobId: string): Promise<void> {
+  const url = `/api/jobs/${jobId}/notes-reviewed`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'PATCH', body: JSON.stringify({}) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, body ?? {});
+  }
+}
+
+export async function updateJobRequirementStatus(
+  jobId: string,
+  requirementId: string,
+  status: string,
+): Promise<NotesReviewRequirement> {
+  const url = `/api/jobs/${jobId}/requirements/${requirementId}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'PATCH', body: JSON.stringify({ status }) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { requirement?: NotesReviewRequirement } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { requirement: NotesReviewRequirement }).requirement;
+}
+
+export async function deleteJobRequirement(jobId: string, requirementId: string): Promise<void> {
+  const url = `/api/jobs/${jobId}/requirements/${requirementId}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'DELETE' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, body ?? {});
+  }
+}
+
+export async function deleteJobScheduleEvent(jobId: string, eventId: string): Promise<void> {
+  const url = `/api/jobs/${jobId}/schedule-events/${eventId}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'DELETE' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, body ?? {});
+  }
+}
+
 export async function getResources(): Promise<GetResourcesResponse> {
   const url = `/api/resources`;
   let response: Response;
@@ -627,6 +856,284 @@ export async function getForemen(): Promise<GetForemenResponse> {
     throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as GetForemenResponse;
+}
+
+export async function getRequirementTypes(): Promise<{ requirementTypes: AdminListRecord[] }> {
+  const url = `/api/admin/requirement-types`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { requirementTypes?: AdminListRecord[] } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as { requirementTypes: AdminListRecord[] };
+}
+
+export async function createRequirementType(payload: CreateAdminListPayload): Promise<AdminListRecord> {
+  const url = `/api/admin/requirement-types`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { requirementType?: AdminListRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { requirementType: AdminListRecord }).requirementType;
+}
+
+export async function updateRequirementType(id: string, payload: UpdateAdminListPayload): Promise<AdminListRecord> {
+  const url = `/api/admin/requirement-types/${id}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'PATCH', body: JSON.stringify(payload) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { requirementType?: AdminListRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { requirementType: AdminListRecord }).requirementType;
+}
+
+export async function getBlockerReasons(): Promise<{ blockerReasons: AdminListRecord[] }> {
+  const url = `/api/admin/blocker-reasons`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { blockerReasons?: AdminListRecord[] } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as { blockerReasons: AdminListRecord[] };
+}
+
+export async function createBlockerReason(payload: CreateAdminListPayload): Promise<AdminListRecord> {
+  const url = `/api/admin/blocker-reasons`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { blockerReason?: AdminListRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { blockerReason: AdminListRecord }).blockerReason;
+}
+
+export async function updateBlockerReason(id: string, payload: UpdateAdminListPayload): Promise<AdminListRecord> {
+  const url = `/api/admin/blocker-reasons/${id}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'PATCH', body: JSON.stringify(payload) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { blockerReason?: AdminListRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { blockerReason: AdminListRecord }).blockerReason;
+}
+
+export async function getAccessConstraints(): Promise<{ accessConstraints: AdminListRecord[] }> {
+  const url = `/api/admin/access-constraints`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { accessConstraints?: AdminListRecord[] } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as { accessConstraints: AdminListRecord[] };
+}
+
+export async function createAccessConstraint(payload: CreateAdminListPayload): Promise<AdminListRecord> {
+  const url = `/api/admin/access-constraints`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { accessConstraint?: AdminListRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { accessConstraint: AdminListRecord }).accessConstraint;
+}
+
+export async function updateAccessConstraint(id: string, payload: UpdateAdminListPayload): Promise<AdminListRecord> {
+  const url = `/api/admin/access-constraints/${id}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'PATCH', body: JSON.stringify(payload) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { accessConstraint?: AdminListRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { accessConstraint: AdminListRecord }).accessConstraint;
+}
+
+export async function getSeasonalFreezeWindows(): Promise<{ seasonalFreezeWindows: SeasonalFreezeWindowRecord[] }> {
+  const url = `/api/admin/seasonal-freeze-windows`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { seasonalFreezeWindows?: SeasonalFreezeWindowRecord[] } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as { seasonalFreezeWindows: SeasonalFreezeWindowRecord[] };
+}
+
+export async function createSeasonalFreezeWindow(
+  payload: CreateSeasonalFreezeWindowPayload,
+): Promise<SeasonalFreezeWindowRecord> {
+  const url = `/api/admin/seasonal-freeze-windows`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { seasonalFreezeWindow?: SeasonalFreezeWindowRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { seasonalFreezeWindow: SeasonalFreezeWindowRecord }).seasonalFreezeWindow;
+}
+
+export async function updateSeasonalFreezeWindow(
+  id: string,
+  payload: UpdateSeasonalFreezeWindowPayload,
+): Promise<SeasonalFreezeWindowRecord> {
+  const url = `/api/admin/seasonal-freeze-windows/${id}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'PATCH', body: JSON.stringify(payload) });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { seasonalFreezeWindow?: SeasonalFreezeWindowRecord } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { seasonalFreezeWindow: SeasonalFreezeWindowRecord }).seasonalFreezeWindow;
+}
+
+export async function getAdminImportSummary(): Promise<AdminImportSummary> {
+  const url = `/api/admin/import-summary`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as AdminImportSummary | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as AdminImportSummary;
 }
 
 export type ForemanDayRoster = {

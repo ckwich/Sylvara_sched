@@ -587,7 +587,21 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
     }
 
     const [job, roster] = await Promise.all([
-      deps.prisma.job.findUnique({ where: { id: body.jobId }, select: { id: true } }),
+      deps.prisma.job.findUnique({
+        where: { id: body.jobId },
+        select: {
+          id: true,
+          frozenGroundFlag: true,
+          winterFlag: true,
+          jobBlockers: {
+            where: {
+              deletedAt: null,
+              status: 'ACTIVE',
+            },
+            select: { id: true },
+          },
+        },
+      }),
       deps.prisma.foremanDayRoster.findUnique({
         where: { id: body.rosterId },
         select: { id: true, date: true, foremanPersonId: true },
@@ -599,6 +613,16 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
           code: 'JOB_NOT_FOUND',
           message: 'Job not found.',
           details: {},
+        },
+      });
+    }
+    const activeBlockers = Array.isArray(job.jobBlockers) ? job.jobBlockers : [];
+    if (activeBlockers.length > 0) {
+      return reply.code(200).send({
+        result: 'REJECT',
+        error: {
+          code: 'ACTIVE_BLOCKER',
+          message: 'Job has active blockers.',
         },
       });
     }
@@ -710,6 +734,18 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       serviceDate: rosterLocalDate,
       rosterId: body.rosterId,
     });
+    if (job.frozenGroundFlag === true) {
+      warnings.push({
+        code: 'FROZEN_GROUND_REQUIRED',
+        message: 'This job requires frozen ground conditions.',
+      });
+    }
+    if (job.winterFlag === true) {
+      warnings.push({
+        code: 'WINTER_PREFERRED',
+        message: 'This job is preferred for winter scheduling.',
+      });
+    }
 
     return reply.code(200).send({
       segment: created,
@@ -857,6 +893,8 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       },
       select: {
         equipmentType: true,
+        frozenGroundFlag: true,
+        winterFlag: true,
         deletedAt: true,
       },
     });
@@ -988,10 +1026,25 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       timezone,
     });
 
+    const warnings: Array<{ code: string; message: string }> = [];
+    if (jobForVacatedSlot.frozenGroundFlag) {
+      warnings.push({
+        code: 'FROZEN_GROUND_REQUIRED',
+        message: 'This job requires frozen ground conditions.',
+      });
+    }
+    if (jobForVacatedSlot.winterFlag) {
+      warnings.push({
+        code: 'WINTER_PREFERRED',
+        message: 'This job is preferred for winter scheduling.',
+      });
+    }
+
     return reply.code(200).send({
       segment: updated.segment,
       jobState,
       vacatedSlotId: updated.vacatedSlotId,
+      warnings,
     });
   });
 

@@ -19,6 +19,10 @@ type JobHoursRow = {
   job_id: string;
   hours: number;
 };
+type LegacyGroupRow = {
+  jobId: string;
+  _count: { _all: number };
+};
 
 type RequirementTypeCode = ParsedNotes['requirements'][number]['typeCode'];
 
@@ -53,6 +57,14 @@ const jobListQuerySchema = z.object({
 const jobIdParamsSchema = z.object({
   id: uuidSchema,
 });
+const requirementIdParamsSchema = z.object({
+  id: uuidSchema,
+  requirementId: uuidSchema,
+});
+const scheduleEventIdParamsSchema = z.object({
+  id: uuidSchema,
+  eventId: uuidSchema,
+});
 
 const jobCreateBodySchema = z.object({
   customerName: z.string().trim().min(1),
@@ -70,6 +82,8 @@ const jobCreateBodySchema = z.object({
   frozenGroundFlag: z.boolean().optional(),
   craneModelSuitability: craneModelSchema.optional(),
   requiresSpiderLift: z.boolean().optional(),
+  hasClimb: z.boolean().optional(),
+  pushUpIfPossible: z.boolean().optional(),
 });
 
 const jobPatchBodySchema = z
@@ -89,12 +103,17 @@ const jobPatchBodySchema = z
     frozenGroundFlag: z.boolean().optional(),
     craneModelSuitability: craneModelSchema.optional(),
     requiresSpiderLift: z.boolean().optional(),
+    hasClimb: z.boolean().optional(),
+    pushUpIfPossible: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'At least one field must be provided.');
 
 const jobCompleteBodySchema = z.object({
   completedDate: dateOnlySchema,
   completionNotes: z.string().optional(),
+});
+const requirementStatusPatchBodySchema = z.object({
+  status: z.nativeEnum(RequirementStatus),
 });
 
 function normalizeSalesRepCode(value: string): string {
@@ -290,6 +309,8 @@ function buildJobDiff(
     frozenGroundFlag: boolean;
     craneModelSuitability: 'MODEL_1090' | 'MODEL_1060' | 'EITHER' | null;
     requiresSpiderLift: boolean;
+    hasClimb: boolean;
+    pushUpIfPossible: boolean;
   },
   after: {
     customerId: string;
@@ -307,6 +328,8 @@ function buildJobDiff(
     frozenGroundFlag: boolean;
     craneModelSuitability: 'MODEL_1090' | 'MODEL_1060' | 'EITHER' | null;
     requiresSpiderLift: boolean;
+    hasClimb: boolean;
+    pushUpIfPossible: boolean;
   },
 ) {
   const diff: Record<string, { from: unknown; to: unknown }> = {};
@@ -335,6 +358,8 @@ function buildJobDiff(
   setIfChanged('frozenGroundFlag', before.frozenGroundFlag, after.frozenGroundFlag);
   setIfChanged('craneModelSuitability', before.craneModelSuitability, after.craneModelSuitability);
   setIfChanged('requiresSpiderLift', before.requiresSpiderLift, after.requiresSpiderLift);
+  setIfChanged('hasClimb', before.hasClimb, after.hasClimb);
+  setIfChanged('pushUpIfPossible', before.pushUpIfPossible, after.pushUpIfPossible);
   return diff;
 }
 
@@ -419,7 +444,12 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
     ]);
 
     const jobIds = jobs.map((job) => job.id);
-    const [hoursByJobId, activeBlockers, unmetRequirements] = await Promise.all([
+    const prismaAny = deps.prisma as unknown as {
+      requirement?: { groupBy?: (...args: unknown[]) => Promise<LegacyGroupRow[]> };
+      scheduleEvent?: { groupBy?: (...args: unknown[]) => Promise<LegacyGroupRow[]> };
+    };
+
+    const [hoursByJobId, activeBlockers, unmetRequirements, legacyRequirements, legacyScheduleEvents] = await Promise.all([
       aggregateScheduledHoursByJob(deps.prisma, jobIds),
       deps.prisma.jobBlocker.groupBy({
         by: ['jobId'],
@@ -445,10 +475,38 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
         },
         _count: { _all: true },
       }),
+      prismaAny.requirement?.groupBy
+        ? deps.prisma.requirement.groupBy({
+            by: ['jobId'],
+            where: {
+              deletedAt: null,
+              source: 'LEGACY_PARSE',
+              jobId: {
+                in: jobIds,
+              },
+            },
+            _count: { _all: true },
+          })
+        : Promise.resolve([]),
+      prismaAny.scheduleEvent?.groupBy
+        ? deps.prisma.scheduleEvent.groupBy({
+            by: ['jobId'],
+            where: {
+              deletedAt: null,
+              source: 'LEGACY_PARSE',
+              jobId: {
+                in: jobIds,
+              },
+            },
+            _count: { _all: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     const blockerCountByJobId = new Map(activeBlockers.map((row) => [row.jobId, row._count._all]));
     const unmetCountByJobId = new Map(unmetRequirements.map((row) => [row.jobId, row._count._all]));
+    const legacyRequirementCountByJobId = new Map(legacyRequirements.map((row) => [row.jobId, row._count._all]));
+    const legacyEventCountByJobId = new Map(legacyScheduleEvents.map((row) => [row.jobId, row._count._all]));
 
     const rows = jobs.map((job) => {
       const scheduledEffectiveHours = hoursByJobId.get(job.id) ?? new Prisma.Decimal(0);
@@ -476,6 +534,9 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
         pushUpIfPossible: job.pushUpIfPossible,
         activeBlockerCount: blockerCountByJobId.get(job.id) ?? 0,
         unmetRequirementCount: unmetCountByJobId.get(job.id) ?? 0,
+        notesLastParsedAt: job.notesLastParsedAt,
+        legacyParseItemCount:
+          (legacyRequirementCountByJobId.get(job.id) ?? 0) + (legacyEventCountByJobId.get(job.id) ?? 0),
       };
     });
 
@@ -555,6 +616,8 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
           notesRaw: payload.notesRaw ?? '',
           winterFlag: payload.winterFlag ?? false,
           frozenGroundFlag: payload.frozenGroundFlag ?? false,
+          hasClimb: payload.hasClimb ?? false,
+          pushUpIfPossible: payload.pushUpIfPossible ?? false,
           craneModelSuitability:
             payload.equipmentType === EquipmentType.CRANE
               ? (toCraneModelEnum(payload.craneModelSuitability) ?? null)
@@ -627,6 +690,8 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
         notesRaw: true,
         winterFlag: true,
         frozenGroundFlag: true,
+        hasClimb: true,
+        pushUpIfPossible: true,
         craneModelSuitability: true,
         requiresSpiderLift: true,
       },
@@ -694,6 +759,12 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
     }
     if (payload.frozenGroundFlag !== undefined) {
       updateData.frozenGroundFlag = payload.frozenGroundFlag;
+    }
+    if (payload.hasClimb !== undefined) {
+      updateData.hasClimb = payload.hasClimb;
+    }
+    if (payload.pushUpIfPossible !== undefined) {
+      updateData.pushUpIfPossible = payload.pushUpIfPossible;
     }
     if (nextEquipmentType === EquipmentType.CRANE) {
       if (payload.craneModelSuitability !== undefined) {
@@ -1041,5 +1112,254 @@ export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
       return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
     }
     return reply.code(200).send({ job: detail });
+  });
+
+  app.get('/api/jobs/:id/notes-review', async (request, reply) => {
+    const params = jobIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid job id.', params.error.flatten());
+    }
+
+    const job = await deps.prisma.job.findFirst({
+      where: { id: params.data.id, deletedAt: null },
+      select: {
+        id: true,
+        notesRaw: true,
+        notesLastParsedAt: true,
+        winterFlag: true,
+        frozenGroundFlag: true,
+        requiresSpiderLift: true,
+        hasClimb: true,
+        pushUpIfPossible: true,
+      },
+    });
+    if (!job) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+
+    const [scheduleEvents, requirements] = await Promise.all([
+      deps.prisma.scheduleEvent.findMany({
+        where: {
+          jobId: job.id,
+          source: 'LEGACY_PARSE',
+          deletedAt: null,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      deps.prisma.requirement.findMany({
+        where: {
+          jobId: job.id,
+          source: 'LEGACY_PARSE',
+          deletedAt: null,
+        },
+        include: {
+          requirementType: {
+            select: {
+              code: true,
+              label: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    return reply.code(200).send({
+      job: {
+        id: job.id,
+        notesRaw: job.notesRaw,
+        notesLastParsedAt: job.notesLastParsedAt,
+        winterFlag: job.winterFlag,
+        frozenGroundFlag: job.frozenGroundFlag,
+        requiresSpiderLift: job.requiresSpiderLift,
+        hasClimb: job.hasClimb,
+        pushUpIfPossible: job.pushUpIfPossible,
+      },
+      scheduleEvents: scheduleEvents.map((event) => ({
+        id: event.id,
+        eventType: event.eventType,
+        fromAt: event.fromAt,
+        toAt: event.toAt,
+        rawSnippet: event.rawSnippet,
+        actorCode: event.actorCode,
+        source: event.source,
+      })),
+      requirements: requirements.map((requirement) => ({
+        id: requirement.id,
+        requirementType: requirement.requirementType.code,
+        requirementTypeLabel: requirement.requirementType.label,
+        status: requirement.status,
+        rawSnippet: requirement.rawSnippet,
+        source: requirement.source,
+      })),
+    });
+  });
+
+  app.patch('/api/jobs/:id/notes-reviewed', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const params = jobIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid job id.', params.error.flatten());
+    }
+
+    const existing = await deps.prisma.job.findFirst({
+      where: { id: params.data.id, deletedAt: null },
+      select: { id: true, notesLastParsedAt: true },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'JOB_NOT_FOUND', 'Job not found.');
+    }
+
+    const reviewedAt = new Date();
+    await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.job.update({
+        where: { id: existing.id },
+        data: { notesLastParsedAt: reviewedAt },
+      });
+      await tx.activityLog.create({
+        data: {
+          entityType: 'Job',
+          entityId: existing.id,
+          actionType: 'NOTE_PARSED',
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+          diff: {
+            notesLastParsedAt: {
+              from: existing.notesLastParsedAt?.toISOString() ?? null,
+              to: reviewedAt.toISOString(),
+            },
+          } as Prisma.InputJsonValue,
+        },
+      });
+    });
+
+    return reply.code(200).send({ ok: true, notesLastParsedAt: reviewedAt.toISOString() });
+  });
+
+  app.patch('/api/jobs/:id/requirements/:requirementId', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const params = requirementIdParamsSchema.safeParse(request.params);
+    const body = requirementStatusPatchBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return validationError(reply, 'Invalid requirement update payload.', {
+        params: params.success ? undefined : params.error.flatten(),
+        body: body.success ? undefined : body.error.flatten(),
+      });
+    }
+
+    const requirement = await deps.prisma.requirement.findFirst({
+      where: {
+        id: params.data.requirementId,
+        jobId: params.data.id,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!requirement) {
+      return notFoundError(reply, 'REQUIREMENT_NOT_FOUND', 'Requirement not found.');
+    }
+
+    const updated = await deps.prisma.requirement.update({
+      where: { id: requirement.id },
+      data: { status: body.data.status },
+      include: {
+        requirementType: {
+          select: {
+            code: true,
+            label: true,
+          },
+        },
+      },
+    });
+
+    return reply.code(200).send({
+      requirement: {
+        id: updated.id,
+        requirementType: updated.requirementType.code,
+        requirementTypeLabel: updated.requirementType.label,
+        status: updated.status,
+        rawSnippet: updated.rawSnippet,
+        source: updated.source,
+      },
+    });
+  });
+
+  app.delete('/api/jobs/:id/requirements/:requirementId', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const params = requirementIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid requirement delete payload.', params.error.flatten());
+    }
+
+    const requirement = await deps.prisma.requirement.findFirst({
+      where: {
+        id: params.data.requirementId,
+        jobId: params.data.id,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!requirement) {
+      return notFoundError(reply, 'REQUIREMENT_NOT_FOUND', 'Requirement not found.');
+    }
+
+    await deps.prisma.requirement.update({
+      where: { id: requirement.id },
+      data: { deletedAt: new Date() },
+    });
+    return reply.code(204).send();
+  });
+
+  app.delete('/api/jobs/:id/schedule-events/:eventId', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireMutationPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const params = scheduleEventIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid schedule event delete payload.', params.error.flatten());
+    }
+
+    const event = await deps.prisma.scheduleEvent.findFirst({
+      where: {
+        id: params.data.eventId,
+        jobId: params.data.id,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!event) {
+      return notFoundError(reply, 'SCHEDULE_EVENT_NOT_FOUND', 'Schedule event not found.');
+    }
+
+    await deps.prisma.scheduleEvent.update({
+      where: { id: event.id },
+      data: { deletedAt: new Date() },
+    });
+    return reply.code(204).send();
   });
 }

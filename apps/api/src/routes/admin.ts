@@ -104,6 +104,52 @@ const deleteRosterParamsSchema = z.object({
   rosterId: uuidSchema,
 });
 
+const adminListCreateBodySchema = z.object({
+  code: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  active: z.boolean().optional(),
+});
+
+const adminListUpdateBodySchema = z
+  .object({
+    label: z.string().trim().min(1).optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'At least one field must be provided.');
+
+const seasonalFreezeWindowCreateBodySchema = z
+  .object({
+    label: z.string().trim().min(1),
+    startDate: dateOnlySchema,
+    endDate: dateOnlySchema,
+    notes: z.string().optional(),
+    active: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const start = parseDateOnlyUtc(value.startDate);
+    const end = parseDateOnlyUtc(value.endDate);
+    if (!start || !end) {
+      return;
+    }
+    if (start.getTime() > end.getTime()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endDate'],
+        message: 'End date must be on or after start date.',
+      });
+    }
+  });
+
+const seasonalFreezeWindowUpdateBodySchema = z
+  .object({
+    label: z.string().trim().min(1).optional(),
+    startDate: dateOnlySchema.optional(),
+    endDate: dateOnlySchema.optional(),
+    notes: z.string().optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'At least one field must be provided.');
+
 function conflictError(reply: FastifyReply, code: string, message: string) {
   return reply.code(409).send({
     error: {
@@ -985,5 +1031,475 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     });
 
     return reply.code(204).send();
+  });
+
+  app.get('/api/admin/requirement-types', async (_request, reply) => {
+    const actor = await requireActor({ request: _request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const requirementTypes = await deps.prisma.requirementType.findMany({
+      where: { deletedAt: null },
+      orderBy: [{ code: 'asc' }],
+    });
+    return reply.code(200).send({ requirementTypes });
+  });
+
+  app.post('/api/admin/requirement-types', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const body = adminListCreateBodySchema.safeParse(request.body);
+    if (!body.success) {
+      return validationError(reply, 'Invalid requirement type payload.', body.error.flatten());
+    }
+
+    try {
+      const requirementType = await deps.prisma.requirementType.create({
+        data: {
+          code: body.data.code,
+          label: body.data.label,
+          active: body.data.active ?? true,
+        },
+      });
+      return reply.code(201).send({ requirementType });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        return conflictError(reply, 'REQUIREMENT_TYPE_CODE_EXISTS', 'Requirement type code already exists.');
+      }
+      throw error;
+    }
+  });
+
+  app.patch('/api/admin/requirement-types/:id', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const params = resourceIdParamsSchema.safeParse(request.params);
+    const body = adminListUpdateBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return validationError(reply, 'Invalid requirement type update payload.', {
+        params: params.success ? undefined : params.error.flatten(),
+        body: body.success ? undefined : body.error.flatten(),
+      });
+    }
+
+    const existing = await deps.prisma.requirementType.findFirst({
+      where: { id: params.data.id, deletedAt: null },
+      select: { id: true },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'REQUIREMENT_TYPE_NOT_FOUND', 'Requirement type not found.');
+    }
+
+    const requirementType = await deps.prisma.requirementType.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.data.label !== undefined ? { label: body.data.label } : {}),
+        ...(body.data.active !== undefined ? { active: body.data.active } : {}),
+      },
+    });
+    return reply.code(200).send({ requirementType });
+  });
+
+  app.get('/api/admin/blocker-reasons', async (_request, reply) => {
+    const actor = await requireActor({ request: _request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const blockerReasons = await deps.prisma.blockerReason.findMany({
+      where: { deletedAt: null },
+      orderBy: [{ code: 'asc' }],
+    });
+    return reply.code(200).send({ blockerReasons });
+  });
+
+  app.post('/api/admin/blocker-reasons', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const body = adminListCreateBodySchema.safeParse(request.body);
+    if (!body.success) {
+      return validationError(reply, 'Invalid blocker reason payload.', body.error.flatten());
+    }
+
+    try {
+      const blockerReason = await deps.prisma.blockerReason.create({
+        data: {
+          code: body.data.code,
+          label: body.data.label,
+          active: body.data.active ?? true,
+        },
+      });
+      return reply.code(201).send({ blockerReason });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        return conflictError(reply, 'BLOCKER_REASON_CODE_EXISTS', 'Blocker reason code already exists.');
+      }
+      throw error;
+    }
+  });
+
+  app.patch('/api/admin/blocker-reasons/:id', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const params = resourceIdParamsSchema.safeParse(request.params);
+    const body = adminListUpdateBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return validationError(reply, 'Invalid blocker reason update payload.', {
+        params: params.success ? undefined : params.error.flatten(),
+        body: body.success ? undefined : body.error.flatten(),
+      });
+    }
+
+    const existing = await deps.prisma.blockerReason.findFirst({
+      where: { id: params.data.id, deletedAt: null },
+      select: { id: true },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'BLOCKER_REASON_NOT_FOUND', 'Blocker reason not found.');
+    }
+
+    const blockerReason = await deps.prisma.blockerReason.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.data.label !== undefined ? { label: body.data.label } : {}),
+        ...(body.data.active !== undefined ? { active: body.data.active } : {}),
+      },
+    });
+    return reply.code(200).send({ blockerReason });
+  });
+
+  app.get('/api/admin/access-constraints', async (_request, reply) => {
+    const actor = await requireActor({ request: _request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const accessConstraints = await deps.prisma.accessConstraint.findMany({
+      where: { deletedAt: null },
+      orderBy: [{ code: 'asc' }],
+    });
+    return reply.code(200).send({ accessConstraints });
+  });
+
+  app.post('/api/admin/access-constraints', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const body = adminListCreateBodySchema.safeParse(request.body);
+    if (!body.success) {
+      return validationError(reply, 'Invalid access constraint payload.', body.error.flatten());
+    }
+
+    try {
+      const accessConstraint = await deps.prisma.accessConstraint.create({
+        data: {
+          code: body.data.code,
+          label: body.data.label,
+          active: body.data.active ?? true,
+        },
+      });
+      return reply.code(201).send({ accessConstraint });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        return conflictError(reply, 'ACCESS_CONSTRAINT_CODE_EXISTS', 'Access constraint code already exists.');
+      }
+      throw error;
+    }
+  });
+
+  app.patch('/api/admin/access-constraints/:id', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const params = resourceIdParamsSchema.safeParse(request.params);
+    const body = adminListUpdateBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return validationError(reply, 'Invalid access constraint update payload.', {
+        params: params.success ? undefined : params.error.flatten(),
+        body: body.success ? undefined : body.error.flatten(),
+      });
+    }
+
+    const existing = await deps.prisma.accessConstraint.findFirst({
+      where: { id: params.data.id, deletedAt: null },
+      select: { id: true },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'ACCESS_CONSTRAINT_NOT_FOUND', 'Access constraint not found.');
+    }
+
+    const accessConstraint = await deps.prisma.accessConstraint.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.data.label !== undefined ? { label: body.data.label } : {}),
+        ...(body.data.active !== undefined ? { active: body.data.active } : {}),
+      },
+    });
+    return reply.code(200).send({ accessConstraint });
+  });
+
+  app.get('/api/admin/seasonal-freeze-windows', async (_request, reply) => {
+    const actor = await requireActor({ request: _request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const seasonalFreezeWindows = await deps.prisma.seasonalFreezeWindow.findMany({
+      where: { deletedAt: null },
+      orderBy: [{ startDate: 'asc' }],
+    });
+    return reply.code(200).send({ seasonalFreezeWindows });
+  });
+
+  app.post('/api/admin/seasonal-freeze-windows', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const body = seasonalFreezeWindowCreateBodySchema.safeParse(request.body);
+    if (!body.success) {
+      return validationError(reply, 'Invalid seasonal freeze window payload.', body.error.flatten());
+    }
+
+    const startDate = parseDateOnlyUtc(body.data.startDate);
+    const endDate = parseDateOnlyUtc(body.data.endDate);
+    if (!startDate || !endDate) {
+      return validationError(reply, 'Invalid seasonal freeze window dates.', {});
+    }
+
+    const seasonalFreezeWindow = await deps.prisma.seasonalFreezeWindow.create({
+      data: {
+        label: body.data.label,
+        startDate,
+        endDate,
+        notes: body.data.notes,
+        active: body.data.active ?? true,
+        createdByUserId: actor.actorUserId,
+      },
+    });
+
+    return reply.code(201).send({ seasonalFreezeWindow });
+  });
+
+  app.patch('/api/admin/seasonal-freeze-windows/:id', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+    const params = resourceIdParamsSchema.safeParse(request.params);
+    const body = seasonalFreezeWindowUpdateBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return validationError(reply, 'Invalid seasonal freeze window update payload.', {
+        params: params.success ? undefined : params.error.flatten(),
+        body: body.success ? undefined : body.error.flatten(),
+      });
+    }
+
+    const existing = await deps.prisma.seasonalFreezeWindow.findFirst({
+      where: { id: params.data.id, deletedAt: null },
+      select: { id: true, startDate: true, endDate: true },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'SEASONAL_FREEZE_WINDOW_NOT_FOUND', 'Seasonal freeze window not found.');
+    }
+
+    const startDate =
+      body.data.startDate !== undefined ? parseDateOnlyUtc(body.data.startDate) : existing.startDate;
+    const endDate =
+      body.data.endDate !== undefined ? parseDateOnlyUtc(body.data.endDate) : existing.endDate;
+    if (!startDate || !endDate || startDate.getTime() > endDate.getTime()) {
+      return validationError(reply, 'Invalid seasonal freeze window date range.', {});
+    }
+
+    const seasonalFreezeWindow = await deps.prisma.seasonalFreezeWindow.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.data.label !== undefined ? { label: body.data.label } : {}),
+        ...(body.data.notes !== undefined ? { notes: body.data.notes } : {}),
+        ...(body.data.active !== undefined ? { active: body.data.active } : {}),
+        ...(body.data.startDate !== undefined ? { startDate } : {}),
+        ...(body.data.endDate !== undefined ? { endDate } : {}),
+      },
+    });
+
+    return reply.code(200).send({ seasonalFreezeWindow });
+  });
+
+  app.get('/api/admin/import-summary', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const [jobsWithImportSource, segmentsBySource, eventsBySource, requirementsBySource, unableJobs, unresolvedPairs, pendingNotes] =
+      await deps.prisma.$transaction([
+        deps.prisma.job.findMany({
+          where: {
+            deletedAt: null,
+            importSource: {
+              not: null,
+            },
+          },
+          select: {
+            importSource: true,
+          },
+        }),
+        deps.prisma.scheduleSegment.count({
+          where: {
+            deletedAt: null,
+            job: {
+              deletedAt: null,
+              importSource: {
+                not: null,
+              },
+            },
+          },
+        }),
+        deps.prisma.scheduleEvent.count({
+          where: {
+            deletedAt: null,
+            source: 'LEGACY_PARSE',
+          },
+        }),
+        deps.prisma.requirement.count({
+          where: {
+            deletedAt: null,
+            source: 'LEGACY_PARSE',
+          },
+        }),
+        deps.prisma.job.findMany({
+          where: {
+            deletedAt: null,
+            unable: true,
+          },
+          select: {
+            id: true,
+            town: true,
+            customer: {
+              select: {
+                name: true,
+              },
+            },
+          },
+          orderBy: [{ createdAt: 'desc' }],
+          take: 100,
+        }),
+        deps.prisma.job.findMany({
+          where: {
+            deletedAt: null,
+            linkedEquipmentNote: {
+              not: null,
+            },
+            linkedJobId: null,
+          },
+          select: {
+            id: true,
+            linkedEquipmentNote: true,
+            jobSiteAddress: true,
+            town: true,
+            customer: {
+              select: {
+                name: true,
+              },
+            },
+          },
+          orderBy: [{ createdAt: 'desc' }],
+          take: 100,
+        }),
+        deps.prisma.job.count({
+          where: {
+            deletedAt: null,
+            notesRaw: { not: '' },
+            notesLastParsedAt: null,
+          },
+        }),
+      ]);
+
+    const importSourceCountMap = new Map<string, number>();
+    for (const row of jobsWithImportSource) {
+      const key = row.importSource ?? 'UNKNOWN';
+      importSourceCountMap.set(key, (importSourceCountMap.get(key) ?? 0) + 1);
+    }
+
+    return reply.code(200).send({
+      importSources: Array.from(importSourceCountMap.entries())
+        .map(([importSource, jobsCount]) => ({
+          importSource,
+          jobsCount,
+        }))
+        .sort((a, b) => (a.importSource ?? '').localeCompare(b.importSource ?? '')),
+      totals: {
+        segmentsCreated: segmentsBySource,
+        scheduleEventsCreated: eventsBySource,
+        requirementsCreated: requirementsBySource,
+      },
+      unable: {
+        count: unableJobs.length,
+        jobs: unableJobs.map((job) => ({
+          id: job.id,
+          customerName: job.customer.name,
+          town: job.town,
+        })),
+      },
+      unresolvedLinkedPairs: {
+        count: unresolvedPairs.length,
+        jobs: unresolvedPairs.map((job) => ({
+          id: job.id,
+          customerName: job.customer.name,
+          jobSiteAddress: job.jobSiteAddress,
+          town: job.town,
+          linkedEquipmentNote: job.linkedEquipmentNote,
+        })),
+      },
+      pendingNotesReview: {
+        count: pendingNotes,
+      },
+    });
   });
 }

@@ -65,13 +65,20 @@ export default function BacklogSection({
                   {group.jobs.map((job) => (
                     <tr key={job.id} className="bg-white">
                       <td className={rowCellClassName(false)}>
-                        <button
-                          type="button"
-                          onClick={() => onEditJob(job.id)}
-                          className="text-left font-medium text-blue-700 hover:underline"
-                        >
-                          {job.customerName}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onEditJob(job.id)}
+                            className="text-left font-medium text-blue-700 hover:underline"
+                          >
+                            {job.customerName}
+                          </button>
+                          {job.legacyParseItemCount > 0 && job.notesLastParsedAt === null ? (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                              Needs Review
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className={rowCellClassName(false)}>{job.town}</td>
                       <td className={rowCellClassName(false)}>

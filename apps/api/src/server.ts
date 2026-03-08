@@ -19,23 +19,33 @@ type ServerAuthConfig = {
   lanSharedSecret: string | null;
 };
 
-const DEFAULT_CORS_ORIGINS = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:3100',
-  'http://127.0.0.1:3100',
-];
-
-function resolveCorsOrigins(rawValue: string | undefined): Set<string> {
-  if (!rawValue || !rawValue.trim()) {
-    return new Set(DEFAULT_CORS_ORIGINS);
+function resolveCorsOrigins(input: { rawValue: string | undefined; nodeEnv: string | undefined }): {
+  origins: Set<string>;
+  warning: string | null;
+} {
+  if (input.rawValue && input.rawValue.trim()) {
+    return {
+      origins: new Set(
+        input.rawValue
+          .split(',')
+          .map((origin) => origin.trim())
+          .filter((origin) => origin.length > 0),
+      ),
+      warning: null,
+    };
   }
-  return new Set(
-    rawValue
-      .split(',')
-      .map((origin) => origin.trim())
-      .filter((origin) => origin.length > 0),
-  );
+
+  if (input.nodeEnv === 'development') {
+    return {
+      origins: new Set(['http://localhost:3000', 'http://localhost:3100']),
+      warning: null,
+    };
+  }
+
+  return {
+    origins: new Set<string>(),
+    warning: 'CORS_ALLOWED_ORIGINS is not configured; CORS requests will be denied.',
+  };
 }
 
 export function buildServer(
@@ -43,7 +53,14 @@ export function buildServer(
   authConfig?: ServerAuthConfig,
 ) {
   const app = Fastify();
-  const corsAllowedOrigins = resolveCorsOrigins(process.env.CORS_ALLOWED_ORIGINS);
+  const corsConfig = resolveCorsOrigins({
+    rawValue: process.env.CORS_ALLOWED_ORIGINS,
+    nodeEnv: process.env.NODE_ENV,
+  });
+  const corsAllowedOrigins = corsConfig.origins;
+  if (corsConfig.warning) {
+    app.log.warn(corsConfig.warning);
+  }
   app.register(cors, {
     origin: (origin, cb) => {
       if (!origin) {
@@ -77,7 +94,7 @@ export function buildServer(
   }
 
   app.get('/health', async () => {
-    return { ok: true };
+    return { ok: true, timestamp: new Date().toISOString() };
   });
 
   app.get('/api/health', async () => {
@@ -91,6 +108,32 @@ export function buildServer(
       logWarning: (message) => app.log.warn(message),
     }),
   );
+
+  app.setErrorHandler((error, _request, reply) => {
+    app.log.error({ err: error }, 'Unhandled route error');
+    const statusCode =
+      typeof (error as { statusCode?: unknown }).statusCode === 'number'
+        ? (error as { statusCode: number }).statusCode
+        : 500;
+    const isServerError = statusCode >= 500;
+    const code =
+      !isServerError && typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : 'INTERNAL_ERROR';
+    const message =
+      isServerError
+        ? 'An unexpected server error occurred.'
+        : typeof (error as { message?: unknown }).message === 'string'
+          ? ((error as { message: string }).message)
+          : 'Request failed.';
+
+    reply.code(statusCode).send({
+      error: {
+        code,
+        message,
+      },
+    });
+  });
 
   registerSchedulingRoutes(app, { prisma: deps.prisma });
   registerAdminRoutes(app, { prisma: deps.prisma });
@@ -107,8 +150,8 @@ const isEntrypoint = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isEntrypoint) {
   const app = buildServer();
-  const port = Number(process.env.API_PORT ?? 4000);
-  const host = process.env.HOST_BIND ?? process.env.API_HOST ?? '127.0.0.1';
+  const port = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
+  const host = process.env.HOST_BIND ?? process.env.API_HOST ?? '0.0.0.0';
   let stopWeeklySnapshotJob: (() => void) | null = null;
 
   app

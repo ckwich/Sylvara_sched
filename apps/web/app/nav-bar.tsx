@@ -8,11 +8,18 @@ const NAV_ITEMS = [
   { href: '/dispatch', label: 'Dispatch' },
   { href: '/backlog', label: 'Backlog' },
   { href: '/reports/summ', label: 'Reports' },
-  { href: '/admin', label: 'Admin' },
 ];
 
-export default function NavBar() {
+type NavBarProps = {
+  role: string | null;
+};
+
+export default function NavBar(props: NavBarProps) {
   const pathname = usePathname();
+  const navItems =
+    props.role === 'MANAGER'
+      ? [...NAV_ITEMS, { href: '/admin', label: 'Admin' }, { href: '/admin/import', label: 'Admin Import' }]
+      : NAV_ITEMS;
 
   return (
     <nav className="border-b border-slate-200 bg-white">
@@ -21,7 +28,7 @@ export default function NavBar() {
           Iron Tree Scheduling
         </Link>
         <div className="flex items-center gap-4">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link

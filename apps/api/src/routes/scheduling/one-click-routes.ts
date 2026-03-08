@@ -170,7 +170,7 @@ export function registerOneClickRoutes(app: FastifyInstance, deps: AppDeps) {
       include: {
         requirements: true,
         jobBlockers: {
-          where: { status: 'ACTIVE' },
+          where: { status: 'ACTIVE', deletedAt: null },
         },
       },
     });
@@ -343,6 +343,18 @@ export function registerOneClickRoutes(app: FastifyInstance, deps: AppDeps) {
       warnings.push({
         code: 'CUSTOMER_WINDOW_NOT_CONFIGURED',
         message: 'Customer availability window is not configured.',
+      });
+    }
+    if (job.frozenGroundFlag) {
+      warnings.push({
+        code: 'FROZEN_GROUND_REQUIRED',
+        message: 'This job requires frozen ground conditions.',
+      });
+    }
+    if (job.winterFlag) {
+      warnings.push({
+        code: 'WINTER_PREFERRED',
+        message: 'This job is preferred for winter scheduling.',
       });
     }
 

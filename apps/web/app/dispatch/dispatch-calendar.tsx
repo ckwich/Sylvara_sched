@@ -62,6 +62,8 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
   const [panelSubmitting, setPanelSubmitting] = useState(false);
   const [panelRejection, setPanelRejection] = useState<string | null>(null);
   const [panelWarnings, setPanelWarnings] = useState<string[]>([]);
+  const [inlineCreationWarnings, setInlineCreationWarnings] = useState<string[]>([]);
+  const [dismissedInlineWarnings, setDismissedInlineWarnings] = useState<Set<string>>(new Set());
   const [openPushupSlotIds, setOpenPushupSlotIds] = useState<string[]>([]);
   const [activePushupSlotId, setActivePushupSlotId] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -364,7 +366,11 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
 
       await Promise.all([reloadForemanDay(foremanId, selectedDate), reloadJobs()]);
 
-      setPanelWarnings((result.warnings ?? []).map((warning) => WARNING_MESSAGES[warning.code] ?? warning.message));
+      const mappedWarnings = (result.warnings ?? []).map(
+        (warning) => WARNING_MESSAGES[warning.code] ?? warning.message,
+      );
+      setPanelWarnings(mappedWarnings);
+      setInlineCreationWarnings(mappedWarnings);
     } catch (scheduleError) {
       setPanelRejection(getErrorMessage(scheduleError));
     } finally {
@@ -463,6 +469,30 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             </button>
           </div>
         </div>
+
+        {inlineCreationWarnings
+          .filter((message) => !dismissedInlineWarnings.has(message))
+          .map((message) => (
+            <div
+              key={message}
+              className="mb-2 flex items-center justify-between rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              <span>{message}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setDismissedInlineWarnings((current) => {
+                    const next = new Set(current);
+                    next.add(message);
+                    return next;
+                  })
+                }
+                className="rounded border border-amber-300 px-2 py-0.5 text-xs text-amber-800"
+              >
+                Dismiss
+              </button>
+            </div>
+          ))}
 
         {error ? <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 

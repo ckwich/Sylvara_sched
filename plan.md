@@ -1,1115 +1,1834 @@
-# Scheduler — plan.md
+# plan.md — Dark Sci-Fi Extraction Bullet Roguelike (Grid / Roguelike-Turn)
 
-> This repository is currently the scheduling module. It will later be merged into the broader **Sylvara** CRM suite. Initial deployment target is LAN-only (internal) under an office hostname (e.g., `schedule-pc:3000`) and/or the internal subdomain `scheduler.irontreeservice.com` when appropriate.
-
-## 0. North Star
-Replace the existing backlog tracking workbook with a multi-user app that:
-- Maintains a **live current backlog** for Crane and Bucket work.
-- Supports **partial scheduling** ("piece by piece") with multi-day and time-based segments.
-- Tracks **schedule history**, **estimate edits**, and a full **activity log**.
-- Extracts high-value operational data out of legacy **Notes** into structured fields while preserving the raw text.
-- Provides a "**Push up if possible**" recommender when a scheduled slot is vacated.
-- Replicates all spreadsheet reports (not spreadsheet UI) using modern filtering/grouping.
-
-**Key definitions locked from conversation**
-- Crane model assignment: **1090** (larger Liebherr), **1060** (smaller), **Either**.
-- Bucket "Lift" means **Spider Lift**.
-- Seasonal/ground flags:
-  - **Winter** = should be done in winter for tree health.
-  - **Frozen** = must wait for frozen ground to prevent lawn damage. Triggers a non-blocking `FROZEN_GROUND_REQUIRED` reminder on scheduling attempt. No weather API; scheduler decides.
-- Pipeline states: **TBS → PARTIALLY_SCHEDULED → FULLY_SCHEDULED → COMPLETED**
-  - Winter/Frozen/Unable/requirements are constraints inside **TBS**.
-- Notes abbreviations:
-  - **DW** = Ditch Witch (equipment)
-  - **DTL** = Police detail required
-  - **CBP** = Crane and Boom Permit
-  - **RS** = Rescheduled **to** {date}
-  - **TBRS** = To be rescheduled **from** {date}
-  - "RS TO X FROM Y" = date swap (pushed up)
-- Job revenue stays in backlog until job is complete and customer satisfied (no partial $ recognition).
-- Requirements enforcement UX: **polite reminder pop-up** (no hard warnings/blocks). Requirements that are not Approved or Not Required are clearly indicated with their actual status.
-
-## 0.9 UX Priority (Now)
-
-UX is a first-class priority for this scheduler module. The goal is **low-friction dispatch work** (fast, obvious, hard to misuse) and **low-ops burden** (easy to start/stop, diagnose, and recover).
-
-**UX principles (apply to every UI change):**
-- **Make the "happy path" obvious**: schedule view loads with minimal inputs; clear primary CTA; sensible defaults.
-- **Progressive disclosure**: keep advanced controls (filters, diagnostics, admin settings) out of the primary flow.
-- **Guardrails over cleverness**: validate early, explain *why* a write is blocked (conflict windows, overlap, midnight, missing roster) and how to fix it.
-- **Fast feedback**: optimistic UI only when safe; otherwise show immediate status, errors, and next action.
-- **Keyboard-first and accessibility-minded**: tab order, visible focus, ARIA where appropriate; avoid UI patterns that require precision mouse work.
-- **Operational clarity**: surface "system state" minimally (API reachable, timezone in use, roster-linked semantics) without leaking sensitive internals.
-
-**Definition of Done for any user-facing change:**
-- Adds/updates smoke coverage where feasible (API) and/or integration coverage when correctness is at risk.
-- Includes clear error strings and user-facing affordances (retry, reset, copy details) where a failure is likely.
-- Does not introduce hydration mismatches or environment-specific assumptions.
+Owner: Cole  
+Platforms: iOS + Windows  
+Engine assumption (editable): Unity 2D (URP optional). If you choose something else later, keep the data + systems architecture the same.
 
 ---
 
-## 1. Scope Boundaries (Beta)
-### In scope (Beta)
-- Full-fidelity **import** of all relevant workbook data (backlog + completed + exception lists).
-- Core CRUD for Customers, Jobs, Schedule Segments.
-- Equipment inventory and crew resources (count-based, editable quantities).
-- Activity log for all changes (who/what/when).
-- Schedule history (structured going forward; legacy RS/TBRS parsed from Notes with source tags).
-- Reports equivalent to current "SUMM" plus weekly comparison value ("previous week backlog $").
-- Notes extraction with suggested structured fields + manual overrides.
-- Customer scheduling notifications (SMS + email; scheduler-triggered, not automatic).
-- Dispatch board multi-foreman conflict visibility (equipment double-booking, person conflicts, capacity warnings, job overlap detection).
-- Seasonal freeze window calendar overlay (admin-managed historical bands; display only).
-
-### Explicitly out of scope (Beta)
-- Full-feature crew mobile app / crew confirmation workflow automation — **post-v1, native app**. See §5.8.
-- Automated external permit integration.
-- Perfect historical reconstruction of every note nuance (we keep `notes_raw` always).
-- Notes parsing expansion beyond tree service vocabulary — post-v1. See §3.2.
-- BETWEEN_JOBS travel automation (AUTO source) — post-v1.
+## 0) Product Goal
+Build a 2D, grid-based, turn-based roguelike that blends:
+- **Manual primary weapon** targeting/aiming (tactical roguelike feel)
+- **Passive auto-firing secondary weapons** each turn (bullet heaven feel)
+- **Extraction gameplay loop** (risk/reward, loot pressure, exfil as an event)
+- **Tarkov-like stash + home base building** with collectible materials and meaningful inventory management
+- Strictly **PvE**
+- **Planned community mod support** (phased: balance/content first, custom assets later)
 
 ---
 
-## 2. Data Model (Authoritative)
+## 1) Locked Design Decisions (current)
 
-### 2.1 Users & Roles
-**User**
-- id, name, email, role: `MANAGER | SCHEDULER | VIEWER` (beta default; can expand later)
-- active flag
+### 1.1 Turn model
+Roguelike turns (time advances on player action). Per-turn order:
+1) Player action (move / primary attack / ability / item / interact / wait)  
+2) Passive weapon auto-fire step  
+3) Enemy step  
+4) World tick (vents / hazards / status)
 
-**Permission baseline**
-- Manager: full access
-- Scheduler: edit most job/schedule fields; manager can refine later
-- Viewer: read-only
+### 1.2 Equipment slots
+- Primary Weapon (manual)
+- Passive Weapon I (auto)
+- Passive Weapon II (auto; unlockable per-class via base upgrade)
+- Armor (1)
+- Accessories (2)
+- Belt (1; dedicated slot — see 1.18)
+- Class-Unique Equipment (1)
 
-### 2.2 Customers
-**Customer**
-- id
-- name (primary)
-- optional: phone/email fields (beta optional)
-- unhappy/risk flags live here (customer-level)
-- deleted_at (nullable; soft delete — required for Sylvara merge compatibility)
+### 1.3 Controls
+- iOS: one-hand friendly (virtual d-pad or swipe-to-step; quick action buttons)
+- PC: numpad movement (1–9), wait on 5; attack/aim bindings
 
-**CustomerRisk (Unhappy Customer)**
-- id, customer_id
-- severity (1–10)
-- reasons (join table: **CustomerRiskReason** — customer_risk_id, risk_reason_id FK to admin-managed RiskReason list)
-- narrative (text)
-- status: `OPEN | MONITORING | RESOLVED`
-- owner_user_id (optional)
-- created_at, updated_at
+### 1.4 Run structure
+Extraction PvE sessions (10–20 min target). Extraction is an **event** (countdown + escalating pressure).
 
-### 2.3 Jobs
-**Job**
-- id, customer_id
-- equipment_type: `CRANE | BUCKET`
-- sales_rep_code (text; normalized to uppercase-trimmed at import and on entry — see §11)
-- job_site_address (text)
-- town (text)
-- estimate_id (nullable UUID FK → estimates) *(NULL for all legacy/import/standalone-era jobs; populated in the integrated era when a job is created from an approved Sylvara estimate — see §12.2)*
+### 1.5 Meta progression
+Home base upgrade web + base modules built with materials. Base upgrades increase player power.
 
-**Workflow state**
-- `state` is a **derived property, not a stored column.** Do not add a `state` column to the jobs table. Derive it at query time using the algorithm in §2.5.
-- The one exception is `COMPLETED`: a job is COMPLETED when `completed_date IS NOT NULL`. Setting `completed_date` is the act of completing a job. There is no separate boolean or enum column.
-- completed_date (date; set explicitly by scheduler; defaults to last segment's end date as a convenience — but user must confirm; required if no segments exist)
-- completed_by_user_id (nullable FK; who marked it complete)
-- completion_notes (optional)
+**Station Depth** and **Threat Level** are separate systems:
+- **Station Depth** — persistent per-class progression value (see 1.27); player selects run Depth up to their unlocked max
+- **Threat Level** — per-run escalation state driven by turn count (T80/T140/T200; see 1.7)
 
-**Financials & estimates**
-- amount_dollars (numeric)
-- estimate_hours_current (numeric) *(authoritative ONSITE labor hours required; can be set while TBS before any schedule exists)*
-- travel_hours_estimate (numeric, default 0) *(scheduler-entered travel-time estimate for planning/reporting and future auto-travel; not used to size ONSITE calendar blocks in beta)*
-  - Derived (not stored): total_hours_estimate = estimate_hours_current + travel_hours_estimate
-  - Note: Hours can be decided before a job is scheduled. Actual calendar time blocks exist only on ScheduleSegments/TravelSegments.
+### 1.6 Death-loss difficulty option (player-selectable)
+Players choose **Death-Loss Difficulty** at the beginning of their initial run and can change it between runs.
 
-**EstimateHistory**
-- id, job_id
-- changed_by_user_id
-- changed_at
-- previous_amount_dollars, new_amount_dollars (optional)
-- previous_estimate_hours, new_estimate_hours
-- note (text; optional)
+Four modes (ordered hardest → easiest):
 
-### 2.3.1 WeeklyBacklogSnapshot
+- **Hardcore** — Permadeath
+  - Death = run ended AND class Station Depth progress is permanently reset to 0
+  - Loss on death: everything (no stash protection)
+  - Drop rate modifier: **+ larger boost**
+  - Station Depth setback on death: full reset to 0
+- **Hard**
+  - Loss on death: keep only Secure Pouch
+  - Drop rate modifier: **+ small boost**
+  - Station Depth setback on death: reset to 0 extractions at current Depth level
+- **Medium (default)**
+  - Loss on death: keep Secure Pouch + **1 chosen carried gear item**
+  - Drop rate modifier: **0**
+  - Station Depth setback on death: lose half of current Depth-level extraction progress
+- **Soft**
+  - Loss on death: keep all equipped gear; lose backpack loot (except Secure Pouch)
+  - **Recovery Drone** base upgrade recovers a % of backpack items per-item (starts at 0%; upgradeable in tiers via `BASE_Node_RecoveryDrone_<Class>` nodes)
+  - Drop rate modifier: **- slight penalty**
+  - Station Depth setback on death: **none** (immune)
 
-Stores a point-in-time capture of backlog metrics, taken once per week. Used to power the SUMM prior-week comparison and the year-over-year Comparable Report.
+Difficulty selection must be shown clearly:
+- pre-run
+- in pause/options (read-only during run)
+- post-run summary
 
-**WeeklyBacklogSnapshot**
-- id (UUID)
-- snapshot_date (date — normalized to the Saturday that opens the captured week; ISO week anchor is Saturday)
-- year (integer — derived from snapshot_date for query convenience)
-- week_number (integer — ISO week number 1–53, derived from snapshot_date)
-- equipment_type: `CRANE | BUCKET`
-- sales_rep_code (text, nullable — NULL for equipment-level total rows; populated for per-rep rows)
-- scheduled_dollars (numeric, nullable — total $ of jobs with at least one active ScheduleSegment; NULL for historical pre-app rows)
-- tbs_dollars (numeric, nullable — total $ of TBS jobs with no active segments; NULL for historical pre-app rows)
-- total_dollars (numeric, nullable — scheduled_dollars + tbs_dollars; NULL for historical pre-app rows)
-- scheduled_hours (numeric — total estimate_hours_current of scheduled jobs)
-- tbs_hours (numeric — total estimate_hours_current of TBS jobs)
-- total_hours (numeric — scheduled_hours + tbs_hours)
-- crew_count (numeric — derived at snapshot time from active foreman Resources for this equipment type; supports fractional values e.g. 2.5)
-- crew_count_override (numeric, nullable — if set by a MANAGER, this value is used in place of crew_count for display and calculations; crew_count retains the derived value for audit purposes)
-- created_at
-- deleted_at (soft delete — Sylvara standard)
+### 1.7 Run timer escalation (greed pressure) — LOCKED SCHEDULE (tunable later)
+Run timer is measured in **turns elapsed**. Escalation thresholds:
+- **T80**: Alert Level 1
+- **T140**: Alert Level 2
+- **T200**: Alert Level 3 (panic tier)
 
-**Unique constraint:** (snapshot_date, equipment_type, sales_rep_code) — NULL sales_rep_code is treated as a distinct value (use a partial unique index or NULLIF as appropriate in Prisma).
+Alert effects are data-driven and applied via world tick.
 
-**Dollar fields are nullable by design.** Historical snapshots seeded from the comparable spreadsheet populate only hour fields. Dollar accumulation begins from the app go-live date onward. The UI must handle NULL dollar fields gracefully — display "—" rather than $0.
+### 1.8 Every run has an explicit Goal Package (mission framing)
+Every run generates with a **Goal Package** that defines:
+- Primary objective(s) required to enable extraction and/or win conditions
+- Optional secondary objectives that increase payout multipliers
+- Reward bias (materials/currency/gear)
+- Threat/time-pressure bias
 
-**Crew count derivation:** At snapshot time, count active (non-deleted, active=true) foreman Resources. For CRANE snapshots, count foremen whose primary equipment is CRANE (or who are unassigned to a specific type — use all active foremen if no equipment type is tracked on Resource). For BUCKET, same logic. If Resource does not track equipment type, use total active foreman count for both. A MANAGER may override the displayed crew_count for any snapshot via crew_count_override without losing the derived value.
+### 1.9 Mod support strategy (LOCKED): "Compiled defs + JSON overlay"
+- **Phase 1 (1.0)**: ScriptableObjects are the authoritative "compiled" game content; registries + DTOs exist.
+- **Phase 2 (post-1.0)**: JSON mods can **override/extend** defs by stable ID (PC-first).
+- **Phase 3 (later)**: optional support for custom art/audio via Addressables/AssetBundles.
 
-**Legacy scheduling fields**
-- approval_date (date)
-- approval_call (text)
-- confirmed_text (legacy string from sheet; preserved)
-- confirmed_by_user_id (nullable; going forward defaults to current user)
-- confirmed_at (nullable)
+### 1.10 Map model (LOCKED)
+- **Single large zone with subareas** (connected wings/sections; no floor transitions).
+- The zone layout is **procedurally generated per run** from a **seed** (deterministic).
+- Each subarea is assigned a **Biome** (data-driven) and may reference an **Environment Profile** to enable future mechanics (oxygen/vacuum/radiation/etc.).
+- Performance rule:
+  - Only **active subarea(s)** near the player simulate **AI turns, spawn vents, and hazards**.
+  - Outside active subarea(s), entities are "sleeping" (stored state, no turns).
+  - Exception: enemies that are **Alerted** (aware of the player) may continue to act/pursue across subareas (until impeded, de-alerted, or killed).
+- Procgen begins in M4.3; earlier milestones may use a fixed test map.
 
-**Constraints / flags extracted from sheet columns**
-- crane_model_suitability: `1090 | 1060 | EITHER | NULL` (for crane jobs; can be per segment later)
-- requires_spider_lift (bool) (for bucket jobs)
-- winter_flag (bool)
-- frozen_ground_flag (bool) *(triggers non-blocking `FROZEN_GROUND_REQUIRED` warning on scheduling attempt; no weather API; scheduler decides)*
+### 1.11 Procedural generation + biomes (LOCKED)
+- Each run generates a **large procedural map** composed of connected **subareas**.
+- Generation must be **seeded and deterministic**:
+  - Run save stores `run_seed` and `mapgen_profile_id` (a `MapGenProfileDef` ID) so runs can be reproduced and migrated safely.
+- Subareas are assigned a `biome_id`.
+  - Biomes provide hooks for **spawn profiles**, **hazards**, **loot bias**, and **objective bias**.
+- Biomes may attach an `environment_profile_id`:
+  - Enables future "raid conditions" (oxygen supply on surfaces, vacuum corridors, toxic atmospheres, derelicts, infestation, etc.).
 
-**Notes**
-- notes_raw (long text; preserved forever)
-- notes_last_parsed_at
-- notes_parse_confidence (JSON object; per-field confidence scores 0–100, e.g. `{"push_up_if_possible": 95, "dtl": 80}`)
+### 1.12 Fog of war (LOCKED)
+- Fog of war is **on** by default.
+- Explored tiles **stay revealed** for the run.
+- Enemy positions are **not** retained — you know the map, not where enemies are.
+- Intel base upgrades can reveal: loot cache locations, boss/objective room locations, vent locations.
+- Intel also unlocks **additional scenario options** on the pre-run draft screen (see 1.13).
 
-**Structured fields extracted from notes (beta set)**
-- push_up_if_possible (bool)
-- must_be_first_job (bool)
-- preferred_start_time (time, nullable)
-- preferred_end_time (time, nullable)
-- availability_notes (text) (for blackouts/ranges that don't parse cleanly)
-- no_email (bool)
-- preferred_channels (join table: **JobPreferredChannel** — job_id, channel: `CALL | TEXT | EMAIL`)
-- contact_allowed (bool, default true)
-- contact_owner_user_id (nullable)
-- contact_instructions (text)
-- access_constraints (join table: **JobAccessConstraint** — job_id, access_constraint_id FK to AccessConstraint admin list)
-- access_notes (text)
+### 1.13 Pre-run scenario selection (LOCKED)
+- Before each run, the player is presented a **draft of 2–3 randomly generated run previews**.
+- Each preview shows: Goal Package type, Biome/zone identity, Reward bias (mats vs gear), Threat level modifier.
+- **Intel base upgrades** unlock additional draft options (larger pool to pick from).
+- Draft pool size is a tunable data field (not hardcoded).
 
-**Soft delete**
-- deleted_at (nullable timestamptz) *(required for Sylvara merge compatibility; use `deleted_at IS NULL` in all queries; never hard-delete job rows)*
+### 1.14 Passive Slot II unlock (LOCKED)
+- Every class starts with 1 passive weapon slot.
+- Passive Slot II is unlocked **per-class** via a dedicated home base upgrade node.
+  - Node IDs follow pattern: `BASE_Node_PassiveSlotII_<ClassName>`
+  - Requires a minimum Station Depth gate (not trivially available on run 2).
+- Once unlocked, Passive Slot II is permanently available for all future runs of that class.
+- `ClassDef` carries a `passive_slots` field (default: 1) and `passive_slot_ii_node_id`.
 
-### 2.4 Requirements (Permits / Police Detail / etc.)
-Use one unified entity for regulatory/dependency requirements.
+### 1.15 Spec system (LOCKED)
+Every class has a **slot-keyed spec system** that defines mid-run build identity.
 
-**Requirement**
-- id, job_id
-- requirement_type_id (FK to admin-managed list)
-- status: `REQUIRED | REQUESTED | APPROVED | DENIED | NOT_REQUIRED`
-- notes (text)
-- source: `LEGACY_PARSE | USER_ACTION` *(how this requirement was created — parsed from notes_raw vs. manually entered)*
-- raw_snippet (text, nullable) *(original notes text that triggered this requirement; preserved for traceability when source=LEGACY_PARSE)*
-- deleted_at (nullable timestamptz; soft delete)
-- created_at, updated_at
+**Branches (per class):**
+- 4 branches, one per slot: Class Ability / Primary Weapon / Passive I / Passive II (post-unlock)
+- Each branch has 2–3 thematic variants; some variants require base upgrades to unlock
+- Branch spec IDs follow pattern: `SPEC_<ClassName>_<SlotTarget>_<BranchName>_<N>`
 
-**RequirementType (admin-managed)**
-Seed at minimum:
-- POLICE_DETAIL (DTL)
-- CRANE_AND_BOOM_PERMIT (CBP)
-- TREE_PERMIT
-- (extendable via UI by manager/admin)
+**Per-run spec flow:**
+1. Early run: 2 **generic specs** drop (class-filtered but slot-keyed; drawn from broader class pool)
+2. Mid-run: player makes an **explicit branch commitment** (pick from available branches; some gated by base upgrades)
+3. Primary branch: 2 additional specs + **1 capstone** (build-defining rule change that may cross slot boundaries)
+4. Secondary branch: up to 2 specs available; **capstone locked out**
+5. Total per full run: ~8 specs
 
-### 2.5 Scheduling
-Because jobs can be scheduled in pieces, scheduling is segment-based.
+**Spec presentation:** offered as a draft of 2–3 choices at key moments (loot drop events).
 
-**ScheduleSegment**
-- id, job_id
-- segment_group_id (uuid, nullable; links split-across-midnight segments so paired operations are possible)
-- segment_type: `PRIMARY | RETURN_VISIT`
-- start_datetime (required; timestamptz, UTC-stored)
-- end_datetime (required; timestamptz, UTC-stored; must be same local calendar day as start_datetime)
-- scheduled_hours_override (numeric, nullable; rare; if set, overrides derived hours for reporting/state math)
-- deleted_at (nullable; soft delete — required so vacated-slot detection can trigger the push-up recommender)
-- notes (text)
-- created_by_user_id, created_at, updated_at
+**What specs modify:** active ability, class-unique equipment behavior, or both (defined per spec).
 
-**TravelSegment**
-- id
-- foreman_person_id (FK to Resource type PERSON; must have is_foreman=true)
-- related_job_id (nullable)
-- start_datetime, end_datetime (required; timestamptz, UTC-stored)
-- travel_type: `START_OF_DAY | END_OF_DAY | BETWEEN_JOBS` *(beta uses START_OF_DAY and END_OF_DAY only; BETWEEN_JOBS / AUTO source is post-v1)*
-- source: `MANUAL | AUTO` (AUTO is post-v1)
-- locked (bool, default false) *(AUTO must not override locked travel blocks)*
-- notes (text)
-- created_by_user_id, created_at, updated_at
-- deleted_at (nullable; soft delete only — never hard-delete)
+**Capstone examples:** "Your passive weapon now re-targets to your primary weapon's last target tile"; "Bulwark Node detonates on destruction, dealing damage equal to absorbed shield value."
 
-**Segment scope rule:** one ScheduleSegment = one calendar day. Multi-day jobs use multiple segments. This keeps crew assignment unambiguous (one crew per segment) and simplifies the calendar view. Segments may be partial-day (e.g., 9:00–13:00 is valid). Segments must not cross midnight local time — a segment that would run from 8pm to 2am must be split at midnight into two segments on consecutive days.
+**New defs required:** `SpecDef`, `SpecBranchDef` (see section 5.7).
 
-**Midnight split linkage (beta):** When a segment is split at midnight, create two ScheduleSegments and set both to the same `segment_group_id`. UI must treat them as "linked halves": on move/resize/delete of one half, prompt "Apply to linked half too?" (default **No**). If the user chooses Yes, apply the same operation to the other half in the same database transaction.
+### 1.16 Class identity model (LOCKED)
+- Class is selected at base before the run (committed for the run).
+- Subclass identity emerges **mid-run** through class-unique gear drops + spec choices.
+- Class-unique gear modifies the base active ability — equipping a piece defines your build direction for that run.
+- Three strategic axes all classes engage with differently: **swarm management**, **deployment/setup**, **positioning/board control**.
+- Classes are pre-run picks; spec branches deepen the chosen direction mid-run.
 
-**Linked-half move semantics (authoritative):** If the user chooses "Apply to linked half too?" on a move/resize, preserve the midnight boundary (each half stays within its own local date). Apply the analogous delta within each day; if either half would cross midnight, reject with `CROSSES_MIDNIGHT`.
+### 1.17 Enemy alert system (LOCKED)
+**Alert triggers** are data-driven per enemy type via `AlertProfileDef`:
+- Line-of-sight (LoS) — default trigger for most enemies
+- Ally killed nearby — proximity-based awareness
+- Player interacts with an object (terminal, vent seal, etc.)
+- Proximity threshold (N tiles, no LoS required)
+- Trigger set and thresholds are defined per enemy; equipment affixes can reduce proximity thresholds
 
-**State derivation (authoritative algorithm)**
-Compute `scheduled_effective_hours` = sum over all non-deleted segments:
-- if `scheduled_hours_override` is set → use that value
-- else → compute `(end_datetime - start_datetime)` in hours using wall-clock time in the company timezone
+**States:**
+- **Idle**: default; follows patrol/wander behavior
+- **Alerted**: pursues player; active across subareas; never de-alerts
+- **Searching**: sub-behavior when player is lost; moves toward last known position
 
-Then derive state:
-1. If `completed_date IS NOT NULL` → `COMPLETED` (never auto-derived; set only by explicit scheduler action)
-2. Else if `scheduled_effective_hours <= 0` → `TBS`
-3. Else if `estimate_hours_current` is NULL → `PARTIALLY_SCHEDULED` (surface "Missing estimate hours" warning)
-4. Else if `scheduled_effective_hours < estimate_hours_current - 0.01` → `PARTIALLY_SCHEDULED`
-5. Else → `FULLY_SCHEDULED`
+**De-alert rule:** enemies **never de-alert** once triggered (except via class abilities like Nullrunner threat-drop).
 
-(The 0.01 tolerance handles floating-point imprecision. Hours are stored as decimals.)
+`EnemyDef` requires `alert_profile_id`. New def: `AlertProfileDef` (see section 5.1).
 
-**ScheduleEvent (history)**
-- id, job_id
-- event_type: `RESCHEDULE_TO | TBS_FROM | DATE_SWAP | NOTE_PARSE_EVENT | MANUAL_EDIT`
-- source: `LEGACY_PARSE | USER_ACTION`
-- from_at (timestamp, nullable; legacy date-only: set 00:00 in company timezone, then store as timestamptz/UTC-normalized)
-- to_at (timestamp, nullable; legacy date-only: set 00:00 in company timezone, then store as timestamptz/UTC-normalized)
-- actor_user_id (nullable)
-- actor_code (text; for legacy initials)
-- raw_snippet (text; for legacy parse traceability)
-- created_at
+### 1.18 Belt slot (LOCKED)
+Belt is a **dedicated equipment slot** (not replacing accessories).
 
-**VacatedSlot**
-A dedicated record created whenever a time window is freed. Drives the push-up recommender. Create it in the **same database transaction** as the segment mutation, inside the scheduling service, using the segment's **pre-change** start/end values. Do not derive this from ActivityLog diffs — an explicit table makes the recommender straightforward to build, test, and extend.
-- id
-- source_segment_id (FK to ScheduleSegment; the segment that was deleted/moved/shortened)
-- source_action: `DELETED | MOVED | SHORTENED`
-- start_datetime, end_datetime (the freed window)
-- slot_hours (numeric; wall-clock hours of the freed window, computed at creation time)
-- equipment_type (copied from the source segment's job at creation time; used for candidate filtering)
-- status: `OPEN | USED | DISMISSED`
-- chosen_job_id (nullable FK; set when scheduler applies a push-up candidate)
-- chosen_segment_id (nullable FK; set when a new segment is created from this slot)
-- created_at
-- dismissed_at (nullable), dismissed_by_user_id (nullable)
+- Drops as loot; follows normal rarity tiers (Common → Relic)
+- **Tier derived from rarity:** Common/Uncommon=T1, Rare=T2, Epic=T3, Relic=T3+
+- **Per tier:** unlocks 1 additional **type-agnostic utility slot** (T1=1, T2=2, T3=3)
+- **Currency retention on death:** scales with tier (exact % tunable in `BeltTierDef`; starting values: T1=0%, T2=25%, T3=50%, T3+=75%)
+- **Never degrades** on death
+- **Mod socket type:** utility/economic affixes only — Belt uses the Chip crafting system but compat tags restrict it to utility and economic affixes only (no offensive or defensive chips)
 
-**SchedulingConflictDismissal**
-Tracks dismissed conflict notices per date per user — prevents re-surfacing dismissed items on the dispatch board conflict summary panel.
-- id
-- user_id (FK → users)
-- conflict_date (date)
-- conflict_type: `EQUIPMENT_OVERCOMMIT | PERSON_CONFLICT | CAPACITY_WARNING | JOB_OVERLAP`
-- conflict_key (varchar; identifies the specific conflict, e.g. resource_id for equipment conflicts)
-- dismissed_at (timestamptz)
+**Utility slot categories** (type-agnostic; player chooses what to fill each slot with):
+- Grenades — throwable AoE (damage/stun/smoke)
+- Consumables — single-use actives (medkit, stimpack, shield charge)
+- Tools — utility items (grapple hook, scanner pulse, door override)
+- Traps — placeables (mine, tripwire, decoy beacon)
+- Ammo types — swap between ammo variants for primary weapon
 
-### 2.6 Job Blockers (TBS constraints)
-Some jobs are "TBS" specifically because something blocks scheduling. Track blockers explicitly (not buried in notes).
+**Utility item rules:**
+- Consumed on use; restocked at base, vendors, or found as loot drops during runs
+- Multiple acquisition methods: loot drops, crafted at base modules, purchased from vendors
 
-**Overlap rule with Requirements:** A permit-related blocker (e.g., PERMIT_PENDING) and a Requirement (e.g., CBP status=REQUESTED) can coexist for the same job — they serve different purposes. The Requirement tracks the permit's approval lifecycle. The JobBlocker tracks whether that pending permit is actively preventing scheduling. When a permit is APPROVED, the scheduler clears the corresponding JobBlocker manually. Do not auto-clear blockers from requirement status changes.
+New defs: `BeltDef`, `BeltTierDef`, `UtilityItemDef` (see section 5.8).
 
-**JobBlocker**
-- id, job_id
-- blocker_reason_id (FK to admin-managed list)
-- status: `ACTIVE | CLEARED`
-- notes (text)
-- created_by_user_id (nullable for legacy import)
-- created_at, cleared_at (nullable), cleared_by_user_id (nullable)
-- deleted_at (nullable timestamptz; soft delete)
+### 1.19 Gear durability (LOCKED)
+- **Weapons and armor** degrade; accessories and Belt **do not**.
+- Degradation occurs **on death only** (not mid-run).
+- Stage count is **variable by rarity** (exact mapping TBD via playtesting; suggested start: Common=1, Relic=3).
+- **Broken** = gear is non-functional until repaired.
+- **Repair locations:**
+  - Base (Gunsmith module): materials only
+  - Mid-run vendor (field repair): currency + materials (premium cost)
+- **Scrapping:** gear can be scrapped instead of repaired
+  - At vendors mid-run or always at base
+  - Yields **type-specific parts** (weapon scraps / armor scraps)
+  - Condition affects yield: Broken = fewer parts than Fine
+- `GearDef` needs: `durability_stage` (int), `max_durability_stages` (int, rarity-derived), `scrap_yield_profile_id`
 
-**BlockerReason (admin-managed)**
-- id
-- code (unique, e.g., PERMIT_PENDING, CUSTOMER_UNRESPONSIVE)
-- label
-- active (bool)
+New def: `ScrapYieldDef` (see section 5.10).
 
-### 2.7 Resources (Equipment + People)
-Start count-based; keep path to named units later.
+### 1.20 Status effects (LOCKED)
+All 6 status effects are **bidirectional** (apply to both enemies and the player).
 
-**Resource**
-- id
-- resource_type: `EQUIPMENT | PERSON`
-- name
-- inventory_quantity (int; editable for EQUIPMENT; for PERSON must be 1 — UI must hide/disable editing when resource_type=PERSON, and backend must enforce = 1)
-- is_foreman (bool, default false) *(only meaningful when resource_type=PERSON)*
-  - **PERSON resources are unique individuals** (inventory_quantity must be 1; do not decrement "inventory" when staffing rosters — exclusivity is enforced via roster membership uniqueness).
-- active (bool)
-- deleted_at (nullable timestamptz; soft delete)
+| Effect | Stack rule | Core behavior |
+|--------|-----------|---------------|
+| Poison | Stack | DoT; intensity scales with stacks |
+| Burn   | Refresh + spread | DoT; spreads to adjacent tiles/entities on application |
+| Shock  | Refresh | Reduces enemy action (skip turn or speed penalty) |
+| Freeze | Refresh | Full immobilize for N turns; shatters for bonus damage |
+| EMP    | Refresh | Disables mechanical enemies / destroys shields |
+| Bleed  | Stack | DoT that scales with movement (more damage if entity moves) |
 
-**ResourceReservation**
-- id, schedule_segment_id, resource_id
-- quantity (int; default 1)
-- notes (text)
-- deleted_at (nullable timestamptz; soft delete)
-- Unique constraint on (schedule_segment_id, resource_id) WHERE deleted_at IS NULL — prevents double-booking the same resource on the same segment.
+**Application:** guaranteed on weapon type; proc-chance on mods (defined per `StatusEffectDef`).
+**Player resistances:** on `ArmorDef` and `ItemDef` via `status_resistances[]`.
+**Environment application:** `EnvironmentProfileDef` can passively apply statuses per turn (biome hazard hooks).
 
-### 2.8 Home Bases (manager-managed)
-Dump sites function as "home base." Managers can add/remove home bases over time. Home bases include addresses for future routing integrations.
+New def: `StatusEffectDef` (see section 5.6).
 
-**HomeBase**
-- id
-- name (e.g., Beverly, Natick)
-- address_line1, address_line2, city, state, postal_code
-- opening_time (time, nullable) *(soft anchor used when a day has no events; falls back to company operating hours if unset)*
-- closing_time (time, nullable) *(UI display preference only; not a hard scheduling boundary)*
-- active (bool)
-- deleted_at (nullable timestamptz; soft delete)
-- created_at, updated_at
+### 1.21 Exfil system (LOCKED)
+- All exfil points are **hidden** until revealed by proximity or Intel upgrades.
+- **5 exfil types** in v1:
+  - **Quiet** — no countdown, no alarm; Intel-gated or rare
+  - **Hot** — standard countdown (default 12 turns) with escalating pressure
+  - **Conditional** — only opens after a specific trigger (boss dead, uplink complete, bribe paid)
+  - **Emergency** — always available; significant cost (exact cost TBD; see Open Decisions)
+  - **Timed** — open for a window of turns, then closes permanently
+- **Exfil type dynamics:**
+  - Types can shift based on **alert level** (e.g. Quiet becomes Hot at T80) — independent of player actions
+  - Types can be **player-influenced** (e.g. bribing a terminal converts Hot → Quiet) — independent of alert-level shifting
+  - Both mechanisms can exist in the same run but are not required simultaneously
+- Goal packages and biomes bias which exfil types appear.
 
-### 2.9 Foreman Day Rosters (authoritative staffing; day-exclusive members)
-Crews are composed per-day under a foreman. A non-foreman crew member may be on **at most one foreman roster per day**.
+New def: `ExfilDef` (see section 5.11).
 
-**ForemanDayRoster**
-- id
-- date (local company timezone date)
-- foreman_person_id (FK to Resource of type PERSON; is_foreman=true)
-- home_base_id (FK HomeBase) *(required at roster creation; used as travel anchor and scheduling availability anchor)*
-- preferred_start_time (time, nullable) *(soft anchor only; not a hard boundary)*
-- preferred_end_time (time, nullable) *(soft anchor only; not a hard boundary)*
-- notes (text)
-- created_by_user_id, created_at, updated_at
-- deleted_at (nullable timestamptz; soft delete)
+### 1.22 Biomes v1 (LOCKED)
+Five biomes for v1, each with distinct spawn profiles, hazards, and environmental flavor:
 
-**ForemanDayRosterMember**
-- id
-- roster_id (FK ForemanDayRoster)
-- date (denormalized copy from roster.date for uniqueness enforcement)
-- person_resource_id (FK Resource type PERSON)
-- role: `CLIMBER | GROUND | OPERATOR | OTHER`
-- created_at
-- Unique (day-exclusive): (tenant_id, date, person_resource_id) WHERE deleted_at IS NULL — a crew member cannot appear on two rosters on the same day.
+| ID | Name | Unique hazards | Environment | Enemy bias |
+|----|------|---------------|-------------|-----------|
+| `BIOME_ResearchLab` | Research Lab | Chemical spills, toxic gas vents | Breathable/thin | Disruptor, Spitter |
+| `BIOME_ServerCore` | Server Core | EMP pulses, overload tiles | Breathable | Swarmer heavy |
+| `BIOME_BioContainment` | Bio-Containment | Toxic atmosphere, organic growth tiles | Toxic | Infestation spawns, Leaper |
+| `BIOME_ArmoryFoundry` | Armory/Foundry | Fire tiles, explosion hazards | Breathable | Anchor, Buffer, military enemies |
+| `BIOME_ReactorLevel` | Reactor Level | Radiation, heat tiles; escalation amplified | Thin/toxic | High-elite density |
 
-### 2.10 Segment Staffing Link (roster-backed)
-Schedule segments reference the roster for that day; staffing defaults from the roster.
+- Hazard exclusivity: some hazards are biome-exclusive; universal hazards are biome-tuned in intensity.
+- Each biome has a `BiomeDef` with `environment_profile_id`, `spawn_profile_id`, and hazard tags.
 
-**SegmentRosterLink**
-- id
-- schedule_segment_id (FK; one per segment; UNIQUE)
-- roster_id (FK ForemanDayRoster)
-- created_by_user_id, created_at
-- Unique: (schedule_segment_id)
+### 1.23 Subarea scale and connectivity (LOCKED)
+- **Subarea count** scales with Station Depth (early runs smaller, later runs larger); exact ranges stored as tuning values in `MapGenProfileDef`.
+- **Layout topology** is **goal-driven** — the goal package shapes the map (boss rooms terminal, uplinks distributed, vault rooms mid-map, etc.).
+- **Subarea size** variable per biome, defined as min/max bounds in `MapGenProfileDef`.
+- **Connector types** (all in v1):
+  - Open doorway — no interaction needed
+  - Locked door — requires key item or terminal hack
+  - Airlock — variable traversal turns (1+); optional spawn trigger fires when player commits to crossing (dramatic tension mechanic)
+  - Collapsed passage — one-way only, no backtracking
+  - Vent shaft — alternate route; small entities only or requires tool
 
-A ScheduleSegment **without** a corresponding SegmentRosterLink is **not** considered scheduled for any foreman or day. All scheduling writes that create segments for a foreman/day must create the ScheduleSegment **and** its SegmentRosterLink in the **same DB transaction**.
+New def: `ConnectorDef` (see section 5.4).
 
-### 2.11 Customer Scheduling Notifications
-Notifications are intentional scheduler-triggered acts, not automatic side effects. The system tracks all schedule changes internally (VacatedSlot, ScheduleEvent, ActivityLog) but sending a customer notification requires explicit scheduler confirmation.
+### 1.24 Currency model (LOCKED)
+- **Currency follows death-loss rules** — amount retained on death is determined by Belt tier's `currency_retention_pct`.
+- Currency retained via Belt applies on top of the death-loss difficulty rules.
+- **Currency sinks (v1):** repairs at mid-run vendor, weapon mod rerolls, exfil bribes, Intel scans mid-run, vendor gear/item purchases, crafting catalysts, Emergency exfil cost, base module upgrade components, Chip replacement material fee.
 
-**ScheduleNotificationLog**
-- id, job_id
-- schedule_segment_id (nullable FK; null for cancellation notifications where no segment remains)
-- notification_type: `JOB_SCHEDULED | JOB_RESCHEDULED | JOB_CANCELLED | CONFIRMATION_REQUEST`
-- sent_by_user_id (FK → users)
-- channels_sent (jsonb; array of channels actually used, e.g. `["SMS", "EMAIL"]`)
-- channels_suppressed (jsonb, nullable; channels suppressed due to opt-in rules, e.g. `[{channel: "EMAIL", reason: "no_email_flag"}]`)
-- customer_response (enum, nullable): `CONFIRMED | RESCHEDULE_REQUESTED | NO_RESPONSE`
-- customer_responded_at (timestamptz, nullable)
-- sent_at (timestamptz)
+### 1.25 Player stats (LOCKED)
 
-**Opt-in enforcement (all three must pass before any channel is used):**
-- `jobs.contact_allowed = true` — if false, block all outbound notifications
-- `jobs.no_email = false` — if true, suppress email channel
-- `jobs.preferred_channels` — only send via channels in this list
+**Damage calculation model:** Flat + percentage layers
+1. Base weapon damage
+2. + flat damage bonus (from gear/base nodes)
+3. × damage% multiplier (from gear/base nodes)
+4. × crit multiplier if crit (100% base + `crit_damage` stat)
 
-### 2.12 Seasonal Freeze Windows (admin-managed)
-Historical freeze window data for the dispatch board calendar overlay. Display only — no bearing on scheduling logic, attempt endpoints, or state derivation.
+**Runtime:** Stats are **cached on equip/unequip** and recalculated only on gear change or base node purchase. No per-turn recalculation.
 
-**SeasonalFreezeWindow**
-- id
-- label (varchar; e.g. "2023–2024 Freeze Window", "Typical Jan–Feb Freeze Period")
-- start_date (date)
-- end_date (date)
-- notes (text, nullable)
-- active (bool; whether to display this band on the current dispatch board)
-- created_by_user_id (FK → users)
-- created_at
+**Defensive stats:**
 
+| Stat | Mechanic |
+|------|----------|
+| Max HP | Total hit points |
+| Armor | Diminishing returns: `armor / (armor + K)` = % reduction; K is tunable in `CombatConstantsDef` |
+| Evasion | % chance to avoid a hit entirely |
+| Shield | Separate absorb pool; slow passive regen per turn |
+| Status Resistance | % reduction to status proc chance and/or duration |
+| Move Speed | Bonus tiles per turn |
 
-## 3. Notes Extraction (Import + Ongoing)
+**Offensive stats:**
 
-### 3.1 Principles
-- Always store **notes_raw** unchanged.
-- Extract structured fields with best-effort parsing + confidence.
-- Never silently discard information; if parse fails, keep it in raw notes and surface "unparsed signals" list.
+| Stat | Mechanic |
+|------|----------|
+| Damage (flat) | Added before % multipliers |
+| Damage% | Multiplier applied after flat bonuses |
+| Crit Chance | % to deal a critical hit |
+| Crit Damage | Bonus multiplier on crits (e.g. +50% = 150% total) |
+| Range | Bonus tiles added to weapon range |
+| CDR | % reduction to cooldown_turns; tracked fractionally per weapon; fires when accumulated value reaches a whole number |
+| Status Potency | Multiplier on DoT damage and status duration |
+| AoE Size | Bonus radius/width on blast/cone effects |
 
-### 3.2 Parsing rules (v1 — tree service vocabulary only)
-**Scope:** Tree service abbreviation vocabulary only for beta. Expansion to landscaping/snow removal parsing vocabulary is post-v1. See §11 for the post-v1 extensibility architecture.
+**Utility stats:**
 
-**Flags**
-- push_up_if_possible:
-  - triggers: "PUSH UP IF POSSIBLE", "PU", "P/U"
-- must_be_first_job:
-  - triggers: "MUST BE 1ST JOB", "WANTS TO BE 1ST JOB"
-- no_email:
-  - triggers: "NO EMAIL"
+| Stat | Mechanic |
+|------|----------|
+| HP Regen | Small HP recovery per turn or per room (tunable) |
+| Vendor Prices | Buy cheaper / sell higher (% modifier) |
 
-**Requirements**
-- DTL → Requirement(POLICE_DETAIL, status=REQUIRED, source=LEGACY_PARSE, raw_snippet preserved)
-- CBP → Requirement(CRANE_AND_BOOM_PERMIT, status=REQUIRED, source=LEGACY_PARSE, raw_snippet preserved)
-- "TREE PERMIT" / "TREE PERMIT NEEDED" → Requirement(TREE_PERMIT, status=REQUIRED, source=LEGACY_PARSE, raw_snippet preserved)
+**Explicitly excluded:** Loot find, currency find, utility item charges (charges are per-item), carry weight (pack is an expanding grid, not a weight limit).
 
-**Equipment suggestions**
-- DW → suggest Resource "Ditch Witch"
-- GRINDER / LIFT / etc. (expandable dictionary)
-These become suggested reservations; do not auto-reserve unless user confirms.
+**Class base stat matrix:**
 
-**Schedule history (legacy parse)**
-- RS {date} → ScheduleEvent(RESCHEDULE_TO, to_at, source=LEGACY_PARSE, raw_snippet preserved)
-- TBRS {date} → ScheduleEvent(TBS_FROM, from_at, source=LEGACY_PARSE, raw_snippet preserved)
-- RS TO {to} FROM {from} → ScheduleEvent(DATE_SWAP, from_at, to_at, source=LEGACY_PARSE, raw_snippet preserved)
-All legacy-derived events use source=LEGACY_PARSE and keep raw_snippet.
+| Stat | Warden | Revenant | Technoseer | Nullrunner |
+|------|--------|----------|------------|------------|
+| Max HP | High | Medium | Low | Low |
+| Armor base | High | Low | Low | Low |
+| Evasion base | None | Low | None | High |
+| Shield base | Medium | None | Medium | None |
+| Move speed | Slow | Medium | Medium | Fast |
+| Crit chance base | None | Medium | None | Medium |
 
-### 3.3 UI for extracted data
-On Job detail:
-- "Extracted from Notes" panel shows:
-  - detected flags, requirements, suggested equipment, schedule events
-  - confidence
-  - quick "accept/edit" actions
+Class base stats create distinct defensive/offensive identities; gear and specs can shift them but classes start meaningfully different.
+
+New def: `CombatConstantsDef` — tunable formula constants (armor K value, crit base multiplier, CDR cap, etc.).  
+New def: `PlayerStatsDef` — per-class base stat values (see section 5.12).
+
+### 1.26 Affix and Chip crafting system (LOCKED)
+
+**Affix assignment — hybrid slot model:**
+- **Slot-locked affixes:** only roll on compatible slot types
+  - Defensive affixes (HP, armor, evasion, shield, status resist, move speed) → armor-locked
+  - Offensive affixes (damage, crit, range, CDR, AoE, status potency) → weapon-locked
+  - Economic affixes (vendor prices, HP regen, currency retention) → belt-locked
+- **Shared pool affixes:** cross-slot conditional rules (e.g. "+damage when shield is full", "kills restore HP") → can appear on any compatible slot
+- **Class-synergy affixes:** class-filtered (e.g. "Bulwark Node gains +1 pulse per kill") → shared pool, class-gated
+
+**Affix values:**
+- Tiered (T1/T2/T3) with rolled values within each tier's range
+- Roll strength (tier availability) scales with **Station Depth**, not rarity
+- This means base progression directly inflates gear power
+
+**Rarity = affix count (derived label):**
+
+| Rarity | Affix count | Notes |
+|--------|-------------|-------|
+| Common | 0 | Blank canvas for crafting |
+| Uncommon | 1 | 1 Chip applied |
+| Rare | 2 | 2 Chips applied |
+| Epic | 3 | 3 Chips applied |
+| Relic | 3 + Legendary power | Legendary power is permanent and pre-applied on drop |
+
+Rarity is a **derived display label** recalculated from chip count. Applying a Chip upgrades rarity automatically.
+
+**Chip system:**
+- Extracting an affix from gear is called making a **Chip**
+- Scrapping gear at the Workshop (base only) destroys the item and yields **1 random Chip** (exact copy of one of the item's affixes)
+- Chips also drop directly as loot in runs (containers, enemy drops)
+- Chips carry: affix stat type, tier, rolled value, compat tags (which slot types they can apply to)
+- Chips take **grid space** in the player's stash (same as other inventory items)
+- Chips are applied at the **Workshop (base only)** — crafting is a between-runs activity
+- Applying a Chip upgrades item rarity by 1 tier automatically
+
+**Chip replacement:**
+- Chips can be replaced on any gear item
+- Replacing destroys the existing Chip (it is not recovered)
+- Replacement costs a **material fee that scales with the item's current rarity tier** (higher rarity = more costly to modify)
+- This creates commitment pressure: experimenting on Common gear is cheap; modifying an Epic is a real decision
+
+**Relic items:**
+- Drop fully pre-chipped (Legendary power + all 3 normal affix slots filled)
+- Legendary powers are **permanently bound** to the Relic they dropped on — cannot be transferred
+- Legendary powers are **passive only** (always-on rule or stat modification — no active triggers)
+- Legendary power assignment is **hybrid**: some Relics are named/unique (hand-authored), others draw from a slot-compatible Legendary power pool
+- Chip slots on Relics can still be replaced (at high material cost per the rarity-scaling rule)
+
+New defs: `AffixDef`, `AffixTierDef`, `ChipDef`, `LegendaryPowerDef` (see section 5.13).
+
+### 1.27 Station Depth system (LOCKED)
+
+**What it is:** Per-class persistent progression value representing how deep into the facility the player has pushed. Hard cap: **Depth 12** per class.
+
+**Player-selected per run:** Before each run the player selects a Depth value up to their unlocked maximum for that class. This determines enemy difficulty, loot/affix quality, and biome availability for that run. Running at lower Depth than max is allowed with no penalty — rewards match the chosen Depth.
+
+**How it advances:**
+- Requires accumulating a threshold number of successful extractions at the current Depth level
+- Thresholds are **data-authored per Depth level** in `StationDepthProfileDef` (no fixed formula)
+- "Successful extraction" = completing the primary objective AND extracting alive
+
+**Death setback (by difficulty mode):**
+- **Hardcore** — full Station Depth reset to 0 (permadeath)
+- **Hard** — reset to 0 extractions at current Depth level
+- **Medium** — lose half of current Depth-level extraction progress
+- **Soft** — immune, no setback
+
+**Biome availability:**
+- Each biome lists a `depth_min` and `depth_max` in its `BiomeDef`
+- Biomes only appear in runs at Depths within their range
+- Authored as a data table — no hardcoded Depth-to-biome mapping
+
+**What Station Depth scales:**
+- Enemy base stats and spawn rates (harder enemies at higher Depth)
+- Loot quality: affix tier availability scales with Depth (higher Depth = higher tier rolls possible)
+- Base node availability: some nodes require minimum Depth before purchasable
+- Subarea count and map scale (larger maps at higher Depth)
+
+**Presentation:**
+- Visible to player at all times on base screen and pre-run
+- Framed narratively (e.g. "Depth 4 — Reactor Level Access Unlocked")
+- Each Depth threshold has a named unlock or narrative beat authored in `StationDepthProfileDef`
+
+New def: `StationDepthProfileDef` (see section 5.14).
+
+### 1.28 FIR rules (LOCKED)
+
+**Found-In-Raid (FIR)** is a tag applied to items picked up during a run.
+
+- All items picked up in a run are FIR-tagged on pickup
+- FIR tag is **lost if the player dies** before extracting (items are lost or retained per death-loss rules, but FIR status does not survive death)
+- Items brought into a run from stash are **never FIR**
+- On successful extraction, FIR tags are cleared — items in stash are never FIR
+
+**What FIR gates:**
+- FIR determines what is lost or retained on death (items in backpack vs. Secure Pouch)
+- FIR does **not** gate vendor sell value or base upgrade crafting directly
+- **Run-exclusive materials** (see below) can only be found in runs — FIR is irrelevant to this distinction
+
+**FIR and crafting:**
+- FIR is consumed when an item is destroyed (e.g. scrapping for a Chip)
+- FIR does not transfer through crafting — a Chip extracted from a FIR item is not itself FIR
+- Applying a Chip to gear does not grant FIR to the gear
+
+**Run-exclusive materials:**
+- A named category of materials that can **only** be found in runs (enemies, containers, objective rewards)
+- Cannot be purchased from vendors or base
+- Required for specific base upgrade recipes
+- Flagged as `material_category: RunExclusive` in `MaterialDef`
+
+### 1.29 Post-run flow (LOCKED)
+
+**Successful extraction flow:**
+1. **Debrief screen** — shows: objectives completed/failed, items extracted, currency/materials earned, Station Depth progress, kill count and turns elapsed
+2. **Item review screen** — player sorts/organizes recovered items into stash before returning to base
+3. **Base screen**
+
+**Death flow:**
+1. **Death summary screen** — shows: what was lost, what was retained (per death-loss rules), Recovery Drone results (Soft mode only), Station Depth setback
+2. **Base screen**
+
+**Reward delivery:**
+- Currency and materials are added automatically to stash on extraction (shown in debrief, no manual claim)
+- Gear and items require placement via the item review screen
+
+New def: `RunSummaryDef` is not needed — post-run data is derived from run save state at resolution time.
 
 ---
 
-## 4. Import Plan (Full Fidelity)
+## 2) Open Decisions (must finalize soon)
 
-### 4.1 Authoritative input
-- Treat CRANE and BUCKET sheets as authoritative because they're edited directly and contain scheduling hour breakdowns.
-- Import other sheets for historical/reference parity:
-  - Completed (2026 Crane Completed, 2026 Bucket Completed)
-  - Unhappy Customer (customer-level risk)
-  - Unable to be scheduled (maps to TBS + blocker/requirement/access constraints)
-  - Winter sheets (map to winter_flag)
-  - DS sheets (become saved views; data imported but not treated as separate sources)
+1. **Emergency exfil cost** — exact cost type: gear sacrifice vs. currency vs. HP tax vs. mixed
+2. **Soft death recovery drone %** — starting tier values for `BASE_Node_RecoveryDrone` (e.g. T1=25%, T2=50%, T3=75%)
+3. **Durability stages by rarity** — exact mapping needs playtesting; suggested start: Common=1, Uncommon=1, Rare=2, Epic=3, Relic=3
+4. **Exfil abort cost** — what is spent when a player cancels an in-progress extraction (currency, item, alert spike, durability hit)
+5. **Passive Slot II Station Depth gate** — minimum Station Depth required before the unlock node becomes purchasable
+6. **CDR rounding** — recommended: track fractional turns internally per weapon, fire when accumulated value hits a whole number; needs confirmation before M3 implementation
+7. **Chip replacement material costs** — exact material type and qty per rarity tier (scales with rarity; exact values need tuning)
+8. **Armor K constant** — starting value for `CombatConstantsDef.armor_k_value` (suggested: 100; needs playtesting)
 
-### 4.2 Import mechanics
-- Build an importer that:
-  - reads rows from each relevant sheet
-  - normalizes into Job/Customer records
-  - records traceability via `ImportRun` and `ImportRowMap` (see below; do not add import fields to Job)
-  - attaches legacy `notes_raw`, `confirmed_text`, etc.
-  - attempts notes parsing as above
-  - marks Completed items by setting completed_date (and completed_by_user_id if present/derivable)
-  - Completed-without-segments fallback: if a row indicates completion but no schedule segments are created/parseable, set completed_date from any explicit completion date field if present; otherwise leave completed_date NULL and write an ActivityLog entry tagged IMPORT_NEEDS_REVIEW_COMPLETION_DATE for manual follow-up.
+Defaults if not decided: Emergency=currency+HP mix, RecoveryDrone=25/50/75%, DurabilityStages=1/1/2/3/3, ExfilAbort=alert spike, PassiveSlotII gate=Station Depth 3.
 
-**ImportRun**
-- id (UUID)
-- started_at, finished_at
-- run_by_user_id (nullable; system run if null)
-- source_filename (text)
-- status: `IN_PROGRESS | COMPLETED | FAILED`
-- summary_json (counts of rows read/created/errored per sheet)
-
-**ImportRowMap**
-- id (UUID), import_run_id (UUID)
-- sheet_name (text)
-- row_number (int)
-- entity_type (text; e.g., "Job", "Customer")
-- entity_id (UUID FK to the created/matched entity) *(must be UUID — not int; all PKs in this system are UUIDs)*
-- raw_row_json (full original row preserved for debugging)
-- created_at
-
-This keeps Job clean while providing full row → entity traceability.
-
-### 4.3 Data cleaning rules
-- Address/town parsing stays as raw text if inconsistent.
-- Scheduled Date cells that were freeform in spreadsheet become:
-  - best-effort segments if parseable
-  - otherwise remain in `availability_notes` and/or `notes_raw` with "needs review"
+9. **Weapon families** — groupings for parts compatibility; deferred to M5.5 weapon tree design milestone
+10. **Station Depth extraction thresholds** — exact number of extractions required per Depth level per class (authored in StationDepthProfileDef; TBD via playtesting)
 
 ---
 
-## 5. Core UI (Beta Screens)
+## 3) Content Targets (v1)
 
-### 5.1 Backlog lists
-- Backlog > Crane
-- Backlog > Bucket
-Each supports:
-- group by sales rep
-- filters: state, town, winter/frozen, requirements unmet, push-up flag, unhappy customer, equipment (1090/1060/either, spider lift)
-- totals: $ backlog, estimate hours, scheduled hours, remaining TBS hours
+### 3.1 Classes (4)
+All classes engage the same three strategic axes (swarm management / deployment+setup / positioning+board control) but through different tools. Each class has:
+- A base active ability
+- 3 class-unique gear variants that modify the active ability (found as loot; equipping defines build direction)
+- 4 spec branches (Class Ability / Primary / Passive I / Passive II)
+- 2–3 thematic spec branches per slot-branch
 
-### 5.2 Job detail
-- Customer + site info
-- State + quick transitions (TBS ↔ partial/full based on segments; Completed explicit action)
-- **Blockers panel** — shows all ACTIVE JobBlockers prominently near the top; clearly separate from Requirements panel
-- Requirements list with statuses (with "polite reminder" behavior when scheduling)
-  - When a Requirement is set to APPROVED, prompt: "Clear related blocker?" — non-mandatory suggestion only, not auto-cleared
-- Schedule segments editor (one segment per calendar day; multi-day jobs use multiple segments)
-- Foreman day roster editor (foreman + day-exclusive members) with per-segment roster linking (defaults to the roster for that foreman/date; editable)
-- Equipment reservations per segment
-- Notes raw + extracted panel
-- Activity log + estimate history + schedule event history
-- **Notification panel** — shows ScheduleNotificationLog entries for this job; "Notify Customer" action button
+**Warden** (control/tank)
+- Base active: Deploy a Bulwark Node on a target tile
+- Unique gear variants modify node behavior (cover+pulse / damage+turret / taunt+aggro redirect)
+- Identity: creates positioning through deployable structures
 
-**One-click scheduling (beta, foreman-anchored)**
-- Scheduler selects: (1) date, (2) foreman, then clicks **"Schedule for mm/dd"** (or a recommended date button).
-- Duration inputs (pre-scheduling):
-  - onsite_hours = Job.estimate_hours_current *(authoritative onsite labor hours required; can be set while TBS before any schedule exists)*
-  - travel_hours_estimate = Job.travel_hours_estimate *(informational in beta; used for reporting/planning and future automation, not for hard fit/rejection)*
-  - calendar_block_minutes = onsite_hours * 60 (rounded up to nearest 10 minutes for placement)
-- Hard rejections (must reject scheduling attempt):
-  - any ACTIVE JobBlocker exists
-  - customer availability windows would be violated
-  - no contiguous free window fits the onsite_hours calendar block for that foreman on that date
-- On success (beta):
-  - create the onsite ScheduleSegment (one calendar day; must not cross midnight local time)
-  - link it to the selected foreman's ForemanDayRoster via SegmentRosterLink
-  - optionally (if explicitly requested by the user during the action), create a **START_OF_DAY** TravelSegment (home base → first job) with `source=MANUAL`
-  - **do not** auto-create **END_OF_DAY** TravelSegment during scheduling; end-of-day travel is created manually via "Close out day"
-- Multi-day splitting remains manual in beta.
-- **Close out day (beta, manual):** creates one **END_OF_DAY** TravelSegment (last job → home base) for a foreman+date:
-  - default `start_datetime` = latest end_datetime of that foreman's ScheduleSegments on that date (company timezone)
-  - scheduler enters duration; end time auto-computed; start/end override allowed
-  - enforce at most one active END_OF_DAY per foreman+date
+**Revenant** (kill-chain)
+- Base active: Spend Blood-Engine stack for an AoE nova (damage scales with stack size)
+- Blood-Engine charges on kills; decays if player stalls
+- Unique gear variants modify charge rate and nova behavior
+- Identity: wants to be surrounded; rewards aggression and momentum
 
-### 5.3 Dispatch Board Calendar (beta target UI)
-Beta calendar UI is a **dispatch board**: one day, many foremen (columns), with time as the vertical axis.
+**Technoseer** (deployables)
+- Base active: Activate Command Halo (buffs/retargets drones and turrets in range)
+- Unique gear variants modify halo behavior (buff radius / mark+priority / loadout management)
+- Identity: sets up a deployable loadout before engaging; manages a board state
 
-**Core interaction rules (authoritative)**
-- **Snap:** all calendar placement snaps to **10-minute** increments.
-  - Snap click positions by **flooring** to the nearest lower 10-minute boundary (e.g., 09:19 → 09:10).
-  - All durations must be multiples of 10 minutes; round **up** when converting hours → minutes for placement.
-- **Click-to-create:** creating a new block is click-based (not click-drag).
-  - If the click occurs **inside** an existing block, open block details instead of creating a new block.
-  - When creating a new block between other blocks, placement must **not** overlap any existing occupancy.
-- **No hard workday boundaries:** foreman work windows vary by day; `preferred_start_time` / `preferred_end_time` are soft anchors only.
-- **Default display window:** show 05:00–19:00 local time by default; allow scrolling beyond. Managers can set operating hours to adjust this display range (preference only).
-- **Authority:** UI may show optimistic previews, but **backend attempt endpoints** must authoritatively accept/reject all creates/moves/resizes.
-- **Seasonal overlay:** historical freeze window bands (SeasonalFreezeWindow records) are displayed as color bands across the date header. Display only — no effect on scheduling logic.
+**Nullrunner** (mobility)
+- Base active: Trigger Phase Rig (blink to target tile, leaving decoy)
+- Unique gear variants modify blink behavior (decoy duration / threat-drop / mine-on-blink)
+- Identity: exploits positioning through mobility; de-alerts enemies; sets traps
 
-**Create placement algorithm (no overlap)**
-Given snapped `clicked_time` and requested `duration_minutes`, compute the free window:
-- `prev_end` = end of the latest occupied interval ending at/before clicked_time
-- `next_start` = start of the earliest occupied interval starting at/after clicked_time (or local midnight if none)
-- `start = max(clicked_time, prev_end)`
-- `end = start + duration_minutes`
-Accept only if `end <= next_start` and the block stays within the local date (no midnight crossing). Otherwise reject.
+### 3.2 Weapons (12 baseline; goal 10–15)
+Primary (manual):
+1) Coil Pistol
+2) Shard Rail (range + pierce upgrade paths)
+3) Pulse Beam (Prism/splitting identity; NOT chain lightning)
+4) Flak Cannon (cone)
+5) Rift Blade (3-tile cleave)
+6) Hex Launcher (tile AoE)
 
-**Backend attempt endpoints (recommended contract)**
-- `POST /api/schedule/attempt-create` (onsite segments)
-- `POST /api/schedule/attempt-move` (move/resize onsite segments)
-- `POST /api/travel/attempt-create` (START/END travel; manual only in beta)
-- `POST /api/travel/close-out-day` (creates END_OF_DAY per §5.2)
+Passive (auto):
+7) Arc Thrower (chain lightning)
+8) Swarm Drones
+9) Grav Mines
+10) Sentinel Turret
+11) Cryo Sprayer
+12) Bio-Needler
 
-**Attempt endpoint response contract (authoritative):**
-- `result`: `ACCEPT | REJECT`
-- `segment`/`travel_segment`: returned on ACCEPT
-- `warnings`: array of `{ code, message, details? }` (non-blocking; UI displays polite reminders here)
-- `rejections`: array of `{ code, message, details? }` (present only when result=REJECT)
+### 3.3 Mod system
+Sockets per weapon:
+- Rune x2 (behavior)
+- Gem x2 (numbers)
+- Enchant x1 (synergy)
 
-**Error and warning codes (stable for UI + tests)**
+Rarity: Common / Uncommon / Rare / Epic / Relic
 
-Hard rejections (result=REJECT):
-- `SNAP_ALIGNMENT_REQUIRED` — proposed time not on a 10-minute boundary
-- `OVERLAP_CONFLICT` — block overlaps an existing occupied interval for this foreman on this date
-- `CROSSES_MIDNIGHT` — block would cross midnight local time
-- `ACTIVE_BLOCKER` — at least one ACTIVE JobBlocker exists on this job
-- `CUSTOMER_WINDOW_CONFLICT` — block falls outside a parsed customer availability window
-- `NO_CONTIGUOUS_SLOT_AT_CLICK` — no contiguous free window fits the requested duration from the clicked time
+### 3.4 Loot categories
+- Gear (weapons / armor / accessories / belt / class-unique equipment)
+- Materials (base building/crafting; also used for Chip replacement fees)
+- Currency (vendors/rerolls/repairs; retention on death determined by Belt tier)
+- **Weapon Parts** (used for weapon upgrade trees; type-specific)
+- **Armor Scraps** (from scrapping armor; used for repairs/crafting)
+- **Utility Items** (grenades/consumables/tools/traps/ammo types; slotted into Belt utility slots)
+- **Chips** (extracted affixes; take grid space; applied at Workshop to craft/upgrade gear)
 
-Non-blocking warnings (result=ACCEPT, surface in UI as polite reminders):
-- `REQ_NOT_APPROVED` — at least one Requirement is not APPROVED or NOT_REQUIRED
-- `REQ_DENIED_PRESENT` — at least one Requirement has status DENIED
-- `REQ_UNMET_PRESENT` — required items exist but are not yet satisfied/confirmed
-- `FROZEN_GROUND_REQUIRED` — job has frozen_ground_flag=true; reminder that job requires frozen soil conditions
-- `WINTER_PREFERRED` — job has winter_flag=true; reminder that job is preferred to run in winter
+### 3.5 Enemies
+Roles: Swarmer, Spitter, Leaper, Anchor, Buffer, Disruptor  
+Elites are modifiers layered on base enemies (shielded, split, explode, aura, etc.)  
+Each enemy type has a `alert_profile_id` defining its trigger set and thresholds.
 
-### 5.4 Push-up recommender
-
-**Vacated-slot triggers (V1–V3 for beta):**
-- **V1 — Segment deleted:** `deleted_at` set. Freed window = the segment's full start/end.
-- **V2 — Segment moved:** `start_datetime` or `end_datetime` changed. Freed window = the *old* start/end. The new window is occupied, not vacated.
-- **V3 — Segment shortened:** end moved earlier or start moved later. Freed window = the released portion (old_end → new_end, or old_start → new_start).
-- **V4 — Segment split:** treat as one delete + two creates (the delete leg triggers V1). No special detection needed.
-
-The following do *not* trigger a vacated slot: changing crew assignment, changing requirements, editing notes, changing `scheduled_hours_override` alone (no time window change).
-
-**Spam guard:** Only create a `VacatedSlot` record when the edit results in a non-empty freed window. No-op edits (e.g., a move where start/end shift identically, or a re-save with no time change) must not produce a VacatedSlot. For V3, only create a VacatedSlot if the freed portion is > 0 hours.
-
-When a trigger fires and a non-empty window is freed, create a `VacatedSlot` record (see §2.5) and open the push-up modal.
-
-**Vacated-slot modal debounce (required):** To avoid pop-up spam while a scheduler is "fiddling" with a block, only open the push-up modal on **commit** actions (e.g., drag-drop mouse-up / resize commit / explicit delete). The backend may create multiple VacatedSlot records across successive commits; the UI must throttle modal display (e.g., cooldown window) and may offer a "Show push-up suggestions" button to reopen. Optional hardening: if multiple OPEN VacatedSlots are created by the same user within a short window and are adjacent/overlapping, coalesce them into a single OPEN slot.
-
-**Candidate eligibility (hard filters — must all pass):**
-- `push_up_if_possible = true`
-- Job is not COMPLETED
-- `remaining_hours > 0` where `remaining_hours = estimate_hours_current - scheduled_effective_hours` (clamped to ≥ 0)
-- Equipment type matches the VacatedSlot's `equipment_type` (crane jobs not shown for bucket slots and vice versa)
-- If job has `preferred_start_time`: slot start must be ≥ that time (check independently; only applied if field is set)
-- If job has `preferred_end_time`: slot end must be ≤ that time (check independently; only applied if field is set)
-
-**Seasonal constraints (not hard filters — badge display only):**
-- `winter_flag` and `frozen_ground_flag` are shown as badges on candidate cards and available as filter knobs in the modal. They do not automatically exclude candidates because the app has no frost/weather signal in beta. Scheduler decides.
-
-**Fit rule (partial fill, A2):**
-- Candidates with `remaining_hours > 0` are eligible regardless of whether they fit perfectly.
-- Default allocation = `min(remaining_hours, slot_hours)`. No prompt — scheduler can adjust after applying.
-- This supports your "piece by piece" scheduling naturally.
-- Candidates where `remaining_hours <= slot_hours` are shown first (they can be fully scheduled in this slot); candidates where `remaining_hours > slot_hours` are shown after (partial fill only).
-
-**Ranking (within each eligibility tier):**
-1. Closest `min(remaining_hours, slot_hours)` to `slot_hours` — best capacity fit first
-2. Oldest `approval_date` — fairness to waiting jobs
-3. Lowest friction — fewest ACTIVE blockers + fewest requirements not in `APPROVED`/`NOT_REQUIRED`
-
-Requirements are never hard filters but their statuses are shown inline on each candidate card.
-Resource availability warnings (inventory count) are shown inline if already modeled; not a hard filter in beta.
-
-### 5.5 Reports
-
-#### SUMM — Backlog in Dollars (live, current week)
-
-Computed live from current job data at query time. Not stored — fully derived.
-
-**Table structure:**
-- One row per active sales rep (reps with at least one non-deleted, non-completed job)
-- Columns per rep:
-  - Bucket: Scheduled $, TBS $, Total $
-  - Crane: Scheduled $, TBS $, Total $
-  - Combined: Scheduled $, TBS $, Total $
-  - % of total (row's total as % of grand total)
-  - Prior week $ (from most recent WeeklyBacklogSnapshot for this rep, total_dollars combined across equipment types; display "—" if no snapshot exists or dollar field is NULL)
-- Footer: grand totals across all reps for each column
-
-**Below the table:**
-- Estimate of Sales Per Day: editable by MANAGER and SCHEDULER. Stored in OrgSettings.sales_per_day (numeric, nullable; no default). If not set, the Days Sales in Backlog metric displays "Set sales/day to enable" rather than a number.
-- Days Sales in Backlog (current week): total_dollars / sales_per_day
-- Days Sales in Backlog (prior week): prior week total_dollars / sales_per_day
-- Increase / (Decrease): current days - prior days
-
-**Snapshot trigger:**
-- Automatic weekly snapshot job runs every Saturday at a configured time (default: 6:00 AM company timezone).
-- MANAGER can trigger manual snapshot from admin UI.
-- Snapshots are append-only. Re-running does not overwrite an existing week. Use the unique constraint to prevent duplicates; manual trigger should surface a warning if that week already exists.
-
-#### Comparable Report — Year-over-Year Weekly Hours
-
-A time-series view showing weekly backlog hours across multiple years, separately for Crane and Bucket. Sourced entirely from WeeklyBacklogSnapshot.
-
-**Display:**
-- Two sections: Crane and Bucket
-- Each section shows a line chart with one line per year (2019–current)
-- X-axis: week number (1–52/53)
-- Y-axis: total_hours (scheduled + TBS combined) for that equipment type, aggregated across all reps
-- Each data point also shows: scheduled_hours, tbs_hours, crew_count for tooltip/hover detail
-- Current year line is visually distinct (bold or different color)
-- Missing weeks (gaps in data) render as line breaks, not zero
-
-**Table view (collapsible, below each chart):**
-- Rows: On Board (scheduled_hours), TBS (tbs_hours), Total (total_hours), Crews (crew_count), Crew-Days (total_hours × crew_count)
-- Columns: week dates for the selected year range
-- Matches the exact layout of the Back_Log_Report_Comparable spreadsheet
-
-**Year range selector:** defaults to current year + all available prior years. User can toggle individual years on/off.
-
-**Data availability note (display in UI):** "Dollar figures available from [app go-live date] onward. Hour figures available from 2019 onward."
-
-### 5.6 Customer Scheduling Notifications
-Notifications are intentional scheduler-triggered communication acts — not automatic side effects of schedule changes. Schedule changes (move, resize, delete) update VacatedSlot, ScheduleEvent, and ActivityLog internally. A customer notification is sent only when the scheduler explicitly triggers it via a "Notify Customer" action.
-
-**Notification events:**
-- **Job Scheduled** — scheduler sends after creating the initial ScheduleSegment. Customer receives SMS + email with date, address, and scope summary. Rep receives internal alert.
-- **Job Rescheduled** — scheduler sends after changing a segment date. System tracks the change internally but does NOT auto-send. Customer receives SMS + email with new date, old date referenced. Rep receives internal alert.
-- **Job Cancelled** — scheduler sends after deleting all segments. Customer receives SMS + email. Rep receives internal alert.
-- **Confirmation Request** — optional step. Scheduler sends a confirm/reschedule reply link before the job date. Customer can confirm or request reschedule via the link. Customer response creates a pipeline activity entry and triggers rep notification.
-
-**Opt-in enforcement (all checks must pass before any channel is used):**
-- `jobs.contact_allowed = true` — if false, block all outbound notifications with warning "Contact not allowed for this customer"
-- `jobs.no_email = false` — if true, suppress email channel
-- `jobs.preferred_channels` — only send via channels confirmed in this list
-- Valid contact info on file — if channel lacks contact data, surface error rather than silently dropping
-
-**Rescheduling and cancellation:** Schedule changes are NEVER auto-notified. Notifications are sent when the scheduler explicitly triggers them, which requires confirming the schedule state is final before communicating to the customer.
-
-### 5.7 Multi-Foreman Conflict Visibility
-The dispatch board renders all foremen as simultaneous columns. Conflict visibility surfaces cross-column resource tensions not visible within a single column.
-
-**Conflict types detected and surfaced:**
-
-- **Equipment double-booking** — two or more segments on the same date where ResourceReservations reference the same resource_id and total reserved quantity exceeds resource.inventory_quantity. Affected blocks on both foreman columns show a red border and badge. Non-blocking.
-
-- **Person conflict** — a crew member appears on more than one ForemanDayRoster for the same date. The DB unique constraint prevents writes; visual surfacing catches legacy data or constraint bypasses. Both roster cards show a warning badge. Flagged as data integrity issue in conflict summary panel.
-
-- **Capacity warning** — total scheduled_effective_hours across all foremen for a given date exceeds (total active crew members × operating_hours_per_person). Date header shows orange capacity indicator.
-
-- **Job overlap** — two segments on the same date reference the same job_id via different rosters. Both blocks show a "Duplicate job" badge. Non-blocking — some jobs legitimately need two crews simultaneously.
-
-**Conflict summary panel** — a collapsed panel accessible from the dispatch board date header. Shows all active conflicts for the selected date in a scannable list without navigating to individual blocks. Each entry includes: conflict type badge (color-coded), affected entity name, foremen involved, and a jump-to link that scrolls the board to the relevant block. Dismissal is per-date per-user and stored in SchedulingConflictDismissal. The panel is computed at render time from a single SQL pass — not a stored table, not a notification system.
-
-### 5.8 Foreman Mobile App (post-v1)
-All foreman-facing mobile features are **explicitly out of scope for beta**. Target format is a **native app** (iOS and Android). The following is the planned feature set when development begins:
-
-- Read-only daily schedule — foreman sees their assigned jobs for today in arrival order
-- Push notifications when schedule changes (job added, removed, or time changed)
-- Mark segment started / completed from mobile — feeds ActivityLog and job completion workflow
-- View site photos and markup annotations (photo_flattened_renders, rep annotation layer)
-- Add on-site notes and completion notes
-- View crew documents from the Crew Documents module
-- Foreman annotation layer — separate from rep markups
-
-The schema (photo_annotations.author_role, photo_flattened_renders, segment start/complete timestamps) is already designed to support all foreman mobile features without migration when the native app is built.
+### 3.6 Core map mechanics
+- **Single large zone with subareas** (connected wings/sections)
+- Each subarea: rooms/corridors + occasional arena
+- The zone layout is **procedurally generated per run** from a **seed** (deterministic)
+- Layout topology is **goal-driven** (boss rooms terminal, uplinks distributed, etc.)
+- Each subarea has a `biome_id`. Biomes reference `environment_profile_id` for hazard/atmosphere mechanics.
+- **Subarea activation:**
+  - enemies outside the active subarea are sleeping (no turns), **except Alerted enemies** which may pursue across subareas
+  - only the player's current subarea simulates AI/spawns/hazards
+- Spawn Vents: spawn pressure source; destroy/seal as objective (**vents operate only in active subareas**)
+- **Connectors** between subareas: Open / Locked / Airlock / Collapsed / Vent Shaft (see 1.23)
 
 ---
 
-## 6. Requirements Enforcement UX (Locked)
-- When scheduler attempts to schedule or edit a schedule segment:
-  - show a **polite pop-up** listing job requirements and each requirement's status
-  - display each requirement's actual status label (REQUIRED / REQUESTED / APPROVED / DENIED / NOT_REQUIRED)
-  - highlight (visually distinct) any requirement whose status is not `APPROVED` or `NOT_REQUIRED`
-  - allow proceeding without hard blocks
-- In list views and job detail:
-  - show badges for unmet requirements (e.g., "CBP — REQUESTED", "DTL — DENIED")
-  - DENIED is shown differently from REQUIRED/REQUESTED — a refused permit needs different action than an unapplied one
+## 4) Data-Driven Architecture (critical)
+
+### 4.1 Data format standard
+**Authoring (Phase 1):**
+- Content defs authored as **ScriptableObjects** in Unity.
+
+**Runtime (Phase 1):**
+- All gameplay systems access content through registries keyed by stable **string IDs**.
+- Saves store **IDs**, never Unity object references.
+- When procedural generation is introduced, run saves must include `run_seed` and `mapgen_profile_id` (a `MapGenProfileDef` ID), plus enough generated-map state to resume safely.
+
+**Mods (Phase 2, post-1.0):**
+- Mods provide JSON that maps to DTOs (`WeaponDto`, `EnemyDto`, etc.).
+- Game loads:
+  1) ScriptableObjects → DTO → Registry
+  2) Mod JSON → DTO → Registry **merge/override**
+
+**Saves/Settings (all phases):**
+- JSON for saves + settings (versioned).
+
+### 4.2 Hard rules for mod-friendliness
+- Every def must have an immutable `id` (string) and `version` (int).
+- Gameplay logic may not depend on direct Unity object references; use IDs and catalogs.
+- Asset refs in defs must be via **Asset IDs** (e.g., `sprite_id`, `sfx_id`) resolved by an `AssetCatalog`.
+- Map generation and biome/environment systems must be **data-driven defs** addressed by stable IDs.
+- No "switch on specific weapon class" logic; use tags + data fields.
+- Registries must support: add new IDs / override existing IDs / deterministic conflict resolution.
+- **UI display strings must never be hardcoded** — all display names and UI labels must live in defs or a localization table (see AGENTS.md localization rule).
+
+### 4.3 Deterministic merge policy
+Default mod merge behavior:
+- Registry is keyed by `id`.
+- If mod defines an existing `id`, it **overrides the entire def** (simple rule).
+- Later enhancement (optional): field-level deep-merge for QoL.
+
+Mod conflict rule:
+- Mods load in deterministic order:
+  1) base content
+  2) mods sorted by `loadOrder` then name
+  3) later mods override earlier mods ("last wins")
+
+### 4.4 Naming conventions
+- IDs are uppercase snake or prefixed tokens:
+  - Weapons: `WPN_CoilPistol`
+  - Mods: `MOD_Rune_Pierce`
+  - Enemies: `ENM_Swarmer_A`
+  - Goals: `GOAL_BossHunt_01`
+  - Objectives: `OBJ_SealVents`
+  - Base nodes: `BASE_Node_SynthesisArray_T1`
+  - Passive Slot II nodes: `BASE_Node_PassiveSlotII_Warden`
+  - Recovery Drone nodes: `BASE_Node_RecoveryDrone_T1`
+  - Subareas: `AREA_WingA_01`
+  - Weapon trees: `TREE_WPN_CoilPistol`
+  - Weapon tree nodes: `NODE_WPN_CoilPistol_Pierce1`
+  - Specs: `SPEC_Warden_ClassAbility_Fortress_1`
+  - Spec branches: `SPECBRANCH_Warden_ClassAbility_Fortress`
+  - Biomes: `BIOME_ResearchLab`
+  - Status effects: `STATUS_Poison`
+  - Exfil defs: `EXFIL_Hot_Standard`
+  - Connectors: `CONN_Airlock_Standard`
+  - Affixes: `AFFIX_Damage_Flat`, `AFFIX_Armor`, `AFFIX_CritChance`
+  - Affix tiers: `AFFIXTIER_Damage_Flat_T1`, `AFFIXTIER_Armor_T2`
+  - Legendary powers: `LEGENDARY_BulwarkPulseOnKill`, `LEGENDARY_WhenShieldFullDamageBonus`
+  - Hazards (tile): `HAZ_FireTile`, `HAZ_ToxicPool`, `HAZ_EMPPulse`
+  - Hazard entities: `HAZE_ToxicGasVent`, `HAZE_EMPEmitter`
+  - Vendors: `VENDOR_Market_Standard`, `VENDOR_Gunsmith_Field`, `VENDOR_BlackMarket`
+  - Materials: `MAT_SteelScrap`, `MAT_BioSample_RunExclusive`, `MAT_ReactorCore_RunExclusive`
+  - Chips: generated instance IDs at runtime (not stable def IDs — each chip is a unique instance)
+  - Station Depth profiles: `STATIONDEPTH_Warden`, `STATIONDEPTH_Nullrunner`
+  - Loot drop profiles: `LOOT_ENM_Swarmer_Standard`, `LOOT_CONTAINER_ArmoryLocker`
+  - Abilities: `ABILITY_Warden_BulwarkNode`, `ABILITY_Revenant_BloodNova`
+  - Subarea templates: `SUB_ArenaOpen_Objective_A`, `SUB_Chokepoint_Support_01`
+  - Subarea skeletons: `SKEL_SurfaceDataCenter_Base`, `SKEL_SurfaceDataCenter_MirrorX`
+  - Alert profiles: `ALERTPROFILE_Swarmer_Standard`, `ALERTPROFILE_BlindGrub_A`
+- Files follow ID names.
 
 ---
 
-## 7. Activity Log (Auditability)
-**ActivityLog**
-- id, entity_type, entity_id
-- action_type: CREATED/UPDATED/DELETED/STATE_CHANGED/SEGMENT_ADDED/SEGMENT_REMOVED/REQUIREMENT_UPDATED/NOTE_PARSED/NOTIFICATION_SENT/etc.
-- diff (JSON)
-- actor_user_id
-- created_at
+## 5) Required Definitions (core)
+All content must be data-defined. Author as ScriptableObjects; runtime uses DTOs + registries.
 
-Log all edits to:
-- Job fields (including notes edits)
-- Schedule segments
-- Requirements
-- Estimates
-- Crew assignments
-- Resource inventory adjustments
-- Customer notifications sent (notification_type, channels, customer response)
+### 5.1 Core defs
+
+- **WeaponDef / WeaponDto**
+  - id, version, name, type (Primary/Passive)
+  - base stats: damage, range, aoe, pierce, cooldown_turns, burst
+  - targeting_mode (manual/nearest/densest/marked/random)
+  - requires_los
+  - socket_layout (rune, gems, enchant)
+  - upgrade_curve
+  - tags: [string]
+  - asset_ids: sprite_id, sfx_id, vfx_id (optional)
+  - default_status_application_id (nullable; for guaranteed status on hit)
+
+- **ModDef / ModDto**
+  - id, version, category (Rune/Gem/Enchant), rarity
+  - effects (stat deltas + rule modifiers)
+  - status_proc_id (nullable), status_proc_chance (float; 0–1)
+  - compat tags (weapon tags)
+
+- **EnemyDef / EnemyDto**
+  - id, version, role, hp, speed, attack, range
+  - behavior_id (so AI logic is data-selected)
+  - alert_profile_id (required; see AlertProfileDef)
+  - drop_profile_id
+  - tags + asset_ids
+  - status_resistances: [{ status_id, resistance_pct }]
+
+- **AlertProfileDef / AlertProfileDto**
+  - id, version
+  - triggers: [enum — LoS / AllyKilled / ObjectInteract / Proximity]
+  - proximity_radius (int tiles; used if Proximity trigger enabled)
+  - proximity_radius_affix_tag (optional; equipment affix tag that can reduce this radius)
+  - note: enemies never de-alert once triggered (except class ability override)
+
+- **EliteModifierDef / EliteModifierDto**
+  - id, version, rules, tags
+
+- **SpawnProfileDef / SpawnProfileDto**
+  - id, version, tables by threat/alert
+  - vent spawn rates
+
+- **ClassDef / ClassDto**
+  - id, version, starting stats, starting weapon id
+  - active_ability_id
+  - passive_slots (int; default 1)
+  - passive_slot_ii_node_id (base node ID that unlocks slot II for this class)
+  - class_unique_gear_ids: [item_id] (list of unique gear variants for this class)
+  - spec_branch_ids: [spec_branch_id] (4 branches: ClassAbility / Primary / PassiveI / PassiveII)
+  - generic_spec_pool_id (pool of class-filtered generic specs)
+
+- **BaseNodeDef / BaseNodeDto**
+  - id, version, prereqs, benefit, world_cost, material_costs
+  - min_station_depth (int; gate for unlock availability)
+
+- **BaseModuleDef / BaseModuleDto**
+  - id, version, tiered costs, unlocks
+
+- **ItemDef / ItemDto**
+  - id, version, type, size (w,h), bulk, tags
+  - status_resistances: [{ status_id, resistance_pct }] (for armor/belt types)
+  - durability_stage (int; 0 = Fine, max = Broken; weapons/armor only)
+  - max_durability_stages (int; rarity-derived; 0 for non-degrading items)
+  - scrap_yield_profile_id (nullable; for weapons/armor)
+
+### 5.2 Run difficulty & escalation
+
+- **RunDifficultyDef / RunDifficultyDto**
+  - id, version, label
+  - death_loss_rules
+  - drop_rate_mult
+
+- **RunTimerEscalationDef / RunTimerEscalationDto**
+  - id, version
+  - tier1_turn: int (default 80; edit directly in Inspector for playtesting)
+  - tier1: EscalationTierData
+  - tier2_turn: int (default 140)
+  - tier2: EscalationTierData
+  - tier3_turn: int (default 200)
+  - tier3: EscalationTierData
+  - scenario_overrides: [{ goal_type_tag (string), field (EscalationField enum), multiplier (float) }]
+
+  **EscalationTierData** (struct — used for tier1/tier2/tier3):
+  - spawn_rate_mult: float (multiplier on vent spawn frequency; 1.0 = no change)
+  - elite_chance_add: float (flat % added to elite spawn chance)
+  - vent_activity_mult: float (multiplier on simultaneous active vent count)
+  - enemy_speed_add: int (flat bonus tiles/turn added to all enemies)
+  - alert_radius_add: int (flat bonus tiles added to all proximity alert radii)
+  - spawn_cap_add: int (raises max simultaneous enemy count)
+  - is_lockdown: bool (true only on tier3 in v1)
+  - lockdown_spawn_profile_id: string (nullable; required if is_lockdown=true; replaces normal spawn profile)
+  - lockdown_exfil_conversion: bool (if true, forces all remaining exfil points to Hot type)
+  - lockdown_display_name_key: string (localization key for UI state label e.g. "UI_ESCALATION_LOCKDOWN"; nullable)
+
+  **EscalationField** (enum — used in scenario_overrides):
+  - SpawnRateMult, EliteChanceAdd, VentActivityMult, EnemySpeedAdd, AlertRadiusAdd, SpawnCapAdd
+
+  **Stacking rule:** cumulative — tier2 effects add on top of tier1; tier3 adds on top of tier2.
+  **Scenario overrides:** at runtime, multiply the named field's accumulated value by the override multiplier if the current run's goal package carries a matching goal_type_tag.
+  **Tuning note:** tier turn values (tier1_turn, tier2_turn, tier3_turn) are top-level Inspector fields for fast playtesting iteration — no array indexing required.
+
+- **BeltTierDef / BeltTierDto**
+  - id, version
+  - tier (int: 1–3+)
+  - utility_slots (int)
+  - currency_retention_pct (float; tunable)
+  - rarity_min, rarity_max (enum range that maps to this tier)
+
+### 5.3 Goals / missions
+
+- **GoalPackageDef / GoalPackageDto**
+  - id, version, primary_objective_ids[], secondary_objective_ids[]
+  - reward_bias, threat_bias
+  - exfil_type_weights: [{ exfil_type, weight }]
+  - map_topology_hints (tags that drive goal-driven subarea layout)
+  - preview_fields: (goal_type, biome_bias, reward_bias, threat_level — shown on draft screen)
+
+- **ObjectiveDef / ObjectiveDto**
+
+- **ExfilDef / ExfilDto** (see section 5.11)
+
+### 5.4 Subareas and connectors
+
+- **SubareaDef / SubareaDto**
+  - id, version
+  - bounds (rect or polygon on grid; v1 uses rect)
+  - connector_ids (adjacent subareas / airlocks)
+  - biome_id (stable ID; required)
+  - environment_profile_id (optional)
+  - tags (hazard_bias, objective_bias, loot_bias)
+  - activation_rules (optional; default: active if player inside bounds)
+
+- **ConnectorDef / ConnectorDto**
+  - id, version
+  - type (enum: Open / Locked / Airlock / Collapsed / VentShaft)
+  - traversal_turns (int; default 1; Airlock may be 1+)
+  - spawn_trigger_id (nullable; fires when player commits to crossing — Airlock tension mechanic)
+  - one_way (bool; Collapsed passages)
+  - unlock_condition_id (nullable; Locked doors)
+  - size_constraint (nullable; VentShaft — small entities or tool required)
+
+### 5.4.1 Biomes
+
+- **BiomeDef / BiomeDto**
+  - id, version
+  - display_name, tags
+  - environment_profile_id (optional)
+  - spawn_profile_id
+  - hazard_ids: [exclusive hazard IDs]
+  - universal_hazard_intensity_mults: [{ hazard_tag, mult }]
+  - spawn/hazard/loot/objective bias hooks (IDs/tags)
+
+### 5.4.2 Environment Profiles
+
+- **EnvironmentProfileDef / EnvironmentProfileDto**
+  - id, version
+  - atmosphere category (breathable/thin/toxic/none)
+  - resource drain hooks (e.g., oxygen drain per turn; optional)
+  - risk/hazard tags (radiation/corrosion/freezing; optional)
+  - passive_status_applications: [{ status_id, proc_chance, interval_turns }]
+
+### 5.4.3 Map generation profile
+
+- **MapGenProfileDef / MapGenProfileDto**
+  - id, version
+    - NOTE: this `id` is the `mapgen_profile_id` stored in run saves
+  - subarea_count_by_station_depth: [{ depth_min, depth_max, count_min, count_max }]
+  - subarea_size_by_biome: [{ biome_id, width_min, width_max, height_min, height_max }]
+  - connector_type_weights: [{ connector_type, weight }] (relative frequency of each connector type in generation)
+  - biome_sequence: [biome_id] (weighted pool for biome assignment per subarea)
+  - goal_topology_rules: [{ goal_type_tag, topology_hint }] (how goal packages shape layout; placeholder until M4.75 GoalPackageDef integration)
+  - generation_mode (enum: Graph / Slot; selects which algorithm runs)
+  - max_generation_attempts (int; retry budget before fallback)
+  - NOTE: implementation may carry additional tuning fields (corridor padding, pocket sizes, etc.) not listed here; those are generator internals, not spec-level fields
+
+### 5.4.4 Subarea templates
+
+`SubareaTemplateDef` is the content unit used by map generation to populate subarea slots. Each template defines the interior layout archetype, size constraints, biome compatibility, and role tags that the generator uses when assigning templates to subarea slots. Templates are authored as ScriptableObjects and selected at generation time via tag matching and size validation.
+
+This def was created during M4.3 implementation and is formalized here retroactively per AGENTS.md open-decision tracking rules.
+
+- **SubareaTemplateDef / SubareaTemplateDto**
+  - id, version
+  - display_name (localization key)
+  - layout_archetype (enum: ArenaOpen / Chokepoint / GridAisles / MazeTunnels / RoomCluster / RingArena / SpineCorridor)
+  - role_tags: [string] (e.g. "Start", "Gate", "Objective", "Exfil", "Support" — used by generator slot matching)
+  - biome_allowlist: [biome_id] (nullable; if set, template only appears in listed biomes)
+  - biome_denylist: [biome_id] (nullable; template never appears in listed biomes)
+  - size_min (w, h; minimum tile dimensions this template can fill)
+  - size_max (w, h; maximum tile dimensions)
+  - connector_port_count_min (int; minimum number of connector attachment points)
+  - connector_port_count_max (int; maximum)
+  - tags: [string] (general-purpose tags for generator filtering; e.g. "hazard_bias", "loot_bias", "fortified")
+  - asset_ids (optional; sprite overrides for tile rendering)
+
+- **SubareaSkeletonDef / SubareaSkeletonDto** *(new — formalizes hardcoded slot skeletons)*
+  - id, version
+  - display_name
+  - grid_width, grid_height (int; total map canvas size this skeleton targets)
+  - slots: [{ slot_id, role_tag, bounds_x, bounds_y, bounds_w, bounds_h, required_connections: [slot_id] }]
+  - corridor_lanes: [{ lane_id, axis (H/V), fixed_coord, range_min, range_max }]
+  - note: replaces hardcoded skeleton coordinate arrays in MapGenerator; authored as data assets so new skeletons can be added without code changes
+
+ID conventions:
+- Subarea templates: `SUB_<LayoutArchetype>_<RoleTag>_<Variant>` (e.g. `SUB_ArenaOpen_Objective_A`, `SUB_Chokepoint_Support_01`)
+- Subarea skeletons: `SKEL_<MapName>_<Variant>` (e.g. `SKEL_SurfaceDataCenter_Base`, `SKEL_SurfaceDataCenter_MirrorX`)
+
+### 5.5 Weapon upgrade trees
+
+- **WeaponUpgradeTreeDef / WeaponUpgradeTreeDto**
+  - id, version, weapon_id
+  - starting_nodes: [node_id]
+  - rules:
+    - max_nodes_purchasable (v1 recommended 6–10)
+    - respec_allowed (bool; default false for v1)
+    - unlock_conditions (optional; Station Depth / base tier)
+  - node_ids: [node_id]
+
+- **WeaponUpgradeNodeDef / WeaponUpgradeNodeDto**
+  - id, version, tree_id
+  - name, description
+  - prerequisites: [node_id]
+  - cost:
+    - upgrade_points (int)
+    - required_parts: [{ item_id, qty }]
+    - currency_cost (optional)
+  - effects:
+    - stat_mods (damage/range/cooldown/burst/etc.)
+    - template_mods (pierce/split/cone width/adjacent offsets/etc.)
+    - rule_mods (refract-on-kill, status procs, etc.)
+
+### 5.6 Status effects
+
+- **StatusEffectDef / StatusEffectDto**
+  - id, version
+  - display_name (resolved via localization table; never hardcoded)
+  - stack_rule (enum: Stack / Refresh / Unique)
+  - dot_per_stack (float; damage per turn per stack)
+  - duration_turns (int; base duration)
+  - max_stacks (int; nullable — unbounded if null)
+  - spread_rule (nullable; e.g. Burn spreads to adjacent entities on application)
+  - immobilize (bool; Freeze)
+  - shatter_damage_mult (float; nullable; Freeze shatter bonus)
+  - action_penalty (nullable; Shock — skip turn or speed reduction)
+  - movement_damage_scale (float; nullable; Bleed)
+  - mechanical_only (bool; EMP — only affects mechanical enemies/shields)
+  - application_tags: [string] (for resistance checks)
+
+### 5.7 Spec system defs
+
+- **SpecDef / SpecDto**
+  - id, version
+  - class_id
+  - branch_id (nullable for generic pool specs)
+  - slot_target (enum: ClassAbility / Primary / PassiveI / PassiveII)
+  - is_generic (bool; true = drawn from class generic pool)
+  - is_capstone (bool; capstone specs are the build-defining rule-change tier)
+  - effects: [stat_mods, rule_mods, cross_slot_rules]
+  - modifies (enum: Active / UniqueEquip / Both)
+  - display_name, description (localized)
+
+- **SpecBranchDef / SpecBranchDto**
+  - id, version
+  - class_id
+  - slot_target (enum: ClassAbility / Primary / PassiveI / PassiveII)
+  - branch_name (thematic label, e.g. "Fortress", "Shock Pylon", "Warden Matrix")
+  - unlock_node_id (nullable; base node required to unlock this branch option)
+  - spec_ids: [spec_id, spec_id] (2 non-capstone specs)
+  - capstone_spec_id
+
+- **ClassSpecGenericPoolDef / ClassSpecGenericPoolDto**
+  - id, version
+  - class_id
+  - spec_ids: [spec_id...] (class-filtered generics; slot-keyed but broader pool)
+
+### 5.8 Belt + utility item defs
+
+- **BeltDef / BeltDto** (extends ItemDef)
+  - id, version
+  - rarity
+  - tier (int; derived from rarity via BeltTierDef lookup)
+  - utility_slots (int; from BeltTierDef)
+  - currency_retention_pct (float; from BeltTierDef)
+  - socket_layout: utility_affixes (int count)
+  - asset_ids
+
+- **UtilityItemDef / UtilityItemDto**
+  - id, version
+  - category (enum: Grenade / Consumable / Tool / Trap / AmmoType)
+  - charges_per_run (int; default 1)
+  - effects: [rule definitions]
+  - acquisition_sources: [enum: LootDrop / Crafted / Vendor]
+  - restock_currency_cost (int; vendor restock cost mid-run)
+  - tags, asset_ids
+
+### 5.9 Boss defs
+
+- **BossDef / BossDto** (extends EnemyDef)
+  - id, version
+  - phase_thresholds: [{ hp_pct, phase_id }]
+  - arena_hazard_ids: [hazard_id]
+  - minion_spawn_profile_id
+  - map_effect_triggers: [{ trigger_condition, map_effect_id }]
+  - vulnerability_conditions: [{ condition, window_turns }]
+  - is_goal_required (bool; true = required for a goal package; false = optional boss room)
+
+- **BossMapEffectDef / BossMapEffectDto**
+  - id, version
+  - effect_type (enum: LockDoors / SurgeVents / ActivateHazards / SpawnElites / etc.)
+  - target_scope (enum: Arena / Subarea / Zone)
+  - duration_turns (int; nullable = permanent until boss death)
+  - hooks into world tick system
+
+- **BossPhraseDef / BossPhaseDto**
+  - id, version
+  - behavior_id (data-selected AI logic for this phase)
+  - stat_mods (damage/speed/range changes for this phase)
+  - ability_ids: [ability applied during this phase]
+
+### 5.10 Durability / scrap defs
+
+- **ScrapYieldDef / ScrapYieldDto**
+  - id, version
+  - gear_type (enum: Weapon / Armor)
+  - rarity_yields: [{ rarity, condition_fine_qty, condition_broken_qty, part_item_id }]
+  - note: condition_broken_qty < condition_fine_qty (condition affects yield)
+
+### 5.11 Exfil defs
+
+- **ExfilDef / ExfilDto**
+  - id, version
+  - exfil_type (enum: Quiet / Hot / Conditional / Emergency / Timed)
+  - countdown_turns (int; nullable for Quiet/Conditional before triggered)
+  - trigger_condition_id (nullable; for Conditional type)
+  - open_window_turns (int; nullable; for Timed type — how long before it closes)
+  - conversion_rules: [{ trigger_condition_id, converts_to_type }]
+  - alert_level_conversion: [{ alert_level, converts_to_type }]
+  - emergency_cost: (TBD — see Open Decisions)
+  - reveal_radius (int tiles; proximity reveals exfil point)
+  - biome_weight_tags: [string]
+
+### 5.12 Player stats defs
+
+- **PlayerStatsDef / PlayerStatsDto**
+  - id, version
+  - class_id
+  - base stats (one field per stat):
+    - max_hp, armor_base, evasion_base, shield_base, status_resist_base, move_speed_base
+    - damage_flat_base, damage_pct_base, crit_chance_base, crit_damage_base
+    - range_base, cdr_base, status_potency_base, aoe_size_base
+    - hp_regen_base, vendor_price_mod_base
+
+- **CombatConstantsDef / CombatConstantsDto**
+  - id, version
+  - armor_k_value (float; used in armor/(armor+K) formula)
+  - crit_base_multiplier (float; default 1.0 = 100% base before crit_damage stat)
+  - cdr_cap (float; maximum CDR % allowed; e.g. 0.75 = 75% cap)
+  - shield_regen_per_turn (float; base regen before gear bonuses)
+  - note: only one instance of this def should exist; referenced globally
+
+### 5.13 Affix, Chip, and Legendary power defs
+
+- **AffixDef / AffixDto**
+  - id, version
+  - display_name (localization key)
+  - stat_target (enum: maps to a player stat field)
+  - category (enum: Defensive / Offensive / Economic / Shared / ClassSynergy)
+  - slot_compat_tags: [string] (which gear slot types can carry this affix)
+  - class_filter_id (nullable; for ClassSynergy affixes)
+  - tiers: [AffixTierDef id]
+
+- **AffixTierDef / AffixTierDto**
+  - id, version
+  - affix_id
+  - tier (int: 1/2/3)
+  - value_min, value_max (float; rolled on chip creation)
+  - station_depth_min (int; minimum Station Depth before this tier can appear)
+
+- **ChipDef / ChipDto**
+  - id, version (generated on creation — each chip is a unique instance)
+  - affix_id
+  - affix_tier (int)
+  - rolled_value (float; exact value, copied from source item on scrapping or rolled on direct drop)
+  - slot_compat_tags: [string] (copied from AffixDef)
+  - size (w, h; grid size in stash — chips take inventory space)
+  - source (enum: Scrapped / Dropped)
+
+- **LegendaryPowerDef / LegendaryPowerDto**
+  - id, version
+  - display_name, description (localization keys)
+  - is_unique (bool; true = named item, hand-authored; false = pool draw)
+  - slot_compat_tags: [string]
+  - effects: [rule_mods] (passive only — no active triggers)
+  - note: Legendary powers are permanently bound to the Relic they appear on; no transfer
+
+- **ChipReplacementCostDef / ChipReplacementCostDto**
+  - id, version
+  - costs_by_rarity: [{ rarity, material_id, qty }]
+  - note: one instance; referenced by Workshop crafting logic
+
+### 5.14 Station Depth defs
+
+- **StationDepthProfileDef / StationDepthProfileDto**
+  - id, version
+  - class_id
+  - depth_levels: [{ depth, extractions_required, narrative_label, unlock_description, biome_ids_available }]
+  - note: one instance per class; `depth_levels` authored per Depth 1–12
+
+### 5.15 Ability defs
+
+- **AbilityDef / AbilityDto**
+  - id, version
+  - class_id
+  - display_name, description (localization keys)
+  - targeting_mode (enum: Tile / Self / Auto)
+  - activation_type (enum: Instant / ChargeUp)
+  - charge_turns (int; nullable; used if activation_type = ChargeUp)
+  - gate_type (enum: Cooldown / Resource / Both)
+  - cooldown_turns (int; nullable; used if gate_type includes Cooldown)
+  - resource_id (nullable; references a resource def e.g. BloodEngine stacks)
+  - resource_cost (int; nullable)
+  - effects: [AbilityEffectDef id] (list of effect categories — see below)
+  - unique_gear_override_ids: [{ item_id, replacement_ability_id }] (gear that replaces ability outright)
+  - unique_gear_modifier_ids: [{ item_id, modifier_rules }] (gear that tweaks parameters)
+
+- **AbilityEffectDef / AbilityEffectDto**
+  - id, version
+  - effect_category (enum: Damage / Deploy / StatusApply / ModifyPlayerState / ModifyEnemyState / CreateZone)
+  - target_scope (enum: Single / AoE / Self / Tile)
+  - damage (float; nullable)
+  - deploy_entity_id (nullable; entity def ID for Deploy effects)
+  - status_id (nullable; for StatusApply effects)
+  - buff_rules (nullable; for ModifyPlayerState)
+  - debuff_rules (nullable; for ModifyEnemyState)
+  - zone_profile_id (nullable; for CreateZone effects)
+  - duration_turns (int; nullable)
+
+- **AbilityResourceDef / AbilityResourceDto**
+  - id, version
+  - display_name (localization key)
+  - max_stacks (int)
+  - decay_rule (nullable; e.g. "loses 1 stack per turn if no kill")
+  - gain_triggers: [{ trigger_event, amount }] (e.g. on_kill: +1)
+
+### 5.16 Hazard defs
+
+- **HazardDef / HazardDto** (tile hazards)
+  - id, version
+  - display_name (localization key)
+  - hazard_type: TileState
+  - effects: [{ effect_type, value, trigger (OnEnter / PerTurn / OnExit) }]
+  - effect_types include: Damage, StatusApply, BlockMovement, ReduceVisibility
+  - spread_rule (nullable; { spread_chance, interval_turns, max_tiles })
+  - duration_turns (int; nullable — null = permanent)
+  - immune_tags: [string] (entity tags that are immune to this hazard)
+  - is_biome_exclusive (bool)
+  - can_be_disabled (bool)
+  - disable_method (nullable; e.g. tool_tag required)
+
+- **HazardEntityDef / HazardEntityDto** (entity hazards)
+  - id, version
+  - display_name (localization key)
+  - hazard_type: Entity
+  - hp (int; nullable — null = indestructible)
+  - aoe_radius (int; effect radius around entity)
+  - effects: [{ effect_type, value, trigger }] (same effect types as HazardDef)
+  - spawn_profile_id (nullable; entity may spawn additional hazards on death)
+  - immune_tags: [string]
+  - is_biome_exclusive (bool)
+  - asset_ids: sprite_id, sfx_id
+
+### 5.17 Loot drop profile defs
+
+- **LootDropProfileDef / LootDropProfileDto** (enemy drops)
+  - id, version
+  - entries: [{ item_category, item_id (nullable), weight, qty_min, qty_max, depth_scale_mult }]
+  - item_category (enum: Gear / Currency / Material / WeaponParts / ArmorScraps / UtilityItem / Chip / Nothing)
+  - note: each entry rolls independently; weight is relative within the profile
+  - depth_scale_mult: runtime multiplier applied based on chosen Station Depth
+
+- **ContainerLootProfileDef / ContainerLootProfileDto** (crates, lockers, caches)
+  - id, version
+  - container_type (enum: ArmoryLocker / ElectronicsCache / BioCrate / VaultContainer / GenericCrate)
+  - guaranteed_slots: [{ item_category, item_id (nullable), qty_min, qty_max }]
+  - random_entries: [{ item_category, item_id (nullable), weight, qty_min, qty_max }]
+  - roll_count (int; how many random_entries roll per open)
+  - depth_scale_mult (float)
+  - biome_bias_tags: [string]
+
+- **MaterialDef / MaterialDto**
+  - id, version
+  - display_name (localization key)
+  - material_category (enum: Standard / RunExclusive)
+  - stack_size (int)
+  - size (w, h; grid size in stash)
+  - asset_ids
+
+### 5.18 Vendor defs
+
+- **VendorDef / VendorDto**
+  - id, version
+  - vendor_type (enum: Market / Gunsmith / BlackMarket)
+  - services: [enum: BuyGear / BuyUtility / BuyMaterials / Sell / FieldRepair / ModReroll / IntelScan / ExfilBribe / VendorExclusive]
+  - inventory_profile_id (references a LootDropProfileDef for what gear/items this vendor stocks)
+  - price_scale_by_depth: [{ depth, price_mult }]
+  - spawn_weight (float; relative chance this vendor type spawns in a run)
+  - inventory_fixed_on_spawn (bool; true = inventory generated once, does not refresh)
+  - vendor_exclusive_item_ids: [item_id] (items only available at this vendor type, not at base)
+  - field_repair_cost_mult (float; nullable; premium over base repair cost)
+
+### 5.19 Objective defs
+
+- **ObjectiveDef / ObjectiveDto**
+  - id, version
+  - display_name, description (localization keys)
+  - objective_type (enum: KillCount / SealDestroy / RetrieveCarry / ActivateHold / Escort / Survival)
+  - is_failable (bool; true = can permanently fail mid-run e.g. escort target dies)
+  - completion_mode (enum: AutoComplete / RequiresInteract)
+  - counter_target (int; nullable; for KillCount, SealDestroy, Survival)
+  - target_entity_id (nullable; specific enemy or entity ID for targeted kills)
+  - hold_turns (int; nullable; for ActivateHold)
+  - retrieve_item_id (nullable; for RetrieveCarry)
+  - escort_entity_id (nullable; for Escort)
+  - steps: [{ step_id, objective_def_id }] (nullable; for multi-step sequences)
+  - is_primary (bool)
+  - is_hidden_until_discovered (bool; secondaries hidden until discovered)
+  - on_complete_effects: [{ effect_type, value }] (e.g. unlock exfil type, grant reward bias)
+  - on_fail_effects: [{ effect_type, value }] (e.g. spawn enemies, close exfil)
+
+### 5.20 Weapon parts / upgrade defs (update)
+
+- **WeaponPartsDef / WeaponPartsDto** (extends MaterialDef)
+  - id, version
+  - weapon_family_id (string; links to a weapon family — families defined at M5.5)
+  - note: weapon families TBD at M5.5 weapon tree design milestone
+
+- **WeaponUpgradeTreeDef** (update to existing)
+  - add: `weapon_family_id` field
+  - add: `respec_part_cost: [{ item_id, qty }]` (parts cost to undo a node)
 
 ---
 
-## 8. Milestones (Execution Plan)
+## 6) Run Goals — Initial Catalog (v1 set)
+Each run picks 1 Goal Package (plus optional secondaries).
 
-### M1 — Foundations
-- Repo + environment setup
-- DB schema migrations for core entities
-- Basic auth/users/roles
-- CRUD for Customers and Jobs
-- ActivityLog framework
-- AuditLog (append-only compliance layer; see §12.1)
+### GP1: Boss Hunt
+- Primary: Defeat a boss entity that spawns after prerequisites (e.g., seal vents or activate terminals).
+- Exfil: Enabled on boss death (hot exfil default).
+- Rewards: higher chance of Cores + Relic mods.
+- Threat: higher elites; Alert Level may start at 1.
+- Map topology: boss arena at map terminus; fortified approaches.
 
-### M2 — Scheduling Core
-- ScheduleSegment CRUD (with datetime)
-- State derivation (TBS/Partial/Full) based on estimate vs scheduled allocation
-- Completed workflow (manual mark complete, completed_date)
-- Schedule event history (user-action events)
+### GP2: Core Retrieval
+- Primary: Collect 1–3 "Important Items" (e.g., Reactor Core, Bio-Sample, Signal Prism) and carry to exfil.
+- Exfil: Enabled once all items are carried and player reaches exfil.
+- Rewards: high materials bias (specific crafting mats).
+- Threat: enemies ambush near item rooms; extraction countdown longer if over-bulk.
+- Map topology: item rooms distributed across subareas; exfil at map edge.
 
-### M2.1 — Internal LAN Pilot (Office Host)
-- Run Scheduler on an always-on Windows machine inside the company network (LAN-only; not for crews/mobile in this phase).
-- Users access the UI from other office PCs via an internal hostname (e.g., `http://schedule-pc:3000`).
-- Runtime must not assume `localhost` from the user's browser:
-  - `apps/web` uses same-origin `/api/*` calls and proxies to `apps/api` via Next rewrites.
-  - `apps/api` binds to `0.0.0.0` for LAN reachability (and is firewalled to internal subnets).
-- Authentication/authorization requirement for multi-user LAN usage:
-  - Human usage must not rely on the dev/test header shim (`x-actor-user-id`).
-  - Implement real login + roles (MANAGER/SCHEDULER/VIEWER). Target is Google Workspace SSO restricted to `@irontreeservice.com`.
+### GP3: Purge (Kill Count)
+- Primary: Kill N enemies (e.g., 150) OR clear a "Wave Room" event.
+- Exfil: Enabled after quota met.
+- Rewards: currency + materials bias; good for early progression.
+- Threat: higher vent activity, lower boss chance.
 
-#### §2.1.1 Auth Implementation (Decision Record)
+### GP4: Vent Seal Operation
+- Primary: Seal X vents (e.g., 4).
+- Exfil: Enabled when vent quota met.
+- Rewards: crafting mats for base power modules.
+- Threat: vent rooms are fortified; buffers/disruptors more common.
+- Map topology: vents distributed across multiple subareas.
 
-**Decision:** Use [Auth.js (NextAuth v5)](https://authjs.dev/) with the Google OAuth provider, restricted to the `@irontreeservice.com` domain.
+### GP5: Data Uplink
+- Primary: Activate Y terminals; hold a tile for Z turns each (mini-defense events).
+- Exfil: Enabled after uplink chain complete.
+- Rewards: Intel Terminal-related materials; map intel progression hooks.
+- Threat: timed waves at each uplink.
+- Map topology: terminals distributed; Conditional exfil preferred.
 
-**Rationale:** Auth.js is free, open-source, well-documented, and purpose-built for Next.js App Router. It handles the Google OAuth flow, session management, and JWT signing with minimal boilerplate — appropriate for a novice-maintainable codebase. No paid services or complex infrastructure required.
+Goal packages are weighted by Station Depth so early runs don't require complex mechanics.
 
-**Implementation spec (Codex must follow):**
+---
 
-- **Library:** `next-auth` (v5 / Auth.js) installed in `apps/web`. No auth library needed in `apps/api` — the API trusts a forwarded verified token (see below).
-- **Provider:** Google OAuth (`GoogleProvider`). Restrict sign-in to `@irontreeservice.com` accounts using the `signIn` callback:
-  ```ts
-  // apps/web/auth.ts
-  callbacks: {
-    signIn({ profile }) {
-      return profile?.email?.endsWith('@irontreeservice.com') ?? false;
+## 7) Mod Support Roadmap (implementation timing aligned to post-1.0)
+### Phase 1 (1.0): mod-ready architecture (no mod loader shipped)
+- Implemented via M4.25 (Registry + DTO Layer) and M4.25.1 (DefDatabase).
+Acceptance criteria:
+- All defs have IDs + versions.
+- Game runs entirely off registries keyed by ID.
+- Saves store IDs only.
+- DTO layer exists for each def type (even if only used internally).
+- Mod merge policy is documented (even if loader not shipped).
+
+### Phase 2 (post-1.0): JSON balance/content mods (PC-first)
+What mods can do:
+- Override weapon/mod/enemy numbers
+- Add new spawn profiles, goal packages, objectives
+- Add new items/materials that reference existing sprites/sfx by asset_id
+- Add new "behavior_id" references to existing behavior scripts (data-driven selection)
+
+Deliverables (post-1.0):
+- `Mods/` folder scanning (PC)
+- `ModManifest.json` support
+- JSON schema docs + example mods
+- Safe failure: invalid mod does not brick game
+
+### Phase 3 (later): custom assets (optional)
+- Addressables/AssetBundles pipeline
+- Mod packaging format including bundles
+- Security + platform considerations (iOS likely limited)
+
+---
+
+## 8) Mod File Format
+
+```json
+{
+  "id": "ExampleMod",
+  "version": 1,
+  "loadOrder": 100,
+  "defs": [
+    {
+      "type": "WeaponDef",
+      "id": "WPN_CoilPistol",
+      "version": 2,
+      "damage": 12
     }
-  }
-  ```
-- **Session strategy:** JWT (default for Auth.js). Store `user.id` (internal DB id) and `user.role` in the JWT payload after first sign-in lookup/creation.
-- **User provisioning:** On first Google sign-in, look up the User record by email. If not found, auto-create with role `VIEWER` and `active=true`. A Manager must then elevate role via the admin UI. Never auto-assign MANAGER on sign-in.
-- **API authentication:**
-  - `apps/web` Next.js route handlers (or server actions) use `auth()` from Auth.js to get the session server-side — no token forwarding needed for web-originated requests handled within `apps/web`.
-  - For calls from `apps/web` → `apps/api` (Fastify), the web layer forwards the verified JWT as a `Bearer` token in the `Authorization` header. `apps/api` verifies the JWT signature using the shared `AUTH_SECRET` environment variable (set identically in both apps).
-  - `apps/api` must have a Fastify `preHandler` hook that verifies the JWT and sets `request.actor` (`{ id, role }`) on every authenticated route. Unauthenticated requests return `401`.
-  - The dev shim (`x-actor-user-id` header) must be **disabled in production** (guard with `NODE_ENV !== 'production'`) and must never be enabled in the LAN pilot build.
-- **Environment variables required (document in README):**
-  - `AUTH_SECRET` — shared JWT signing secret (generate with `openssl rand -base64 32`; same value in both `apps/web` and `apps/api`). Auth.js v5 also accepts `NEXTAUTH_SECRET` as an alias, but we standardize on `AUTH_SECRET`.
-  - `AUTH_URL` — full origin URL (e.g., `http://schedule-pc:3000`); required for OAuth redirect URI. Auth.js v5 also accepts `NEXTAUTH_URL` as an alias, but we standardize on `AUTH_URL`.
-  - `AUTH_GOOGLE_ID` — Google OAuth client ID (apps/web)
-  - `AUTH_GOOGLE_SECRET` — Google OAuth client secret (apps/web)
-- **Google OAuth setup (one-time, performed by manager):**
-  1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
-  2. Enable the Google OAuth consent screen (Internal, restricted to your Workspace org).
-  3. Create OAuth 2.0 credentials (Web application type).
-  4. Add authorized redirect URIs: `http://schedule-pc:3000/api/auth/callback/google` and `http://localhost:3000/api/auth/callback/google` for local dev.
-  5. Domain restriction is enforced in code via the `signIn` callback above — do not rely on Google Console alone.
-- **Role enforcement:**
-  - `apps/api` Fastify routes check `request.actor.role` against a permission map defined in `packages/shared/src/roles.ts`.
-  - VIEWER requests to any mutating endpoint (`POST`/`PATCH`/`DELETE`) return `403`.
-  - SCHEDULER requests to manager-only endpoints (admin list edits, role changes, sales-per-day) return `403`.
-- **Session expiry:** Default Auth.js JWT expiry (30 days). Expired sessions redirect to sign-in — no silent failure.
-- **README must document:** how to set env vars, how to create the Google OAuth app, and how to promote a user to MANAGER after first sign-in.
-
-### M3 — Resources & Rosters
-- Resource inventory CRUD (count-based)
-- Resource reservations per segment
-- Foreman day rosters + day-exclusive member assignment UI (foreman + members)
-- Availability checks: (beta approximation) sum all reservations by resource **per calendar day across all foremen**, overlap-agnostic, and warn when `total reserved quantity > inventory_quantity`; surface as a non-blocking warning — never a hard block in beta
-- Dispatch board conflict summary panel (equipment double-booking, person conflicts, capacity warnings, job overlap detection — see §5.7)
-- SchedulingConflictDismissal support (per-date per-user dismissal of conflict notices)
-
-### M4 — Import (Full Fidelity)
-- Import CRANE/BUCKET authoritative
-- Import Completed, Unhappy Customer, Unable, Winter, DS
-- Notes parsing pipeline (flags/requirements/equipment suggestions/RS-TBRS history)
-- All parsed Requirements and ScheduleEvents tagged with source=LEGACY_PARSE and raw_snippet preserved
-- "Extracted from Notes" UI review panel
-
-### M5 — Reporting & Weekly Snapshot
-- Live backlog report (SUMM equivalent)
-- Weekly snapshot job + "previous week backlog $" display
-- Sales-per-day editable setting (manager + schedulers)
-- Seasonal freeze window admin UI + dispatch board calendar overlay (SeasonalFreezeWindow CRUD + display bands)
-
-### M6 — Push-up Recommender
-- Vacated-slot detection: V1 (delete), V2 (move), V3 (shorten) — creates VacatedSlot records (see §2.5 and §5.4)
-- Candidate generation using hard filters + partial fill default (see §5.4)
-- Ranking by capacity fit, approval date, friction score
-- Push-up modal with inline requirement/blocker/seasonal badges
-- Apply-to-slot action: creates new ScheduleSegment, marks VacatedSlot as USED
-- Dismiss action: marks VacatedSlot as DISMISSED
-- Audit log entries for all recommender actions
-
-### M7 — Polish & Hardening
-- Permission refinement (manager feedback)
-- Import validation tools + reconciliation report (rows imported vs workbook)
-- Customer scheduling notifications: SMS + email via ScheduleNotificationLog (see §5.6)
-  - Job Scheduled, Job Rescheduled, Job Cancelled, Confirmation Request events
-  - Opt-in enforcement (contact_allowed, no_email, preferred_channels)
-  - Rep internal alerts on customer response
-- Error handling, performance, and UX cleanup
+  ]
+}
+```
 
 ---
 
-## 9. Acceptance Criteria (Beta)
-- All workbook "active" data imports successfully with traceability (row → job id).
-- Schedulers can:
-  - find any job via filters/search
-  - schedule multi-day time-based segments
-  - partially schedule jobs and see remaining hours
-  - mark jobs completed
-  - maintain requirements with statuses
-  - see clear reminders about unmet requirements
-  - see FROZEN_GROUND_REQUIRED and WINTER_PREFERRED warnings on scheduling attempts for flagged jobs
-  - view the conflict summary panel on the dispatch board date header and dismiss individual conflicts
-  - send customer scheduling notifications (SMS + email) explicitly via "Notify Customer" action
-- Manager can:
-  - edit sales/day value
-  - edit admin-managed lists (blocker reasons, access constraints, requirement types, seasonal freeze windows)
-  - adjust resource inventory quantities
-- Reports match spreadsheet intent:
-  - live backlog totals by rep and equipment
-  - previous week comparison values populated from snapshots
-- Notes extraction:
-  - preserves `notes_raw`
-  - successfully extracts at least: push-up flag, DTL/CBP/tree permit requirements, RS/TBRS history events, DW equipment suggestion
-  - all extracted requirements and schedule events have source=LEGACY_PARSE and raw_snippet populated
-  - provides a review/edit mechanism
+## 9) Milestones
+
+### M0 — Project Setup (1–3 days)
+Acceptance:
+- Project builds on Windows
+- iOS target compiles (no gameplay needed yet)
+- Basic scene loads, input system wired
+
+Tasks:
+- Create Unity project, set 2D pipeline
+- Create folder structure (Section 10)
+- Add build instructions
+- Establish save-data stub
+
+### M1 — Grid + Turn Engine (playable loop) (3–6 days)
+Acceptance:
+- Player can move on grid (8-way), wait, bump into walls
+- Enemies exist and take turns
+- Turn order is deterministic and visible (debug UI ok)
+
+Tasks:
+- Grid map representation + tile occupancy
+- Turn scheduler (player -> passive step hook -> enemies -> world)
+- Basic enemy AI: "move toward player" + "attack if adjacent"
+
+### M2 — Primary Weapon Manual Combat (3–6 days)
+Acceptance:
+- Player can aim/target and fire a primary weapon
+- Damage, death, simple drops (currency) exist
+- Numpad + iOS control prototype works
+
+Tasks:
+- PrimaryWeapon system (manual targeting)
+- Hit resolution (LoS optional, start simple)
+- Health + death + return to menu
+- iOS UI: virtual d-pad + attack + target select
+
+### M3 — Passive Weapon Auto-Fire Step (bullet heaven feel) (3–6 days)
+Acceptance:
+- Passive weapon fires automatically after player action
+- Targeting modes work (nearest / random at minimum)
+- Swarm density feels meaningfully different
+
+Tasks:
+- PassiveWeapon system with cooldown_turns + burst
+- Auto-fire step executed between player action and enemy step
+
+### M4 — Swarms + Spawn Vents + Objectives + Subarea Scaffolding (5–10 days)
+Acceptance:
+- Vents spawn enemies on world tick (active subareas only)
+- Player can destroy/seal vents
+- At least 2 objective types exist to enable extraction
+- Enemies outside the active subarea do not take turns
+
+Tasks:
+- SpawnVent entity + spawn rules (**vents operate only in active subareas**)
+- **Subarea scaffolding (v1)**
+  - represent subareas (rect bounds ok)
+  - track current active subarea (player position → subarea)
+  - ensure only active subarea enemies take turns
+- Objective framework foundation (ObjectiveDef)
+- Implement 2 objectives (SealVents, KillCount)
+
+### M4.25 — Registry + DTO Layer (mod-ready foundation) (3–7 days)
+Acceptance:
+- ScriptableObjects load into registries keyed by ID
+- DTOs exist and can be serialized/deserialized to JSON
+- Game runtime uses registries (not direct SO references)
+
+Tasks:
+- DefRegistry<T> pattern
+- DTO mapping (SO <-> DTO)
+- JSON serializer utility + version field
+- Save system uses IDs only
+
+### M4.25.1 — DefDatabase (explicit base defs) (1–3 days)
+Acceptance:
+- Base defs are authored as `.asset` ScriptableObjects (not runtime-created instances)
+- A `DefDatabase` ScriptableObject explicitly lists base defs used to populate registries
+- Bootstrap loads registries deterministically from `DefDatabase` (no runtime disk scanning)
+- Missing/duplicate IDs produce clear logs and do not cause nullref crashes
+
+Tasks:
+- `DefDatabase` ScriptableObject (+ CreateAssetMenu)
+- `DefBootstrap` MonoBehaviour referencing `DefDatabase`
+- Basic validation: empty IDs, duplicates, missing referenced IDs
+
+### M4.3 — Procedural MapGen v1 + Biomes (seeded) (5–12 days)
+Acceptance:
+- Each run generates a large procedural zone from a saved `run_seed` and `mapgen_id`
+- Map is composed of connected subareas, each assigned a `biome_id`
+- Layout is goal-driven (goal package shapes topology)
+- Biomes provide hooks for future mechanics via optional `environment_profile_id`
+- Player spawn, vents, and objectives are placed into generated subareas deterministically
+- Active-subarea simulation rule remains (sleeping outside active subarea; Alerted enemies may pursue)
+- All 5 connector types are represented in generation (Open, Locked, Airlock, Collapsed, VentShaft)
+
+Tasks:
+- Implement `MapGenProfileDef` (subarea count by Station Depth, size by biome, topology rules)
+- Implement `BiomeDef` + `EnvironmentProfileDef` + `ConnectorDef`
+- Map generator outputs: tile grid layout, subarea bounds/IDs, biome assignments, connector placements
+- Deterministic placement: player start, vents, objective targets
+- Save additions: persist `run_seed`, `mapgen_id`, generated subareas + biome assignments
+- **Surface Data Center slot generator (M4.3.2 sub-scope):**
+  - `MAPGEN_SURFACE_DATA_CENTER_96` uses slot-based skeletons
+  - template assignment constrained by slot tags + size
+  - corridor lanes for tube/open connections
+  - HUD reports generator mode/skeleton/attempt salt
+
+### M4.35 — Enemy Pathfinding v1 + Alert System (3–6 days)
+Acceptance:
+- Enemies can navigate maze-like subareas to reach the player
+- Pathing respects walls and blocking tiles; fallback behavior exists when no path
+- Deterministic path results given the same seed/state
+- Alert system: Idle → Alerted → Searching states work correctly
+- Alert triggers (LoS, ally kill, object interact, proximity) fire per `AlertProfileDef`
+- Alerted enemies pursue across subarea boundaries
+
+Tasks:
+- Implement grid pathfinding (A* or BFS) for enemy movement
+- Cache/refresh paths with reasonable invalidation rules
+- Add basic failover: if no path, enemy waits or reverts to greedy step
+- Implement `AlertProfileDef` + alert state machine
+- Implement Searching behavior (last known position pursuit)
+
+### M4.5 — Run Timer Escalation (2–5 days)
+Acceptance:
+- Run timer tracked (turn count)
+- Escalation thresholds at T80/T140/T200 trigger
+- UI shows current Alert Level and next threshold
+
+Tasks:
+- Turn counter + escalation table
+- Apply escalation modifiers during world tick
+- Minimal UI indicator
+
+### M4.75 — Goal Package System + Pre-Run Draft (3–7 days)
+Acceptance:
+- Pre-run draft screen shows 2–3 randomly generated run previews
+- Each preview shows: goal type, biome, reward bias, threat level
+- Run starts with a selected Goal Package (at least 2 packages: Purge + Vent Seal)
+- UI shows current goals + progress tracker
+- Goal completion enables extraction per package rules
+
+Tasks:
+- GoalPackageDef data model
+- Pre-run draft generation logic (pool size tunable)
+- Goal selection logic (weighted by Station Depth)
+- Objective tracking UI
+- Reward/threat bias hooks (minimal at first)
+
+### M5 — Extraction as an Event (countdown + pressure) (5–10 days)
+Acceptance:
+- All exfil points hidden until proximity reveal
+- Initiating exfil starts a countdown (e.g., 12 turns)
+- Enemy pressure increases during countdown
+- Player successfully extracts → end screen + loot summary
+- Abort extraction is possible with a cost
+- All 5 exfil types exist in data (at minimum Hot + Conditional functional)
+- Alert-level exfil type conversion works (Quiet → Hot at T80)
+
+Tasks:
+- Exfil points (all 5 types stubbed; Hot + Conditional functional)
+- Proximity reveal + Intel reveal hooks
+- Extraction countdown + alarm state
+- Alert-level conversion rule
+- Post-run summary and rewards calculation
+
+### M5.5 — Weapon Upgrade Trees + Parts Economy (Design Lock) (3–7 days)
+Acceptance:
+- Weapon upgrade tree system is specified and locked for v1 implementation.
+- Parts/material economy spec exists.
+- At least 3 weapons have complete trees (6–10 nodes each):
+  - Coil Pistol, Shard Rail, Pulse Beam
+- Each node specifies: upgrade point cost, required parts (item IDs + quantities), concrete effects.
+- Pacing targets defined per Station Depth band.
+
+Tasks:
+- Finalize `WeaponUpgradeTreeDef` + `WeaponUpgradeNodeDef` schema.
+- Define small parts taxonomy (v1 target: ~12–20 total parts).
+- Define upgrade point acquisition rules.
+- Define and document 3 full trees.
+- Document loot/drop plan for parts.
+
+### M6 — Inventory Grid + Loot Tetris + FIR Tagging + Death-Loss + Belt (7–14 days)
+Acceptance:
+- In-run backpack grid with item sizes
+- Loot pickup requires space; player must choose what to keep
+- Items tagged Found-In-Raid (FIR) only become "secured" on extraction
+- Secure Pouch exists and persists on death per rules
+- Player can choose Hardcore/Medium/Soft between runs; drop rate multiplier applies
+- Belt slot exists; utility slots function; currency retention on death works
+- Weapon parts + armor scraps supported as inventory items
+- Gear durability stages tracked; broken gear is non-functional
+
+Tasks:
+- Backpack + stash UI
+- FIR state transitions
+- Secure Pouch logic
+- Run difficulty selection UI + persistence
+- Apply drop_rate_mult to loot tables
+- Belt slot + BeltDef + BeltTierDef
+- Utility item slot UI + UtilityItemDef
+- Durability system: death-flagging, broken state, `ScrapYieldDef`
+- Scrapping UI (at base and vendor)
+
+### M7 — Home Base: Stash + Modules + Upgrade Web (10–20 days)
+Acceptance:
+- Base screen with stash + modules + upgrade web
+- Materials consumed for upgrades
+- Upgrades increase player power and Station Depth unlock potential
+- Passive Slot II unlock nodes exist per class
+- Recovery Drone upgrade node exists (Soft mode only)
+- Gunsmith module: repair weapons/armor for materials
+- Workshop: Chip application, scrapping gear → Chip, item review screen functional
+- Station Depth profile visible on base screen with narrative labels
+
+Tasks:
+- Base save data model
+- Implement base modules v1
+- Upgrade web UI + node prerequisites + world_cost hooks
+- Per-class Passive Slot II nodes
+- Recovery Drone nodes (T1–T3)
+- Gunsmith repair UI
+- Workshop chip application UI + scrapping UI
+- StationDepthProfileDef + per-class depth tracking
+- Item review/stash sorting screen (post-run flow)
+
+### M8 — Shops/Vendors + Economy Tuning (5–10 days)
+Acceptance:
+- In-run shop terminals exist
+- Post-run selling exists
+- Prices/rerolls scale with Threat Level and run progress
+- Field repair available at vendors (currency + materials)
+- Utility item restock available at vendors
+- Intel scan purchase available at vendors
+
+Tasks:
+- Vendor inventory generation
+- Sell/buy UI
+- Field repair + utility restock UI
+- Economy logging
+
+### M8.5 — Boss Framework (5–10 days)
+Acceptance:
+- `BossDef` data model fully implemented with all 5 pillars:
+  - Phase transitions fire at correct HP thresholds
+  - Arena hazards activate on boss entry
+  - Minion spawning works per spawn profile
+  - Map-wide effects trigger correctly (door locks, vent surges, hazard pulses)
+  - Vulnerability windows require correct condition before damage lands
+- At least 1 functional boss (any biome)
+- Optional boss rooms can appear independent of goal package
+- Boss required by GP1 (Boss Hunt) works end-to-end
+
+Tasks:
+- BossDef + BossPhraseDef + BossMapEffectDef data model
+- Phase transition system
+- Arena hazard activation
+- Minion spawn integration
+- Map-wide effect hooks into world tick
+- Vulnerability condition system
+- Optional boss room placement in procgen
+
+### M9 — Content Expansion to v1 Targets (ongoing)
+Acceptance:
+- 4 classes with spec systems functional
+- 12 weapons, 5 biomes, full enemy roster + elites
+- All 5 goal packages functional
+- All 5 exfil types functional
+- Status effects system complete (all 6 effects, bidirectional)
+- Balance pass for meaningful extraction choices
+
+### M10 — Polish + Shipping Readiness (ongoing)
+Acceptance:
+- iOS one-hand UX polished
+- Performance supports high enemy counts
+- Save/load robust
+- Tutorial/onboarding
 
 ---
 
-## 10. Admin-Managed Lists (Initial)
-- Requirement Types: POLICE_DETAIL, CRANE_AND_BOOM_PERMIT, TREE_PERMIT
-- Blocker Reasons (seed list; editable):
-  - Permit Pending
-  - Customer Unresponsive
-  - Access Blocked
-  - Neighbor Consent Needed
-  - Frozen Ground Required
-  - Winter Timing
-  - Utility Coordination
-  - Weather Delay
-  - Other
-- Access Constraints (seed list; editable):
-  - Driveway blocked
-  - Neighbor driveway access
-  - Gate/code needed
-  - Vehicles must be moved
-  - Street/parking constraints
-  - Other
-- Seasonal Freeze Windows (manager-managed; no seed data — manager adds historical records):
-  - label, start_date, end_date, notes, active flag
-  - displayed as color bands on dispatch board calendar overlay
+## 9.1 Post-1.0 Milestones (mod support release track)
+
+### P1 — Mods v1 (JSON overlay, PC-first) (7–14 days)
+Acceptance:
+- Game loads mods from `Mods/` directory (PC)
+- ModManifest controls load order
+- Overrides apply (last wins)
+- Safe failure: invalid mod does not brick game
+
+Tasks:
+- Mod scanner + manifest loader
+- JSON DTO loader and registry overlay
+- Validation + error reporting UI/log
+- Ship ExampleMod and schema docs
+
+### P2 — Mod tooling + docs (optional)
+- Add a "Dump DTOs to JSON" command for vanilla defs
+- Add a "Validate mod" tool
+- Documentation and examples
+
+### P3 — Custom asset mods (optional, later)
+- Addressables/AssetBundles pipeline
+- Mod packaging format including bundles
+- Security + platform considerations (iOS likely limited)
 
 ---
 
-## 11. Implementation Notes (for Codex)
-- Prefer derived state over duplicated fields (e.g., compute remaining TBS hours from estimate history + segments).
-- Store datetimes even if current UI is list-based; future calendar depends on it.
-- Legacy parse artifacts must be traceable (`source=LEGACY_PARSE`, `raw_snippet` preserved).
-- Never require perfect parsing to proceed; surface "needs review" to users.
+## 10) Proposed Unity Folder Structure
+```
+Assets/
+  _Project/
+    Scripts/
+      Core/
+      Combat/
+      AI/
+      World/          (map gen, subareas, connectors, vents, hazards, objectives, escalation, goal packages)
+      UI/
+      Data/           (registries, DTO mapping, catalogs)
+      Save/
+      Mods/           (mod loader; post-1.0)
+    Data/
+      Weapons/
+      Mods/
+      Enemies/
+      AlertProfiles/
+      EliteModifiers/
+      Classes/
+      Specs/
+      SpecBranches/
+      Biomes/
+      BaseNodes/
+      BaseModules/
+      Items/
+      Belt/
+      UtilityItems/
+      RunDifficulties/
+      EscalationProfiles/
+      GoalPackages/
+      Objectives/
+      Exfil/
+      Bosses/
+      StatusEffects/
+      Catalogs/       (AssetCatalog, string->asset maps)
+      Subareas/
+      SubareaTemplates/
+      SubareaSkeletons/
+      Connectors/
+      Affixes/
+      Chips/
+      LegendaryPowers/
+      PlayerStats/
+      CombatConstants/
+      Abilities/
+      Hazards/
+      HazardEntities/
+      LootDropProfiles/
+      Vendors/
+      Materials/
+      StationDepth/
+    Prefabs/
+    Scenes/
+      Boot.unity
+      Run.unity
+      Base.unity
 
-
-**Operating hours (UI + anchor preferences):** Default dispatch board display window is 05:00–19:00 local time. Managers can set company operating hours (start/end) which adjust the calendar display window and the default scheduling/availability anchor when a day has no events. These are preferences only, not hard scheduling boundaries.
-
-**Timezone policy:** Store all timestamps as `timestamptz` (UTC-normalized). The app operates in a single company timezone (America/New_York unless configured otherwise). All display and date input uses that timezone. Document the configured timezone in README. Never store naive local timestamps.
-
-**Date/time handling (novice-safety):** In the web UI and API, do not perform arithmetic with native `Date` objects. All scheduling math must use **(company-local date + snapped minute-of-day integers)**; UTC timestamps are for storage/serialization only. For timezone conversions (UTC ⇄ company-local) and day-boundary computations, use a single timezone-aware library **inside shared helpers only** (Luxon is permitted *only* within `packages/shared` time helpers). Feature code must not import Luxon directly; it must call the shared helpers.
-
-**Primary key type (authoritative):** All tables must use UUID primary keys (`@id @default(uuid())` in Prisma). Do not use integer auto-increment PKs. Sylvara CRM (the parent system this module will eventually merge into) uses UUIDs universally, and re-keying from integers to UUIDs after beta is one of the most destructive migrations possible. Use UUIDs from the first migration. This applies to every entity: Job, Customer, Resource, ScheduleSegment, ForemanDayRoster, ImportRowMap.entity_id, etc.
-
-**Numeric math (novice-safety):** Postgres `numeric` values must not be manipulated as JavaScript `number` in runtime logic (money, hours, and state math). Use `Prisma.Decimal` (or equivalent decimal library) end-to-end for arithmetic and comparisons. For calendar placement/overlap logic, prefer integer minutes derived from the snapped datetimes.
-
-**Derived-state query performance:** Backlog list queries must compute `scheduled_effective_hours` in a single SQL pass (JOIN + GROUP BY or equivalent) to avoid N+1 queries. If performance later forces denormalization, use the state invalidation surface to keep any cached field correct.
-
-**API warnings vs errors (novice-safety):** Scheduling attempt endpoints must return non-blocking reminders as `warnings[]` in a successful ACCEPT response. Only hard rejection conditions return REJECT with error codes; warnings must never be encoded as HTTP 400 errors.
-
-**Warning codes (stable, non-blocking):**
-- `REQ_NOT_APPROVED` — at least one Requirement is not APPROVED
-- `REQ_DENIED_PRESENT` — at least one Requirement is DENIED
-- `REQ_UNMET_PRESENT` — required items exist but are not yet satisfied/confirmed
-- `FROZEN_GROUND_REQUIRED` — job has frozen_ground_flag=true; scheduler reminder only
-- `WINTER_PREFERRED` — job has winter_flag=true; scheduler reminder only
-
-**Customer notification constraints:** Before any outbound notification channel is used, the scheduling service must check all three opt-in fields: `jobs.contact_allowed`, `jobs.no_email`, and `jobs.preferred_channels`. If contact_allowed=false, block the entire notification and surface a warning. If no_email=true, suppress email but allow SMS if phone is available. Never silently drop a channel — surface the suppression reason in the UI and log it in ScheduleNotificationLog.channels_suppressed. Reschedule and cancellation notifications are never automatic; they require explicit scheduler action.
-
-**Conflict visibility is read-only:** The dispatch board conflict summary panel (§5.7) is computed at render time from a single SQL pass. It does not block scheduling, does not generate any notifications, and does not write records except for SchedulingConflictDismissal rows when a user dismisses a conflict notice. Never make conflicts into hard blocks.
-
-**Notes parsing expansion (post-v1):** Beta parser covers tree service vocabulary only (DW, DTL, CBP, RS, TBRS, PUSH UP IF POSSIBLE, etc.). Post-v1 extensibility path: add a `notes_parsing_vocabulary` key to OrgSettings/tenant_settings storing a JSON dictionary of `{token: action}` pairs. Parser loads tenant vocabulary at runtime and merges with the system tree service dictionary. This enables landscaping (mowers, aerators, skid steers) and snow removal (route codes, salt/sand, priority tiers) parsing per tenant without modifying the core parser. Do not build this in beta — just don't hard-code the parser in a way that makes extension impossible.
-
-**OrgSettings (single-row, internal tool):** stores `company_timezone`, `operating_start_time`, and `operating_end_time` used for dispatch-board default display window and default availability anchor when a day has no events. These are preferences only, not hard scheduling boundaries.
-
-
-**Canonical availability query (authoritative)**
-All "foreman availability" logic must be consistent across:
-- calendar/day views
-- recommended dates
-- one-click scheduling
-- conflict detection
-
-**Inputs**
-- foreman_person_id
-- target local date (company timezone)
-- duration_hours (onsite hours calendar block for scheduling attempts)
-
-**Occupied intervals (active only)**
-1) TravelSegments where:
-   - travel_segments.foreman_person_id = :foreman_person_id
-   - deleted_at IS NULL
-   - start/end fall on the target local date (split at midnight local time if needed; segments must not cross midnight)
-
-2) ScheduleSegments where:
-   - schedule_segments.deleted_at IS NULL
-   - EXISTS SegmentRosterLink -> ForemanDayRoster for that date where foreman_person_id matches
-   - start/end fall on the target local date (segments must not cross midnight)
-
-**Algorithm (pseudocode)**
-- Fetch all occupied intervals for the foreman/date, sorted by start_datetime.
-- Coalesce overlaps (if any) into a normalized occupied list.
-- Compute free intervals as the gaps between occupied intervals.
-- Choose the first free interval that can fit duration_hours starting from an anchor time:
-  - If ForemanDayRoster.preferred_start_time exists → use that as the first search anchor.
-  - Else if the day already has any events → anchor at the earliest event start.
-  - Else anchor at the selected HomeBase opening time (manager-managed; falls back to company operating hours if HomeBase open time is unset).
-  - HomeBase selection rule: if no ForemanDayRoster exists yet for the foreman+date, the scheduling attempt must first create the roster and set ForemanDayRoster.home_base_id (UI must require/choose a HomeBase); subsequent availability uses that roster home_base_id.
-- A scheduling attempt succeeds only if a contiguous free interval can fit duration_hours.
-
-**Performance note**
-- Use partial indexes on active segments (deleted_at IS NULL) as defined in AGENTS.md §4.2.
-
-
-
-**`sales_rep_code` normalization:** During import and on all data entry, normalize `sales_rep_code` to uppercase-trimmed (e.g., "jd", "J.D.", " JD " all become "JD"). This is required for correct group-by-sales-rep behavior in reports.
-
-**Phase 2 decision — customer availability windows (authoritative):** Until a dedicated availability model exists, customer windows are derived only from `Job.availabilityNotes` using strict pattern parsing (24h and explicit AM/PM range forms). Recognized windows are enforced as hard scheduling constraints; unrecognized/ambiguous text is treated as "window not configured" (non-blocking). UI continues to display AM/PM-friendly labels while runtime stores and compares internal minute values.
+Mods/                (PC runtime folder, outside Assets; post-1.0)
+  ExampleMod/
+```
 
 ---
 
-## 12. Sylvara CRM Integration Notes
-
-This scheduler is being built standalone first (replacing the spreadsheet backlog for Iron Tree Service). It will later be merged into the **Sylvara CRM** platform as the scheduling module. This section documents the known gaps, entity mappings, and migration decisions so that standalone development doesn't inadvertently bake in patterns that make the merge expensive.
-
-**Standalone-first principle:** Do not build Sylvara CRM features into this module. Build the scheduler cleanly as a standalone product. The merge path below tells you what shape to keep things in — not what to build now.
-
-### 12.1 Decisions locked now for merge readiness
-
-**UUID primary keys (non-negotiable):** Sylvara uses UUIDs on every table. This module must also use UUIDs (see §11 Implementation Notes). Do not use integer auto-increment PKs anywhere.
-
-**No `tenant_id` in standalone (acceptable; document the boundary):** Sylvara enforces `tenant_id` on every table with PostgreSQL row-level security. This scheduler is single-tenant (Iron Tree Service only) and has no `tenant_id`. This is intentional for standalone beta. `OrgSettings` serves as the proto-tenant anchor (company timezone, operating hours, etc.). When the modules merge, `tenant_id` will be added to all tables and `OrgSettings` will be replaced by the Sylvara `tenants` row. Do not build any multi-tenant logic now, but do not build patterns that make adding `tenant_id` a full rewrite either — specifically: all queries must be written to filter from a single top-level anchor, not from global scans.
-
-**Soft deletes (match Sylvara):** Sylvara uses `deleted_at` soft deletes on every table. This scheduler uses `deleted_at` on all entities (Customer, Job, Resource, ForemanDayRoster, JobBlocker, Requirement, HomeBase, etc.). Apply this pattern to every new table added. Never hard-delete rows.
-
-**Append-only audit log (add to scheduler):** Sylvara has an immutable `audit_log` that records every INSERT/UPDATE/DELETE across all tables — separate from the user-facing `ActivityLog`. The scheduler must also implement this compliance-grade layer. Add an `AuditLog` table mirroring Sylvara's schema (`table_name`, `record_id`, `action`, `changed_by`, `changed_at`, `old_values`, `new_values` as JSONB). This is in addition to — not a replacement for — the existing domain-semantic `ActivityLog`. Populate it via a Prisma middleware or DB trigger on every write. This is a M1 task.
-
-### 12.2 Entity mapping (scheduler → Sylvara)
-
-| Scheduler entity | Sylvara entity | Migration notes |
-|---|---|---|
-| `Customer` | `Contact` + `Property` + `property_contacts` | The scheduler's flat Customer must be split at merge time. Keep `Customer.name` and contact fields on `Contact`; move `job_site_address`/`town` to `Property`. Do not over-build Customer — avoid adding sub-entities that assume it stays flat. |
-| `Job` | `jobs` | **Decision (locked): The scheduler's Job entity and Sylvara's jobs table are the same table in the merged system. The scheduler's richer model wins — no re-keying required.** Legacy/import-era rows have `estimate_id = NULL`. Integrated-era rows (post-merge) have `estimate_id` populated when a job is created from an approved estimate. `approval_date` / `approval_call` are the lightweight substitute until then. |
-| `Resource (PERSON)` | `crew_members` | Scheduler `Resource.name`, `is_foreman`, `active` → Sylvara `crew_members.first_name/last_name`, `role=foreman`, `active`. |
-| `Resource (EQUIPMENT)` | `equipment_types` + inventory | Sylvara's `equipment_types` is a catalog with no inventory count. The scheduler adds `inventory_quantity`. Merge path: add inventory to Sylvara's equipment_types. |
-| `ResourceReservation` | `schedule_equipment` (junction) | Sylvara's junction is simpler (no quantity). Merge path: extend with quantity. |
-| `ForemanDayRoster` + `SegmentRosterLink` | *(not in Sylvara v1.2)* | The scheduler's foreman-anchored model is more advanced than Sylvara's `schedule_entries`. At merge, Sylvara adopts the scheduler's model. The scheduler's tables are the authoritative design. |
-| `TravelSegment`, `VacatedSlot` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried into Sylvara as-is. |
-| `ScheduleEvent` | *(not in Sylvara v1.2)* | Scheduler-specific history. Will be carried as-is. |
-| `CustomerRisk` | `complaints` (partial overlap) | Sylvara's `complaints` table is broader (service quality, driver behavior, property damage, billing). The scheduler's `CustomerRisk` (severity 1–10, OPEN/MONITORING/RESOLVED) is a customer satisfaction flag, not an incident log. At merge: `CustomerRisk` maps to a severity/status filter on `complaints` where `complaint_type = service_quality`. |
-| `sales_rep_code` (text) | `reps.id` (UUID FK) | Scheduler uses normalized text code (e.g., "JD"). Sylvara has a proper `reps` table. At merge: create a `reps` record per unique code and replace `sales_rep_code` with `rep_id FK`. Keep the text code as a transitional field until the FK is fully populated. |
-| `ImportRun` + `ImportRowMap` | `import_quarantine` (partial overlap) | Both can coexist. `ImportRowMap` provides row→entity traceability (scheduler-specific). Sylvara's `import_quarantine` handles unmapped/failed rows. At merge: keep both; they serve different purposes. |
-| `ActivityLog` | `audit_log` (different purpose) | See §12.1. Both should exist in the merged system. |
-| `OrgSettings` | `tenants` + `tenant_settings` | `OrgSettings.company_timezone` → `tenants.timezone`. `OrgSettings.operating_start_time/end_time` → `tenant_settings` key-value. Replace at merge. |
-| `Requirement`, `RequirementType` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried into Sylvara as-is. |
-| `JobBlocker`, `BlockerReason` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried into Sylvara as-is. |
-| `HomeBase` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried as-is; may eventually link to `properties`. |
-| `EstimateHistory` | `estimate_revisions` (partial overlap) | Sylvara tracks estimate dollar revisions. The scheduler tracks both dollar and hour changes. At merge: extend `estimate_revisions` to include hours. |
-| `ScheduleNotificationLog` | *(not in Sylvara v1.2)* | Scheduler-specific. Will be carried as-is. Integrates with Sylvara's Notifications module at merge. |
-| `SeasonalFreezeWindow` | *(not in Sylvara v1.2)* | Scheduler-specific admin-managed display data. Will be carried as-is. |
-| `SchedulingConflictDismissal` | *(not in Sylvara v1.2)* | Scheduler-specific UI state. Will be carried as-is. |
-
-### 12.3 Role and permission mapping
-
-| Scheduler role | Sylvara role | Notes |
-|---|---|---|
-| `MANAGER` | `admin` | Full access |
-| `SCHEDULER` | `scheduling` | Schedule create/edit; read-only leads/estimates |
-| `VIEWER` | `read_only` | Read-only across all |
-| *(missing)* | `sales` | Not needed in standalone scheduler; will exist at merge |
-| *(missing)* | `accounting` | Not needed in standalone scheduler |
-| *(missing)* | `foreman` | Not needed in standalone scheduler (foremen are Resources, not users) |
-
-The Auth.js implementation in §2.1.1 uses `MANAGER | SCHEDULER | VIEWER`. When merging into Sylvara, these role names will be migrated to Sylvara's enum. Do not add the Sylvara roles to the standalone scheduler — but do implement the role-permission check in `packages/shared/src/roles.ts` so the mapping point is clean and isolated.
-
-### 12.4 Auth reconciliation path
-
-The standalone scheduler uses **Google OAuth only** (Auth.js). Sylvara's `users` table uses `password_hash` (Argon2/bcrypt) — meaning it was designed for username/password login. These need reconciliation at merge time.
-
-Recommended path: Sylvara's full auth system should adopt OAuth as the primary mechanism (Google Workspace SSO for internal users; potentially other providers for future SaaS). The `password_hash` column in Sylvara can be made nullable to support OAuth-only accounts. This is a Sylvara-level decision, not a scheduler decision — but the scheduler's Auth.js implementation should be treated as the reference pattern.
-
-### 12.5 `jobs.status` — resolution (stored enum replaced by derived model)
-
-**Decision (locked):** The scheduler's derived-state model wins. Sylvara's stored `jobs.status` enum column is dropped at merge and replaced by a database view (`jobs_derived_state`) that computes state using the authoritative five-event algorithm in §2.5. This is a Stop-and-Ask migration — do not execute without a formal merge plan.
-
-**Replacement map for the eight stored status values:**
-
-| v1.2 stored value | v2.x replacement |
-|---|---|
-| `to_be_scheduled` | Derived: `scheduled_effective_hours <= 0` and not completed |
-| `scheduled` (partial) | Derived: `0 < scheduled_effective_hours < estimate_hours_current - 0.01` |
-| `scheduled` (full) | Derived: `scheduled_effective_hours >= estimate_hours_current - 0.01` |
-| `completed` | Derived: `completed_date IS NOT NULL` |
-| `in_progress` | Post-v1 derived: today's date has an active ScheduleSegment for this job; or lightweight manual flag if needed |
-| `invoiced` | Derived from invoicing module: invoice exists in paid/sent status for this job |
-| `unable` | Replaced by `JobBlocker` with ACTIVE status — not a pipeline state |
-| `winter_hold` | Replaced by `jobs.winter_flag` boolean — not a pipeline stage |
-| `unhappy_customer` | Replaced by `CustomerRisk.status = OPEN` linked to the customer |
-
-### 12.6 What the scheduler contributes to Sylvara
-
-To be clear about merge direction: the scheduler's scheduling model is the more advanced design. Sylvara will adopt the scheduler's approach, not the other way around:
-
-- `ForemanDayRoster` + `SegmentRosterLink` + `ForemanDayRosterMember` replaces Sylvara's simple `crews` + `schedule_entries` model.
-- `TravelSegment`, `VacatedSlot`, `ScheduleEvent` are net-new capabilities Sylvara doesn't have.
-- The notes parsing pipeline, push-up recommender, and foreman-anchored availability model are all scheduler-originated features.
-- The `ResourceReservation` inventory model extends Sylvara's `schedule_equipment` with quantity tracking.
-- `ScheduleNotificationLog`, `SeasonalFreezeWindow`, and `SchedulingConflictDismissal` are net-new.
+## 11) Testing & Acceptance Criteria (minimum viable)
+- Turn order correctness
+- Auto-fire triggers only during passive step
+- Goal progress increments correctly and enables exfil
+- Escalation thresholds trigger at exact turn counts (80/140/200)
+- FIR rules: only extracted items become secured
+- Difficulty selection: drop rate modifier applies; death-loss rules apply
+- **Belt currency retention:** correct % kept on death per belt tier
+- **Durability:** gear flagged damaged on death; broken = non-functional
+- **Alert system:**
+  - enemies alert on correct triggers per AlertProfileDef
+  - alerted enemies never de-alert
+  - searching behavior fires on player lost
+  - alerted enemies pursue across subarea boundaries
+- **Subarea activation:**
+  - enemies outside the active subarea do not take turns or pathfind
+  - vents outside the active subarea do not spawn
+  - alerted enemies are exceptions to sleeping rule
+- **Connector types:** Airlock traversal turn cost applies; spawn trigger fires correctly; Collapsed is one-way
+- **Exfil system:** all 5 types function; alert-level conversion fires; player-influence conversion fires
+- **Status effects:** all 6 apply bidirectionally; stack rules respected; resistances apply
+- **Boss framework:** all 5 pillars tested per boss
+- **Station Depth:**
+  - per-class depth tracked and persisted correctly
+  - extraction increments depth progress; death applies correct setback per difficulty mode
+  - biome availability respects depth_min/depth_max per BiomeDef
+  - narrative labels display correctly at each depth threshold
+- **FIR rules:**
+  - items picked up in-run are FIR-tagged
+  - FIR tag lost on death; cleared on extraction
+  - items in stash are never FIR
+  - run-exclusive materials cannot be purchased from vendors
+- **Post-run flow:**
+  - debrief screen shows correct objectives, items, rewards, depth progress, stats
+  - item review screen correctly places items into stash
+  - death summary shows correct loss/retain breakdown per difficulty mode
+- **Objectives:**
+  - all 6 objective types complete correctly
+  - failable objectives (escort, survival) fail permanently on condition broken
+  - auto-complete and requires-interact modes both work
+  - secondary objectives hidden until discovered
+  - on_complete_effects and on_fail_effects fire correctly
+- **Vendors:**
+  - vendor inventory fixed on spawn; does not refresh
+  - prices scale correctly with Station Depth
+  - vendor-exclusive items not available at base
+  - field repair available at Gunsmith vendors only
+  - all defs load by ID
+  - missing ID fails gracefully with clear error
+- Post-1.0 mod overlay (Phase 2):
+  - override applied correctly
+  - invalid JSON is rejected without crashing
 
 ---
 
-**State invalidation surface:** Derived job state changes when exactly these five write events occur:
-1. A ScheduleSegment is created (for this job)
-2. A ScheduleSegment is soft-deleted (`deleted_at` set)
-3. A ScheduleSegment's `start_datetime`, `end_datetime`, or `scheduled_hours_override` is changed
-4. `Job.estimate_hours_current` is changed
-5. `Job.completed_date` is set or cleared
+## 12) First Sprint (get fun fast)
+Goal: a playable prototype where extraction is tense and goals feel like missions.
 
-This list is the authoritative upgrade path if a cached/denormalized `state` column is ever needed. Any caching implementation must invalidate on exactly these events and no others. If an "un-complete" workflow is ever added (clearing `completed_date`), that is already covered by event 5 — no schema change required.
+Sprint tasks:
+1) M1 Turn engine + grid movement
+2) M2 Primary weapon (Coil Pistol)
+3) M3 Passive weapon (Arc Thrower)
+4) M4 Spawn vents + SealVents objective + subarea scaffolding
+5) M4.5 Run timer escalation (T80/T140/T200)
+6) M4.75 Goal package UI + tracking (Vent Seal + Purge) + pre-run draft screen
+7) M5 Hot exfil countdown (12 turns) with alarm spawns
+8) Minimal post-run summary (currency + materials)
+9) iOS control prototype + PC numpad movement
+
+Definition of Done:
+- A run that lasts 5–10 minutes, includes a clear mission goal, ramps difficulty over time, and ends in a tense extraction event with meaningful loot output into a basic stash.
 
 ---
+
+## 13) Brainstorm Backlog (living list)
+
+### 13.1 Extraction + Economy
+- Exfil types distribution per biome: Quiet vs Hot vs Conditional weighting
+- Emergency exfil exact cost (open decision)
+- Exfil abort cost: what is spent (currency, item, alert spike, durability)
+- Bulk/encumbrance thresholds and exact penalties (move cadence, exfil timer, alert gain)
+- FIR nuances:
+  - which items require FIR for base upgrades
+  - whether crafting consumes FIR or converts it
+- Insurance-lite system (PvE-friendly): recovery drone contracts, time-delayed returns
+- Loot container taxonomy (electronics cache, armory locker, bio crate) + spawn weights
+- Vendor design:
+  - fixed vendors vs rotating "black market" terminal
+  - sell value curves, buyback rules, anti-hoarding mechanics
+- Economy sinks beyond v1: cosmetic unlocks, map-wide intel packages, contraband items
+
+### 13.2 Run Timer Escalation (T80/T140/T200)
+- Baseline modifier values per alert tier:
+  - spawn_rate_mult, elite_chance_add, hazard_intensity_add, vent_activation_add
+- Escalation stacking model:
+  - additive vs multiplicative with Station Depth
+- Late-tier "panic events":
+  - lockdown doors, vent surge, elite wave, hazard pulse
+
+### 13.3 Goals / Mission System
+- Expand Goal Package catalog beyond v1:
+  - Escort payload, Holdout, Capture points, "Retrieve and defend"
+- Secondary objectives and reward multipliers:
+  - "Extract with X FIR items", "No damage taken after Alert 2", "Seal vents within 120 turns"
+- Goal weighting rules by Station Depth + player progression
+- Mission-specific map generation hooks:
+  - guaranteed boss arena room, guaranteed vault room, guaranteed uplink rooms
+- Mission modifiers:
+  - "Low power" (lights out, reduced vision), "Toxic leak" (hazard bias), "Security sweep" (elite patrols)
+
+### 13.4 Base Building (modules + upgrade web)
+- Define Base Module tiers (T1–T3) and what each tier unlocks
+- Standardize material taxonomy: raw junk → refined components (Fabricator)
+- Crafting recipe library (Workshop, Med Bay, Gunsmith)
+- Stash expansion pacing + special containers (mod case, material crate)
+- Station Depth effects list + caps
+- "Mastery-on-extract" track:
+  - which upgrades require successful extracts (not just materials)
+- Recovery Drone tier % values (open decision)
+
+### 13.5 Combat Systems
+- Weapon targeting rules:
+  - weapon decides which input it uses (direction vs target lock vs tile)
+  - Pulse Beam is Prism/splitting (not chain); Arc Thrower owns chain lightning
+- Projectile/beam abstraction and LoS rules (what ignores walls)
+- Enemy AI scalability strategy:
+  - pathing cache rules, fallback behaviors in crowds
+- Weapon upgrade trees:
+  - node caps (6–10 v1), parts economy sizing (12–20 parts), respec policy
+- Status effect interaction matrix:
+  - freeze + shatter combo damage values
+  - EMP + mechanical enemy behavior rules
+  - bleed + shock simultaneous application
+
+### 13.6 Spec System Design
+- Full spec lists for all 4 classes × 4 branches × 3 specs + capstone
+- Generic spec pool contents per class
+- Spec draft trigger conditions (what key moments offer specs)
+- Capstone interaction testing (cross-slot rules need careful review)
+- Branch unlock node list in base upgrade web
+
+### 13.7 Utility Items
+- Full utility item catalog for v1
+- Ammo type variants per weapon family
+- Trap placement rules (friendly fire? entity size restrictions?)
+- Tool interaction rules (door override: one-use or charges? grapple: diagonal movement?)
+
+### 13.8 Content & Presentation
+- Boss designs (1 per biome): unique phases, arena layouts, map effects
+- Boss Hunt GP1 boss placement rules
+- Art style targets and readability rules (low-HP swarm clarity)
+- Tutorial/onboarding plan (teach extraction + inventory pressure fast)
+- Biome visual identity rules
+
+### 13.9 Technical / Production
+- Save versioning + migration plan
+- Performance profiling targets (max enemies, max vents)
+- Telemetry hooks:
+  - average extract time, deaths by alert tier, loot retained by difficulty mode
+- Automated tests for:
+  - turn determinism, FIR correctness, goal completion, escalation thresholds, alert state transitions
+- Localization table format and tooling
+- Durability stage values by rarity (open decision — needs playtesting)
+- Passive Slot II Station Depth gate values (open decision)
+- Station Depth extraction thresholds per class per level (open decision — needs playtesting)
+- Weapon family definitions (open decision — needed before M5.5)

@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "reset:schedule-day": "tsx scripts/reset-schedule-day.ts",
     "seed:lan-demo": "tsx scripts/seed-lan-demo.ts",
+    "seed:admin": "tsx scripts/seed-admin-lists.ts",
     "seed:comparable": "tsx scripts/seed-comparable-history.ts",
     "import:master": "tsx scripts/import-master-sheet.ts",
     "import:link-pairs": "tsx scripts/link-paired-jobs.ts",
