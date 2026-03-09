@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const FOREMAN_ID = '33333333-3333-4333-8333-333333333333';
@@ -85,12 +85,12 @@ function buildForemenSchedulesPrisma() {
 
 describe('foremen schedules batch endpoint', () => {
   test('GET /api/foremen/schedules returns map keyed by foremanId', async () => {
-    const app = buildServer({ prisma: buildForemenSchedulesPrisma() });
+    const app = buildServer({ prisma: buildForemenSchedulesPrisma() }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: `/api/foremen/schedules?date=2026-03-03&foremanIds=${FOREMAN_ID}`,
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -106,19 +106,19 @@ describe('foremen schedules batch endpoint', () => {
   });
 
   test('GET /api/foremen/schedules returns 400 when date is missing or malformed', async () => {
-    const app = buildServer({ prisma: buildForemenSchedulesPrisma() });
+    const app = buildServer({ prisma: buildForemenSchedulesPrisma() }, { verifyToken: createTestVerifier() });
 
     const missingDate = await app.inject({
       method: 'GET',
       url: '/api/foremen/schedules',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
     expect(missingDate.statusCode).toBe(400);
 
     const malformedDate = await app.inject({
       method: 'GET',
       url: '/api/foremen/schedules?date=03-03-2026',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
     expect(malformedDate.statusCode).toBe(400);
     await app.close();

@@ -1,7 +1,7 @@
 import { ResourceType, RosterMemberRole, UserRole, type PrismaClient } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const MANAGER_ID = '11111111-1111-4111-8111-111111111111';
 const FOREMAN_ID = '22222222-2222-4222-8222-222222222222';
@@ -203,12 +203,12 @@ function createMockPrisma() {
 describe('roster management endpoints', () => {
   test('POST /api/foremen/:id/rosters creates roster', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { date: '2026-03-07', homeBaseId: HOME_BASE_ID },
     });
 
@@ -219,18 +219,18 @@ describe('roster management endpoints', () => {
 
   test('POST same date twice returns 409', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { date: '2026-03-07', homeBaseId: HOME_BASE_ID },
     });
     const response = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { date: '2026-03-07', homeBaseId: HOME_BASE_ID },
     });
 
@@ -240,12 +240,12 @@ describe('roster management endpoints', () => {
 
   test('POST /api/foremen/:id/rosters/:id/members adds member', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const create = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { date: '2026-03-07', homeBaseId: HOME_BASE_ID },
     });
     const rosterId = create.json().roster.id as string;
@@ -253,7 +253,7 @@ describe('roster management endpoints', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters/${rosterId}/members`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { personResourceId: MEMBER_ID, role: 'CLIMBER' },
     });
 
@@ -264,12 +264,12 @@ describe('roster management endpoints', () => {
 
   test('POST same member twice returns 409', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const create = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { date: '2026-03-07', homeBaseId: HOME_BASE_ID },
     });
     const rosterId = create.json().roster.id as string;
@@ -277,13 +277,13 @@ describe('roster management endpoints', () => {
     await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters/${rosterId}/members`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { personResourceId: MEMBER_ID, role: 'CLIMBER' },
     });
     const response = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters/${rosterId}/members`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { personResourceId: MEMBER_ID, role: 'CLIMBER' },
     });
 
@@ -293,19 +293,19 @@ describe('roster management endpoints', () => {
 
   test('DELETE member soft deletes', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const create = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { date: '2026-03-07', homeBaseId: HOME_BASE_ID },
     });
     const rosterId = create.json().roster.id as string;
     const add = await app.inject({
       method: 'POST',
       url: `/api/foremen/${FOREMAN_ID}/rosters/${rosterId}/members`,
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { personResourceId: MEMBER_ID, role: 'CLIMBER' },
     });
     const memberId = add.json().member.id as string;
@@ -313,7 +313,7 @@ describe('roster management endpoints', () => {
     const response = await app.inject({
       method: 'DELETE',
       url: `/api/foremen/${FOREMAN_ID}/rosters/${rosterId}/members/${memberId}`,
-      headers: lanAuthHeaders('DELETE', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(204);

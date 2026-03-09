@@ -3,8 +3,7 @@ import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { prisma } from '@sylvara/db';
 import { fileURLToPath } from 'node:url';
-import { createJwtAuthPreHandler } from './http/jwt-auth.js';
-import { isLanModeEnabled, isStrongLanSharedSecret, MIN_LAN_SHARED_SECRET_LENGTH } from './http/lan-guard.js';
+import { createAuthPreHandler, type TokenVerifier } from './http/jwt-auth.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerConflictRoutes } from './routes/conflicts.js';
 import { registerJobRoutes } from './routes/jobs.js';
@@ -13,11 +12,6 @@ import { registerSnapshotRoutes } from './routes/snapshots.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
 import { registerPushupRoutes } from './routes/pushup.js';
 import { startWeeklySnapshotJob } from './jobs/weekly-snapshot-job.js';
-
-type ServerAuthConfig = {
-  lanModeEnabled: boolean;
-  lanSharedSecret: string | null;
-};
 
 function resolveCorsOrigins(input: { rawValue: string | undefined; nodeEnv: string | undefined }): {
   origins: Set<string>;
@@ -50,7 +44,7 @@ function resolveCorsOrigins(input: { rawValue: string | undefined; nodeEnv: stri
 
 export function buildServer(
   deps: { prisma: typeof prisma } = { prisma },
-  authConfig?: ServerAuthConfig,
+  authConfig?: { verifyToken?: TokenVerifier },
 ) {
   const app = Fastify();
   const corsConfig = resolveCorsOrigins({
@@ -81,17 +75,9 @@ export function buildServer(
       }
     },
     methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'x-lan-user', 'x-actor-user-id'],
+    allowedHeaders: ['Authorization', 'Content-Type'],
     credentials: true,
   });
-
-  const lanModeEnabled = authConfig?.lanModeEnabled ?? isLanModeEnabled(process.env.LAN_MODE);
-  const lanSharedSecret = authConfig?.lanSharedSecret ?? process.env.LAN_SHARED_SECRET ?? null;
-  if (lanModeEnabled && !isStrongLanSharedSecret(lanSharedSecret)) {
-    throw new Error(
-      `LAN_SHARED_SECRET is required and must be at least ${MIN_LAN_SHARED_SECRET_LENGTH} characters when LAN_MODE=true`,
-    );
-  }
 
   app.get('/health', async () => {
     return { ok: true, timestamp: new Date().toISOString() };
@@ -101,13 +87,7 @@ export function buildServer(
     return { ok: true };
   });
 
-  app.addHook(
-    'preHandler',
-    createJwtAuthPreHandler({
-      lanSharedSecret,
-      logWarning: (message) => app.log.warn(message),
-    }),
-  );
+  app.addHook('preHandler', createAuthPreHandler(authConfig?.verifyToken));
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error({ err: error }, 'Unhandled route error');

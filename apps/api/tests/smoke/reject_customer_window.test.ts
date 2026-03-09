@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const JOB_ID = '22222222-2222-4222-8222-222222222222';
@@ -69,12 +69,12 @@ describe('A6 customer window conflict and unconfigured warning', () => {
   ])(
     'rejects CUSTOMER_WINDOW_CONFLICT when only outside-window capacity remains (%s)',
     async (availabilityNotes) => {
-      const app = buildServer({ prisma: buildWindowConflictPrisma(availabilityNotes) });
+      const app = buildServer({ prisma: buildWindowConflictPrisma(availabilityNotes) }, { verifyToken: createTestVerifier() });
 
       const response = await app.inject({
         method: 'POST',
         url: '/api/schedule/one-click-attempt',
-        headers: lanAuthHeaders('POST', ACTOR_ID),
+        headers: testAuthHeaders(ACTOR_ID),
         payload: {
           jobId: JOB_ID,
           foremanPersonId: FOREMAN_ID,
@@ -157,11 +157,11 @@ describe('A6 customer window conflict and unconfigured warning', () => {
         }),
     } as unknown as PrismaClient;
 
-    const app = buildServer({ prisma: fakePrisma });
+    const app = buildServer({ prisma: fakePrisma }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         foremanPersonId: FOREMAN_ID,

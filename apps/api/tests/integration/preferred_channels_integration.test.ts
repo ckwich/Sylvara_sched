@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { PreferredChannel } from '@prisma/client';
 import { buildServer } from '../../src/server';
 import { makePrisma, resetDb, seedBase } from './_helpers/db';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, signTestToken } from '../fixtures/test-auth.js';
 
 const prisma = makePrisma();
 const MISSING_JOB_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -25,11 +25,12 @@ describe('preferred channels integration (real postgres)', () => {
       ],
     });
 
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'SCHEDULER')}` };
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${job.id}/preferred-channels`,
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         channels: ['CALL', 'TEXT'],
       },
@@ -77,11 +78,12 @@ describe('preferred channels integration (real postgres)', () => {
       select: { channel: true },
     });
 
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'SCHEDULER')}` };
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${job.id}/preferred-channels`,
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         channels: ['FAX'],
       },
@@ -103,7 +105,8 @@ describe('preferred channels integration (real postgres)', () => {
 
   test('returns 404 JOB_NOT_FOUND for missing job and leaves DB unchanged', async () => {
     const { actor } = await seedBase(prisma);
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'SCHEDULER')}` };
 
     const beforeChannels = await prisma.jobPreferredChannel.count();
     const beforeLogs = await prisma.activityLog.count({
@@ -113,7 +116,7 @@ describe('preferred channels integration (real postgres)', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${MISSING_JOB_ID}/preferred-channels`,
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         channels: ['CALL'],
       },

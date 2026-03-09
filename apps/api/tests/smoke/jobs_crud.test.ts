@@ -1,7 +1,7 @@
 import { Prisma, EquipmentType, type PrismaClient } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const CUSTOMER_ID = '22222222-2222-4222-8222-222222222222';
@@ -175,12 +175,12 @@ function makeCrudPrisma() {
 describe('jobs CRUD routes', () => {
   test('POST /api/jobs creates job + customer and returns TBS', async () => {
     const mock = makeCrudPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/jobs',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         customerName: '  New Customer  ',
         equipmentType: 'CRANE',
@@ -202,12 +202,12 @@ describe('jobs CRUD routes', () => {
 
   test('PATCH /api/jobs/:id changing estimate creates EstimateHistory row', async () => {
     const mock = makeCrudPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'PATCH',
       url: `/api/jobs/${JOB_ID}`,
-      headers: lanAuthHeaders('PATCH', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         estimateHoursCurrent: 4,
       },
@@ -221,12 +221,12 @@ describe('jobs CRUD routes', () => {
 
   test('POST /api/jobs/:id/complete marks completed state', async () => {
     const mock = makeCrudPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${JOB_ID}/complete`,
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         completedDate: '2026-03-05',
       },
@@ -241,12 +241,12 @@ describe('jobs CRUD routes', () => {
   test('POST /api/jobs/:id/uncomplete clears completed date and re-derives state', async () => {
     const mock = makeCrudPrisma();
     mock.state.job.completedDate = new Date('2026-03-05T00:00:00.000Z');
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: `/api/jobs/${JOB_ID}/uncomplete`,
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -301,12 +301,12 @@ describe('jobs CRUD routes', () => {
         },
         $transaction: async <T>(input: Promise<unknown>[]) => Promise.all(input) as Promise<T>,
       } as unknown as PrismaClient,
-    });
+    }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/jobs',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -327,12 +327,12 @@ describe('jobs CRUD routes', () => {
 
   test('salesRepCode normalization on PATCH stores uppercase', async () => {
     const mock = makeCrudPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'PATCH',
       url: `/api/jobs/${JOB_ID}`,
-      headers: lanAuthHeaders('PATCH', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         salesRepCode: ' a.b-9 ',
       },

@@ -1,10 +1,11 @@
-import { auth } from '@/auth';
+import { auth } from '@clerk/nextjs/server';
 import Link from 'next/link';
 import ImportSummaryClient from './summary-client';
 
 export default async function AdminImportPage() {
-  const session = await auth();
-  const role = session?.user?.role ?? null;
+  const { sessionClaims } = await auth();
+  const role =
+    (sessionClaims?.publicMetadata as { role?: string } | undefined)?.role ?? null;
 
   if (role !== 'MANAGER') {
     return (

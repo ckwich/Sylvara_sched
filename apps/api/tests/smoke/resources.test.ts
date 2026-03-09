@@ -1,7 +1,7 @@
 import { ResourceType, UserRole, type PrismaClient } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const MANAGER_ID = '11111111-1111-4111-8111-111111111111';
 const VIEWER_ID = '33333333-3333-4333-8333-333333333333';
@@ -153,12 +153,12 @@ function createMockPrisma() {
 describe('resources endpoints', () => {
   test('GET /api/resources returns list', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/resources',
-      headers: lanAuthHeaders('GET', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -168,12 +168,12 @@ describe('resources endpoints', () => {
 
   test('POST /api/resources as MANAGER creates resource', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/resources',
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: {
         name: 'New Bucket',
         resourceType: 'EQUIPMENT',
@@ -188,12 +188,12 @@ describe('resources endpoints', () => {
 
   test('POST /api/resources as VIEWER returns 403', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/resources',
-      headers: lanAuthHeaders('POST', VIEWER_ID),
+      headers: testAuthHeaders(VIEWER_ID, 'VIEWER'),
       payload: {
         name: 'Blocked',
         resourceType: 'EQUIPMENT',
@@ -217,12 +217,12 @@ describe('resources endpoints', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'PATCH',
       url: '/api/resources/bbbb2222-2222-4222-8222-222222222222',
-      headers: lanAuthHeaders('PATCH', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: {
         inventoryQuantity: 99,
       },
@@ -235,12 +235,12 @@ describe('resources endpoints', () => {
 
   test('DELETE /api/resources/:id soft deletes', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'DELETE',
       url: '/api/resources/aaaa1111-1111-4111-8111-111111111111',
-      headers: lanAuthHeaders('DELETE', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(204);

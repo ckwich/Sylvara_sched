@@ -1,6 +1,5 @@
 import type { NextRequest } from 'next/server';
-import { getToken } from 'next-auth/jwt';
-import { auth } from '@/auth';
+import { auth } from '@clerk/nextjs/server';
 
 const DEFAULT_API_URL = 'http://127.0.0.1:4000';
 
@@ -25,16 +24,13 @@ async function handle(request: NextRequest): Promise<Response> {
     return jsonError(400, 'VALIDATION_ERROR', 'path query param must start with /api/.');
   }
 
-  const session = await auth();
-  if (!session?.user?.id) {
+  const { getToken, sessionClaims } = await auth();
+  const meta = sessionClaims?.publicMetadata as { userId?: string } | undefined;
+  if (!meta?.userId) {
     return jsonError(401, 'UNAUTHENTICATED', 'Authentication required.');
   }
 
-  const rawToken = await getToken({
-    req: request,
-    raw: true,
-    secret: process.env.AUTH_SECRET,
-  });
+  const rawToken = await getToken();
   if (!rawToken) {
     return jsonError(401, 'UNAUTHENTICATED', 'Authentication required.');
   }

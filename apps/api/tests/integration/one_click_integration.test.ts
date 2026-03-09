@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import { makePrisma, resetDb, seedBase } from './_helpers/db';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, signTestToken } from '../fixtures/test-auth.js';
 
 const prisma = makePrisma();
 const TEST_TZ = 'America/New_York';
@@ -45,11 +45,12 @@ describe('one-click scheduling integration (real postgres)', () => {
       availabilityNotes: null,
     });
 
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'SCHEDULER')}` };
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         jobId: job.id,
         foremanPersonId: foreman.id,
@@ -79,11 +80,12 @@ describe('one-click scheduling integration (real postgres)', () => {
       availabilityNotes: null,
     });
 
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'SCHEDULER')}` };
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         jobId: job.id,
         foremanPersonId: foreman.id,
@@ -106,11 +108,12 @@ describe('one-click scheduling integration (real postgres)', () => {
       availabilityNotes: '9am-11am',
     });
 
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'SCHEDULER')}` };
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         jobId: job.id,
         foremanPersonId: foreman.id,
@@ -133,11 +136,12 @@ describe('one-click scheduling integration (real postgres)', () => {
       availabilityNotes: 'mornings only',
     });
 
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'SCHEDULER')}` };
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         jobId: job.id,
         foremanPersonId: foreman.id,

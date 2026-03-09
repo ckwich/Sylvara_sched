@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { TravelType } from '@prisma/client';
 import { buildServer } from '../../src/server';
 import { createLinkedSegment, makePrisma, resetDb, seedBase } from './_helpers/db';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, signTestToken } from '../fixtures/test-auth.js';
 
 const prisma = makePrisma();
 const TEST_TZ = 'America/New_York';
@@ -43,11 +43,12 @@ describe('close-out-day integration (real postgres)', () => {
       endDatetime: new Date('2026-03-03T16:00:00.000Z'),
     });
 
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'SCHEDULER')}` };
     const response = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         foremanPersonId: foreman.id,
         date,
@@ -111,12 +112,13 @@ describe('close-out-day integration (real postgres)', () => {
       endDatetime: new Date('2026-03-03T16:00:00.000Z'),
     });
 
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'SCHEDULER')}` };
 
     const first = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         foremanPersonId: foreman.id,
         date,
@@ -129,7 +131,7 @@ describe('close-out-day integration (real postgres)', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: lanAuthHeaders('POST', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         foremanPersonId: foreman.id,
         date,

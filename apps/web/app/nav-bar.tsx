@@ -1,6 +1,7 @@
 'use client';
+
 import Link from 'next/link';
-import { useClerk, useUser, useAuth } from '@clerk/nextjs';
+import { SignOutButton, useUser, useAuth } from '@clerk/nextjs';
 import { usePathname } from 'next/navigation';
 
 const NAV_ITEMS = [
@@ -10,14 +11,12 @@ const NAV_ITEMS = [
 ];
 
 export default function NavBar() {
-  const { signOut } = useClerk();
+  const pathname = usePathname();
   const { isSignedIn } = useAuth();
   const { user } = useUser();
-  const pathname = usePathname();
+  const role = (user?.publicMetadata as { role?: string } | undefined)?.role ?? null;
 
   if (!isSignedIn) return null;
-
-  const role = (user?.publicMetadata as { role?: string } | undefined)?.role ?? null;
 
   const navItems =
     role === 'MANAGER'
@@ -45,13 +44,14 @@ export default function NavBar() {
               </Link>
             );
           })}
-          <button
-            type="button"
-            onClick={() => signOut({ redirectUrl: '/sign-in' })}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          >
-            Sign out
-          </button>
+          <SignOutButton redirectUrl="/sign-in">
+            <button
+              type="button"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Sign out
+            </button>
+          </SignOutButton>
         </div>
       </div>
     </nav>
