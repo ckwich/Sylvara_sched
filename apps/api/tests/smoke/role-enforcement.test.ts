@@ -1,7 +1,7 @@
 import type { PrismaClient, UserRole } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const VIEWER_ID = '11111111-1111-4111-8111-111111111111';
 const SCHEDULER_ID = '22222222-2222-4222-8222-222222222222';
@@ -51,7 +51,7 @@ function createApp(roleById: Record<string, UserRole>) {
       }),
   } as unknown as PrismaClient;
 
-  return buildServer({ prisma });
+  return buildServer({ prisma }, { verifyToken: createTestVerifier() });
 }
 
 describe('role enforcement', () => {
@@ -63,7 +63,7 @@ describe('role enforcement', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/resources',
-      headers: lanAuthHeaders('POST', VIEWER_ID),
+      headers: testAuthHeaders(VIEWER_ID, 'VIEWER'),
       payload: {
         name: 'Loader',
         resourceType: 'EQUIPMENT',
@@ -83,7 +83,7 @@ describe('role enforcement', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: '/api/org-settings',
-      headers: lanAuthHeaders('PATCH', SCHEDULER_ID),
+      headers: testAuthHeaders(SCHEDULER_ID, 'SCHEDULER'),
       payload: {
         companyTimezone: 'America/New_York',
       },
@@ -102,7 +102,7 @@ describe('role enforcement', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: '/api/org-settings',
-      headers: lanAuthHeaders('PATCH', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: {
         companyTimezone: 'America/New_York',
       },

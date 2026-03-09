@@ -1,7 +1,7 @@
 import { EquipmentType, Prisma, UserRole, type PrismaClient } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const MANAGER_ID = '11111111-1111-4111-8111-111111111111';
 const SCHEDULER_ID = '22222222-2222-4222-8222-222222222222';
@@ -166,11 +166,11 @@ function buildReportsPrisma() {
 
 describe('reports endpoints', () => {
   test('GET /api/reports/summ returns expected shape', async () => {
-    const app = buildServer({ prisma: buildReportsPrisma() });
+    const app = buildServer({ prisma: buildReportsPrisma() }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'GET',
       url: '/api/reports/summ',
-      headers: lanAuthHeaders('GET', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -187,11 +187,11 @@ describe('reports endpoints', () => {
   });
 
   test('GET /api/reports/summ returns days_sales_in_backlog null when sales_per_day is not set', async () => {
-    const app = buildServer({ prisma: buildReportsPrisma() });
+    const app = buildServer({ prisma: buildReportsPrisma() }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'GET',
       url: '/api/reports/summ',
-      headers: lanAuthHeaders('GET', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -204,22 +204,22 @@ describe('reports endpoints', () => {
     ['SCHEDULER', SCHEDULER_ID],
     ['VIEWER', VIEWER_ID],
   ])('GET /api/reports/summ is accessible by %s', async (_label, actorId) => {
-    const app = buildServer({ prisma: buildReportsPrisma() });
+    const app = buildServer({ prisma: buildReportsPrisma() }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'GET',
       url: '/api/reports/summ',
-      headers: lanAuthHeaders('GET', actorId),
+      headers: testAuthHeaders(actorId, _label),
     });
     expect(response.statusCode).toBe(200);
     await app.close();
   });
 
   test('GET /api/reports/comparable returns expected shape and available years', async () => {
-    const app = buildServer({ prisma: buildReportsPrisma() });
+    const app = buildServer({ prisma: buildReportsPrisma() }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'GET',
       url: '/api/reports/comparable',
-      headers: lanAuthHeaders('GET', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -235,11 +235,11 @@ describe('reports endpoints', () => {
   });
 
   test('GET /api/reports/comparable?years=2025 filters to requested year', async () => {
-    const app = buildServer({ prisma: buildReportsPrisma() });
+    const app = buildServer({ prisma: buildReportsPrisma() }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'GET',
       url: '/api/reports/comparable?years=2025',
-      headers: lanAuthHeaders('GET', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -254,11 +254,11 @@ describe('reports endpoints', () => {
     ['SCHEDULER', SCHEDULER_ID],
     ['VIEWER', VIEWER_ID],
   ])('GET /api/reports/comparable is accessible by %s', async (_label, actorId) => {
-    const app = buildServer({ prisma: buildReportsPrisma() });
+    const app = buildServer({ prisma: buildReportsPrisma() }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'GET',
       url: '/api/reports/comparable',
-      headers: lanAuthHeaders('GET', actorId),
+      headers: testAuthHeaders(actorId, _label),
     });
     expect(response.statusCode).toBe(200);
     await app.close();

@@ -1,6 +1,6 @@
 import { prisma } from '@sylvara/db';
 
-export async function upsertUserOnSignIn(email: string, name: string) {
+export async function upsertUserOnSignIn(email: string, name: string, clerkId?: string) {
   const normalizedEmail = email.trim().toLowerCase();
   const user = await prisma.user.findUnique({
     where: { email: normalizedEmail },
@@ -8,12 +8,19 @@ export async function upsertUserOnSignIn(email: string, name: string) {
       id: true,
       role: true,
       active: true,
+      clerkId: true,
     },
   });
 
   if (user) {
     if (!user.active) {
       throw new Error('User account is inactive.');
+    }
+    if (clerkId && !user.clerkId) {
+      await prisma.user.update({
+        where: { email: normalizedEmail },
+        data: { clerkId },
+      });
     }
     return user;
   }
@@ -24,6 +31,7 @@ export async function upsertUserOnSignIn(email: string, name: string) {
       name: name.trim() || normalizedEmail,
       role: 'VIEWER',
       active: true,
+      clerkId: clerkId ?? null,
     },
     select: {
       id: true,

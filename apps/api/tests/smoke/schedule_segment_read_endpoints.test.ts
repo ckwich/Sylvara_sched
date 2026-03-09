@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const JOB_ID = '22222222-2222-4222-8222-222222222222';
@@ -320,12 +320,12 @@ function buildReadPrisma() {
 describe('M2 schedule segment read/list endpoints', () => {
   test('returns linked segment for foreman/date and empties after soft-delete', async () => {
     const store = buildReadPrisma();
-    const app = buildServer({ prisma: store.prisma });
+    const app = buildServer({ prisma: store.prisma }, { verifyToken: createTestVerifier() });
 
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -339,7 +339,7 @@ describe('M2 schedule segment read/list endpoints', () => {
     const beforeDelete = await app.inject({
       method: 'GET',
       url: `/api/foremen/${FOREMAN_ID}/schedule?date=2026-03-03`,
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
     expect(beforeDelete.statusCode).toBe(200);
     const beforeBody = beforeDelete.json();
@@ -349,14 +349,14 @@ describe('M2 schedule segment read/list endpoints', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: `/api/schedule-segments/${segmentId}`,
-      headers: lanAuthHeaders('DELETE', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
     expect(deleted.statusCode).toBe(200);
 
     const afterDelete = await app.inject({
       method: 'GET',
       url: `/api/foremen/${FOREMAN_ID}/schedule?date=2026-03-03`,
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
     expect(afterDelete.statusCode).toBe(200);
     expect(afterDelete.json().scheduleSegments).toHaveLength(0);
@@ -365,14 +365,14 @@ describe('M2 schedule segment read/list endpoints', () => {
 
   test('excludes orphan segments and returns linked job segments with derived state', async () => {
     const store = buildReadPrisma();
-    const app = buildServer({ prisma: store.prisma });
+    const app = buildServer({ prisma: store.prisma }, { verifyToken: createTestVerifier() });
 
     store.insertOrphanSegment();
 
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -385,7 +385,7 @@ describe('M2 schedule segment read/list endpoints', () => {
     const foremanRead = await app.inject({
       method: 'GET',
       url: `/api/foremen/${FOREMAN_ID}/schedule?date=2026-03-03`,
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
     expect(foremanRead.statusCode).toBe(200);
     const foremanBody = foremanRead.json();
@@ -394,7 +394,7 @@ describe('M2 schedule segment read/list endpoints', () => {
     const jobRead = await app.inject({
       method: 'GET',
       url: `/api/jobs/${JOB_ID}/schedule-segments`,
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
     expect(jobRead.statusCode).toBe(200);
     const jobBody = jobRead.json();
@@ -405,12 +405,12 @@ describe('M2 schedule segment read/list endpoints', () => {
 
   test('returns foreman day activity entries with newest-first ordering and day filtering', async () => {
     const store = buildReadPrisma();
-    const app = buildServer({ prisma: store.prisma });
+    const app = buildServer({ prisma: store.prisma }, { verifyToken: createTestVerifier() });
 
     const created = await app.inject({
       method: 'POST',
       url: '/api/schedule-segments',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         rosterId: ROSTER_ID,
@@ -423,7 +423,7 @@ describe('M2 schedule segment read/list endpoints', () => {
     const activity = await app.inject({
       method: 'GET',
       url: `/api/foremen/${FOREMAN_ID}/activity?date=2026-03-03`,
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
     expect(activity.statusCode).toBe(200);
     const activityBody = activity.json() as { entries: Array<Record<string, unknown>> };
@@ -435,7 +435,7 @@ describe('M2 schedule segment read/list endpoints', () => {
     const wrongDay = await app.inject({
       method: 'GET',
       url: `/api/foremen/${FOREMAN_ID}/activity?date=2026-03-04`,
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
     expect(wrongDay.statusCode).toBe(200);
     expect(wrongDay.json().entries).toHaveLength(0);

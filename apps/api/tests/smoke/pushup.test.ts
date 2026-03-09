@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient, RequirementStatus } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const MANAGER_ID = '11111111-1111-4111-8111-111111111111';
 const VIEWER_ID = '11111111-1111-4111-8111-111111111112';
@@ -84,7 +84,7 @@ function buildPatchHarness() {
   };
 
   return {
-    app: buildServer({ prisma: prisma as unknown as PrismaClient }),
+    app: buildServer({ prisma: prisma as unknown as PrismaClient }, { verifyToken: createTestVerifier() }),
     vacatedCreates,
     existing,
   };
@@ -270,7 +270,7 @@ function buildPushupHarness(): PushupHarness {
   };
 
   return {
-    app: buildServer({ prisma: prisma as unknown as PrismaClient }),
+    app: buildServer({ prisma: prisma as unknown as PrismaClient }, { verifyToken: createTestVerifier() }),
     createdSegments,
     updatedSlots,
   };
@@ -283,7 +283,7 @@ describe('pushup smoke', () => {
     const moveResponse = await moveHarness.app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${SEGMENT_ID}`,
-      headers: lanAuthHeaders('PATCH', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: {
         startDatetime: '2026-03-03T17:00:00.000Z',
         endDatetime: '2026-03-03T21:00:00.000Z',
@@ -296,7 +296,7 @@ describe('pushup smoke', () => {
     const shortenResponse = await shortenHarness.app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${SEGMENT_ID}`,
-      headers: lanAuthHeaders('PATCH', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: {
         endDatetime: '2026-03-03T17:00:00.000Z',
       },
@@ -308,7 +308,7 @@ describe('pushup smoke', () => {
     const noOpResponse = await noOpHarness.app.inject({
       method: 'PATCH',
       url: `/api/schedule-segments/${SEGMENT_ID}`,
-      headers: lanAuthHeaders('PATCH', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { notes: 'notes only' },
     });
     expect(noOpResponse.statusCode).toBe(200);
@@ -318,7 +318,7 @@ describe('pushup smoke', () => {
     const deleteResponse = await deleteHarness.app.inject({
       method: 'DELETE',
       url: `/api/schedule-segments/${SEGMENT_ID}`,
-      headers: lanAuthHeaders('DELETE', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
     expect(deleteResponse.statusCode).toBe(200);
     expect(deleteHarness.vacatedCreates.some((slot) => slot.sourceAction === 'DELETED')).toBe(true);
@@ -336,7 +336,7 @@ describe('pushup smoke', () => {
     const response = await harness.app.inject({
       method: 'GET',
       url: `/api/pushup/candidates?vacatedSlotId=${SLOT_ID}`,
-      headers: lanAuthHeaders('GET', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -359,7 +359,7 @@ describe('pushup smoke', () => {
     const response = await harness.app.inject({
       method: 'GET',
       url: '/api/pushup/candidates?vacatedSlotId=55555555-5555-4555-8555-555555555555',
-      headers: lanAuthHeaders('GET', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -374,7 +374,7 @@ describe('pushup smoke', () => {
     const response = await harness.app.inject({
       method: 'POST',
       url: '/api/pushup/apply',
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: {
         vacatedSlotId: SLOT_ID,
         jobId: JOB_ID,
@@ -397,7 +397,7 @@ describe('pushup smoke', () => {
     const response = await harness.app.inject({
       method: 'POST',
       url: '/api/pushup/apply',
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: {
         vacatedSlotId: SLOT_ID,
         jobId: '66666666-6666-4666-8666-666666666666',
@@ -418,7 +418,7 @@ describe('pushup smoke', () => {
     const response = await harness.app.inject({
       method: 'POST',
       url: '/api/pushup/dismiss',
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { vacatedSlotId: SLOT_ID },
     });
 
@@ -434,7 +434,7 @@ describe('pushup smoke', () => {
     const applyResponse = await harness.app.inject({
       method: 'POST',
       url: '/api/pushup/apply',
-      headers: lanAuthHeaders('POST', VIEWER_ID),
+      headers: testAuthHeaders(VIEWER_ID, 'VIEWER'),
       payload: {
         vacatedSlotId: SLOT_ID,
         jobId: JOB_ID,
@@ -447,7 +447,7 @@ describe('pushup smoke', () => {
     const dismissResponse = await harness.app.inject({
       method: 'POST',
       url: '/api/pushup/dismiss',
-      headers: lanAuthHeaders('POST', VIEWER_ID),
+      headers: testAuthHeaders(VIEWER_ID, 'VIEWER'),
       payload: { vacatedSlotId: SLOT_ID },
     });
     expect(dismissResponse.statusCode).toBe(403);

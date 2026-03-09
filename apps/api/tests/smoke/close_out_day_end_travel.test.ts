@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const FOREMAN_ID = '33333333-3333-4333-8333-333333333333';
@@ -74,12 +74,12 @@ describe('A7 close out day END_OF_DAY travel', () => {
         }),
     } as unknown as PrismaClient;
 
-    const app = buildServer({ prisma: fakePrisma });
+    const app = buildServer({ prisma: fakePrisma }, { verifyToken: createTestVerifier() });
 
     const first = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
@@ -95,7 +95,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',
@@ -111,7 +111,7 @@ describe('A7 close out day END_OF_DAY travel', () => {
   });
 
   test('returns 401 when actor header is missing', async () => {
-    const app = buildServer({ prisma: {} as PrismaClient });
+    const app = buildServer({ prisma: {} as PrismaClient }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
@@ -136,11 +136,11 @@ describe('A7 close out day END_OF_DAY travel', () => {
     const fakePrisma = {
       user: { findUnique: async () => null },
     } as unknown as PrismaClient;
-    const app = buildServer({ prisma: fakePrisma });
+    const app = buildServer({ prisma: fakePrisma }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'POST',
       url: '/api/travel/close-out-day',
-      headers: lanAuthHeaders('POST', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'),
+      headers: testAuthHeaders('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'),
       payload: {
         foremanPersonId: FOREMAN_ID,
         date: '2026-03-02',

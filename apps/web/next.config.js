@@ -4,14 +4,18 @@ const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
     if (!apiUrl) {
-      return [];
+      return { beforeFiles: [], afterFiles: [], fallback: [] };
     }
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${apiUrl}/api/:path*`,
-      },
-    ];
+    return {
+      beforeFiles: [],
+      afterFiles: [
+        {
+          source: '/api/:path*',
+          destination: `${apiUrl}/api/:path*`,
+        },
+      ],
+      fallback: [],
+    };
   },
 };
 

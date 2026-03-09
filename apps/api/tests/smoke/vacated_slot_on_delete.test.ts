@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const SEGMENT_ID = '22222222-2222-4222-8222-222222222222';
@@ -61,12 +61,12 @@ describe('A8 vacated slot on delete', () => {
             activityLog: { create: async () => undefined },
           }),
       } as unknown as PrismaClient,
-    });
+    }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'DELETE',
       url: `/api/schedule-segments/${SEGMENT_ID}`,
-      headers: lanAuthHeaders('DELETE', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);

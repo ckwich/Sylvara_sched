@@ -797,46 +797,36 @@ Log all edits to:
 
 #### §2.1.1 Auth Implementation (Decision Record)
 
-**Decision:** Use [Auth.js (NextAuth v5)](https://authjs.dev/) with the Google OAuth provider, restricted to the `@irontreeservice.com` domain.
+**Decision:** Use [Clerk](https://clerk.com/) (`@clerk/nextjs` + `@clerk/backend`) with Google OAuth, domain-restricted in the Clerk dashboard to `@irontreeservice.com`.
 
-**Rationale:** Auth.js is free, open-source, well-documented, and purpose-built for Next.js App Router. It handles the Google OAuth flow, session management, and JWT signing with minimal boilerplate — appropriate for a novice-maintainable codebase. No paid services or complex infrastructure required.
+**Rationale:** Clerk provides a managed auth service with built-in UI components (sign-in, user management), webhook-based user provisioning, and a clean token verification flow. It removes the need for custom JWT signing/verification and provides a clear multi-tenancy path via Clerk Organizations for future SaaS expansion.
 
-**Implementation spec (Codex must follow):**
+**Implementation spec:**
 
-- **Library:** `next-auth` (v5 / Auth.js) installed in `apps/web`. No auth library needed in `apps/api` — the API trusts a forwarded verified token (see below).
-- **Provider:** Google OAuth (`GoogleProvider`). Restrict sign-in to `@irontreeservice.com` accounts using the `signIn` callback:
-  ```ts
-  // apps/web/auth.ts
-  callbacks: {
-    signIn({ profile }) {
-      return profile?.email?.endsWith('@irontreeservice.com') ?? false;
-    }
-  }
-  ```
-- **Session strategy:** JWT (default for Auth.js). Store `user.id` (internal DB id) and `user.role` in the JWT payload after first sign-in lookup/creation.
-- **User provisioning:** On first Google sign-in, look up the User record by email. If not found, auto-create with role `VIEWER` and `active=true`. A Manager must then elevate role via the admin UI. Never auto-assign MANAGER on sign-in.
+- **Library:** `@clerk/nextjs` in `apps/web`, `@clerk/backend` in `apps/api`.
+- **Provider:** Google OAuth, configured in the Clerk dashboard. Domain restriction (`@irontreeservice.com`) is enforced in the Clerk dashboard — not hardcoded in application code.
+- **Middleware:** `apps/web/middleware.ts` uses `clerkMiddleware()` from `@clerk/nextjs/server`. All routes except `/sign-in(.*)` and `/api/webhooks/clerk(.*)` require authentication via `auth.protect()`.
+- **User provisioning:** Clerk webhook `user.created` → Svix signature verification → `upsertUserOnSignIn(email, name, clerkId)` → creates/links User record → sets `publicMetadata: { userId, role }` on the Clerk user via `clerkClient.users.updateUserMetadata`. New users get role `VIEWER`. A Manager must elevate role via the admin UI.
+- **Token flow:**
+  - `apps/web` uses `auth()` from `@clerk/nextjs/server` to read `sessionClaims.publicMetadata` (userId, role) for server-side rendering.
+  - The web proxy (`apps/web/app/api/proxy/route.ts`) calls `auth().getToken()` to get the raw Clerk session token and forwards it as `Authorization: Bearer <token>` to `apps/api`.
+  - `apps/api` verifies the token using `verifyToken()` from `@clerk/backend` with `CLERK_SECRET_KEY`. On success, reads `publicMetadata.userId` and `publicMetadata.role` from the verified payload and sets `request.actor`.
+  - No custom JWT minting. No shared signing secret between web and API.
 - **API authentication:**
-  - `apps/web` Next.js route handlers (or server actions) use `auth()` from Auth.js to get the session server-side — no token forwarding needed for web-originated requests handled within `apps/web`.
-  - For calls from `apps/web` → `apps/api` (Fastify), the web layer forwards the verified JWT as a `Bearer` token in the `Authorization` header. `apps/api` verifies the JWT signature using the shared `AUTH_SECRET` environment variable (set identically in both apps).
-  - `apps/api` must have a Fastify `preHandler` hook that verifies the JWT and sets `request.actor` (`{ id, role }`) on every authenticated route. Unauthenticated requests return `401`.
-  - The dev shim (`x-actor-user-id` header) must be **disabled in production** (guard with `NODE_ENV !== 'production'`) and must never be enabled in the LAN pilot build.
-- **Environment variables required (document in README):**
-  - `AUTH_SECRET` — shared JWT signing secret (generate with `openssl rand -base64 32`; same value in both `apps/web` and `apps/api`). Auth.js v5 also accepts `NEXTAUTH_SECRET` as an alias, but we standardize on `AUTH_SECRET`.
-  - `AUTH_URL` — full origin URL (e.g., `http://schedule-pc:3000`); required for OAuth redirect URI. Auth.js v5 also accepts `NEXTAUTH_URL` as an alias, but we standardize on `AUTH_URL`.
-  - `AUTH_GOOGLE_ID` — Google OAuth client ID (apps/web)
-  - `AUTH_GOOGLE_SECRET` — Google OAuth client secret (apps/web)
-- **Google OAuth setup (one-time, performed by manager):**
-  1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
-  2. Enable the Google OAuth consent screen (Internal, restricted to your Workspace org).
-  3. Create OAuth 2.0 credentials (Web application type).
-  4. Add authorized redirect URIs: `http://schedule-pc:3000/api/auth/callback/google` and `http://localhost:3000/api/auth/callback/google` for local dev.
-  5. Domain restriction is enforced in code via the `signIn` callback above — do not rely on Google Console alone.
+  - `apps/api/src/http/jwt-auth.ts` exports `createAuthPreHandler(verifyToken?)`. The `TokenVerifier` is injectable for testability — production uses Clerk's `verifyToken`, tests inject a jose-based verifier. The middleware always runs the same code path; only the cryptographic verification is swappable.
+  - Defense-in-depth: `requireActor()` in `route-helpers.ts` still does a DB lookup via `prisma.user.findUnique` to confirm the user exists and is active, even after token verification.
+- **Environment variables required:**
+  - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` — Clerk publishable key (apps/web)
+  - `CLERK_SECRET_KEY` — Clerk secret key (apps/web + apps/api)
+  - `CLERK_WEBHOOK_SECRET` — Svix webhook signing secret (apps/web)
+  - `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in` — sign-in route
+- **No LAN shim.** No `x-actor-user-id` header bypass. No `NODE_ENV` guards for auth. The `TokenVerifier` injection is the only test seam and it runs the same middleware code path.
 - **Role enforcement:**
   - `apps/api` Fastify routes check `request.actor.role` against a permission map defined in `packages/shared/src/roles.ts`.
   - VIEWER requests to any mutating endpoint (`POST`/`PATCH`/`DELETE`) return `403`.
   - SCHEDULER requests to manager-only endpoints (admin list edits, role changes, sales-per-day) return `403`.
-- **Session expiry:** Default Auth.js JWT expiry (30 days). Expired sessions redirect to sign-in — no silent failure.
-- **README must document:** how to set env vars, how to create the Google OAuth app, and how to promote a user to MANAGER after first sign-in.
+- **Session expiry:** Managed by Clerk (default: long-lived sessions with short-lived tokens). Expired sessions redirect to `/sign-in`.
+- **Multi-tenancy path:** Clerk Organizations is the future path for multi-tenant SaaS. When selling to other companies, each company gets a Clerk Organization. No schema changes required — the Clerk user → local User mapping already supports it.
 
 ### M3 — Resources & Rosters
 - Resource inventory CRUD (count-based)
@@ -1069,9 +1059,9 @@ The Auth.js implementation in §2.1.1 uses `MANAGER | SCHEDULER | VIEWER`. When 
 
 ### 12.4 Auth reconciliation path
 
-The standalone scheduler uses **Google OAuth only** (Auth.js). Sylvara's `users` table uses `password_hash` (Argon2/bcrypt) — meaning it was designed for username/password login. These need reconciliation at merge time.
+The standalone scheduler uses **Clerk** for authentication (Google OAuth via Clerk-managed flow). Sylvara's `users` table has a `password_hash` column (Argon2/bcrypt) designed for username/password login. These need reconciliation at merge time.
 
-Recommended path: Sylvara's full auth system should adopt OAuth as the primary mechanism (Google Workspace SSO for internal users; potentially other providers for future SaaS). The `password_hash` column in Sylvara can be made nullable to support OAuth-only accounts. This is a Sylvara-level decision, not a scheduler decision — but the scheduler's Auth.js implementation should be treated as the reference pattern.
+Recommended path: Sylvara's full auth system should adopt Clerk as the primary authentication mechanism (Google Workspace SSO for internal users; Clerk Organizations for multi-tenant SaaS). The `password_hash` column in Sylvara can be made nullable to support OAuth-only accounts. Clerk Organizations is the multi-tenancy path when selling to other companies — each company gets a Clerk Organization, and the existing `clerkId` column on `users` already supports the mapping.
 
 ### 12.5 `jobs.status` — resolution (stored enum replaced by derived model)
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import type { PrismaClient } from '@prisma/client';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const TEST_TZ = 'America/New_York';
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
@@ -125,11 +125,11 @@ describe('A3 click-to-create snap and no-overlap', () => {
         }),
     } as unknown as PrismaClient;
 
-    const app = buildServer({ prisma: fakePrisma });
+    const app = buildServer({ prisma: fakePrisma }, { verifyToken: createTestVerifier() });
     const response = await app.inject({
       method: 'POST',
       url: '/api/schedule/one-click-attempt',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         jobId: JOB_ID,
         foremanPersonId: FOREMAN_ID,

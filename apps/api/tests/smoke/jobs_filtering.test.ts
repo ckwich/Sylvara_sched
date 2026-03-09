@@ -1,7 +1,7 @@
 import { Prisma, EquipmentType, type PrismaClient } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -142,12 +142,12 @@ function buildFilteringPrisma() {
 describe('jobs filtering and pagination', () => {
   test('GET /api/jobs with no params returns paginated response shape', async () => {
     const mock = buildFilteringPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/jobs',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -164,12 +164,12 @@ describe('jobs filtering and pagination', () => {
 
   test('GET /api/jobs?equipmentType=CRANE returns only crane jobs', async () => {
     const mock = buildFilteringPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/jobs?equipmentType=CRANE',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -181,12 +181,12 @@ describe('jobs filtering and pagination', () => {
 
   test('GET /api/jobs?search=... returns matching jobs', async () => {
     const mock = buildFilteringPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/jobs?search=elm',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -198,12 +198,12 @@ describe('jobs filtering and pagination', () => {
 
   test('GET /api/jobs?page=1&pageSize=5 respects pagination params', async () => {
     const mock = buildFilteringPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/jobs?page=1&pageSize=5',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -216,12 +216,12 @@ describe('jobs filtering and pagination', () => {
 
   test('GET /api/jobs?pageSize=999 clamps pageSize to 200', async () => {
     const mock = buildFilteringPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/jobs?pageSize=999',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);

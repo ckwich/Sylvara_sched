@@ -1,7 +1,7 @@
 import { UserRole, type PrismaClient } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -92,12 +92,12 @@ function createMockPrisma() {
 describe('conflicts endpoints', () => {
   test('GET /api/conflicts?date= returns response shape', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/conflicts?date=2026-03-07',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -109,12 +109,12 @@ describe('conflicts endpoints', () => {
 
   test('GET /api/conflicts without date returns 400', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/conflicts',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(400);
@@ -123,12 +123,12 @@ describe('conflicts endpoints', () => {
 
   test('POST /api/conflicts/dismiss records dismissal', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/conflicts/dismiss',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         date: '2026-03-07',
         conflictType: 'PERSON_CONFLICT',
@@ -143,12 +143,12 @@ describe('conflicts endpoints', () => {
 
   test('GET /api/conflicts/dismissals returns dismissals for date', async () => {
     const mock = createMockPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     await app.inject({
       method: 'POST',
       url: '/api/conflicts/dismiss',
-      headers: lanAuthHeaders('POST', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
       payload: {
         date: '2026-03-07',
         conflictType: 'PERSON_CONFLICT',
@@ -159,7 +159,7 @@ describe('conflicts endpoints', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/api/conflicts/dismissals?date=2026-03-07',
-      headers: lanAuthHeaders('GET', ACTOR_ID),
+      headers: testAuthHeaders(ACTOR_ID),
     });
 
     expect(response.statusCode).toBe(200);

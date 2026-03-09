@@ -1,12 +1,21 @@
-import { auth } from '@/auth';
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
-export default auth((req) => {
-  if (!req.auth) {
-    const signInUrl = new URL('/sign-in', req.url);
-    return Response.redirect(signInUrl);
+const isPublicRoute = createRouteMatcher([
+  '/sign-in(.*)',
+  '/api/webhooks/clerk(.*)',
+]);
+
+export default clerkMiddleware(async (auth, request) => {
+  if (!isPublicRoute(request)) {
+    await auth.protect();
   }
 });
 
 export const config = {
-  matcher: ['/((?!api/auth|sign-in|_next/static|_next/image|favicon.ico).*)'],
+  matcher: [
+    // Skip Next.js internals and all static files
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Always run for API routes
+    '/(api|trpc)(.*)',
+  ],
 };

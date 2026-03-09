@@ -2,7 +2,33 @@
   "permissions": {
     "allow": [
       "Bash(corepack pnpm:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git:*)",
+      "Bash(ls -la /c/dev/sylvara/sched/apps/web/app/jobs/[jobId]/)",
+      "Bash(xargs grep -l \"ACTIVE_BLOCKER\")",
+      "Bash(xargs ls:*)",
+      "Bash(npx prisma:*)",
+      "Bash(npx:*)",
+      "Bash(xargs grep -l \"NextAuth\\\\|next-auth\")",
+      "Bash(xargs grep -l \"LAN_MODE\\\\|LAN_SHARED_SECRET\\\\|bearer\\\\|x-lan-user\")",
+      "Bash(rm -f apps/web/auth.ts)",
+      "Bash(rm -rf apps/web/app/api/auth)",
+      "Bash(rm -f apps/web/types/next-auth.d.ts)",
+      "Bash(rm -f apps/web/app/sign-in/page.tsx)",
+      "Bash(rm -f apps/api/tests/fixtures/lanAuthHeaders.ts)",
+      "Bash(node -e \"const m = require.resolve\\(''@clerk/nextjs/server''\\); console.log\\(m\\)\")",
+      "Bash(node -e \"import\\(''@clerk/nextjs/server''\\).then\\(m => console.log\\(Object.keys\\(m\\).filter\\(k => k.includes\\(''Clerk''\\) || k.includes\\(''clerk''\\)\\).join\\('', ''\\)\\)\\)\")",
+      "Bash(node -e \"import\\(''@clerk/nextjs/server''\\).then\\(m => { const keys = Object.keys\\(m\\); console.log\\(keys.filter\\(k => k.toLowerCase\\(\\).includes\\(''clerk''\\)\\).join\\('', ''\\)\\); }\\)\")",
+      "Read(//c/Dev/Sylvara/Sched/apps/web/**)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(node -e \"const p = require\\(''./apps/web/package.json''\\); console.log\\(''dependencies:'', JSON.stringify\\(p.dependencies, null, 2\\)\\); console.log\\(''devDependencies:'', JSON.stringify\\(p.devDependencies, null, 2\\)\\);\")",
+      "Bash(cp \"C:\\\\Dev\\\\Sylvara\\\\Sched\\\\apps\\\\web\\\\.env\" \"C:\\\\Dev\\\\Sylvara\\\\Sched\\\\.claude\\\\worktrees\\\\zealous-ardinghelli\\\\apps\\\\web\\\\.env\")",
+      "Bash(cp \"C:\\\\Dev\\\\Sylvara\\\\Sched\\\\apps\\\\api\\\\.env\" \"C:\\\\Dev\\\\Sylvara\\\\Sched\\\\.claude\\\\worktrees\\\\zealous-ardinghelli\\\\apps\\\\api\\\\.env\")",
+      "Bash(cp \"C:\\\\Dev\\\\Sylvara\\\\Sched\\\\.env\" \"C:\\\\Dev\\\\Sylvara\\\\Sched\\\\.claude\\\\worktrees\\\\zealous-ardinghelli\\\\.env\")",
+      "Bash(node -e \"const clerk = require\\(''@clerk/nextjs''\\); console.log\\(Object.keys\\(clerk\\).filter\\(k => k.startsWith\\(''S''\\) || k.startsWith\\(''use''\\)\\).join\\(''\\\\n''\\)\\)\")",
+      "Bash(node -e \"const clerk = require\\(''@clerk/nextjs''\\); console.log\\(Object.keys\\(clerk\\).sort\\(\\).join\\(''\\\\n''\\)\\)\")",
+      "Bash(timeout 5)",
+      "Bash(curl -v http://localhost:3098/sign-in)"
     ]
   }
 }

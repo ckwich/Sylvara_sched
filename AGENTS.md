@@ -18,7 +18,7 @@ This document is **authoritative** instructions for Codex (and any other coding 
 - **ORM & migrations:** Prisma (recommended for novice clarity) *(migrations are required; never edit committed migrations)*
 - **Validation:** Zod (shared schemas between web/api)
 - **Date/time:** **Luxon is allowed only inside shared time helpers.** Do not import Luxon in `apps/*`. Use shared minute-of-day helpers (`packages/shared/src/time-of-day.ts`) and explicit timezone policy (`org_settings.company_timezone`) with UTC storage/serialization.
-- **Auth:** Auth.js (NextAuth v5) with Google OAuth provider, restricted to `@irontreeservice.com`. See plan.md §2.1.1 for the full implementation spec. Do not swap or add an alternative auth library.
+- **Auth:** Clerk (`@clerk/nextjs` + `@clerk/backend`) with Google OAuth. Domain restriction configured in Clerk dashboard. See plan.md §2.1.1 for the full implementation spec.
 - **Testing:** Vitest (unit/integration) + Playwright (E2E)
 - **Formatting/lint:** ESLint + Prettier
 
@@ -406,7 +406,7 @@ Codex MUST stop and ask (do not proceed) if:
 - It would modify import semantics (what gets imported or how it's keyed).
 - It would remove or overwrite `notes_raw`.
 - It would introduce a new major dependency/framework that increases complexity.
-- It would introduce or swap to a more complex auth/permissions system than the current stack requires (novice-safety gate). **Note: the auth system is already decided — Auth.js + Google OAuth. See plan.md §2.1.1. Do not introduce an alternative; do stop and ask if something in that spec seems contradictory or unimplementable.**
+- It would introduce or swap to a more complex auth/permissions system than the current stack requires (novice-safety gate). **Note: the auth system is already decided — Clerk (`@clerk/nextjs` + `@clerk/backend`) with Google OAuth. See plan.md §2.1.1. Do not introduce an alternative; do stop and ask if something in that spec seems contradictory or unimplementable.**
 - It would make the Sylvara CRM merge significantly harder — specifically: using integer PKs instead of UUIDs, hard-deleting rows instead of soft-deleting, storing derived job state as a column, or renaming entities in ways that conflict with plan.md §12.2 entity mappings.
 
 **After a stop-and-ask is resolved:** Record the decision in plan.md (under the relevant section) or in a new ADR file before proceeding. Do not just continue from the chat answer — the decision must be durable.

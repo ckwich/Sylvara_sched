@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import { makePrisma, resetDb, seedBase } from './_helpers/db';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, signTestToken } from '../fixtures/test-auth.js';
 
 const prisma = makePrisma();
 const ORG_SETTINGS_ID = '11111111-1111-4111-8111-111111111111';
@@ -21,12 +21,13 @@ describe('org settings integration (real postgres)', () => {
       where: { id: actor.id },
       data: { role: 'MANAGER' },
     });
-    const app = buildServer({ prisma });
+    const app = buildServer({ prisma }, { verifyToken: createTestVerifier() });
+    const actorHeaders = { authorization: `Bearer ${await signTestToken(actor.id, 'MANAGER')}` };
 
     const patchResponse = await app.inject({
       method: 'PATCH',
       url: '/api/org-settings',
-      headers: lanAuthHeaders('PATCH', String(actor.id)),
+      headers: actorHeaders,
       payload: {
         companyTimezone: 'America/Chicago',
       },
@@ -37,7 +38,7 @@ describe('org settings integration (real postgres)', () => {
     const getResponse = await app.inject({
       method: 'GET',
       url: '/api/org-settings',
-      headers: lanAuthHeaders('GET', String(actor.id)),
+      headers: actorHeaders,
     });
     expect(getResponse.statusCode).toBe(200);
     expect(getResponse.json().companyTimezone).toBe('America/Chicago');

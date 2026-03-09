@@ -1,7 +1,7 @@
 import { EquipmentType, Prisma, UserRole, type PrismaClient } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const MANAGER_ID = '11111111-1111-4111-8111-111111111111';
 const SCHEDULER_ID = '22222222-2222-4222-8222-222222222222';
@@ -91,12 +91,12 @@ function buildSnapshotPrisma() {
 describe('snapshot trigger route', () => {
   test('POST /api/snapshots/trigger as MANAGER returns CREATED and counts', async () => {
     const mock = buildSnapshotPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/snapshots/trigger',
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { date: '2026-03-04' },
     });
 
@@ -130,12 +130,12 @@ describe('snapshot trigger route', () => {
       equipmentType: 'CRANE',
       salesRepCode: null,
     });
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/snapshots/trigger',
-      headers: lanAuthHeaders('POST', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
       payload: { date: '2026-03-04' },
     });
 
@@ -146,12 +146,12 @@ describe('snapshot trigger route', () => {
 
   test('POST /api/snapshots/trigger as SCHEDULER returns 403', async () => {
     const mock = buildSnapshotPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/snapshots/trigger',
-      headers: lanAuthHeaders('POST', SCHEDULER_ID),
+      headers: testAuthHeaders(SCHEDULER_ID, 'SCHEDULER'),
       payload: {},
     });
 
@@ -161,12 +161,12 @@ describe('snapshot trigger route', () => {
 
   test('POST /api/snapshots/trigger as VIEWER returns 403', async () => {
     const mock = buildSnapshotPrisma();
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/snapshots/trigger',
-      headers: lanAuthHeaders('POST', VIEWER_ID),
+      headers: testAuthHeaders(VIEWER_ID, 'VIEWER'),
       payload: {},
     });
 

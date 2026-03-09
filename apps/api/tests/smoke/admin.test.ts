@@ -2,7 +2,7 @@ import type { PrismaClient, UserRole } from '@prisma/client';
 import { describe, expect, test } from 'vitest';
 import { buildServer } from '../../src/server';
 import { BLOCKER_REASONS, REQUIREMENT_TYPES } from '../../scripts/seed-admin-lists';
-import { lanAuthHeaders } from '../fixtures/lanAuthHeaders';
+import { createTestVerifier, testAuthHeaders } from '../fixtures/test-auth.js';
 
 const MANAGER_ID = '11111111-1111-4111-8111-111111111111';
 const VIEWER_ID = '22222222-2222-4222-8222-222222222222';
@@ -93,12 +93,12 @@ function buildPrisma(roleById: Record<string, UserRole>) {
 describe('admin endpoints', () => {
   test('GET /api/admin/import-summary returns correct shape', async () => {
     const mock = buildPrisma({ [MANAGER_ID]: 'MANAGER' });
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/admin/import-summary',
-      headers: lanAuthHeaders('GET', MANAGER_ID),
+      headers: testAuthHeaders(MANAGER_ID),
     });
 
     expect(response.statusCode).toBe(200);
@@ -134,12 +134,12 @@ describe('admin endpoints', () => {
 
   test('VIEWER cannot access /api/admin/* endpoints', async () => {
     const mock = buildPrisma({ [VIEWER_ID]: 'VIEWER' });
-    const app = buildServer({ prisma: mock.prisma });
+    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
 
     const response = await app.inject({
       method: 'GET',
       url: '/api/admin/requirement-types',
-      headers: lanAuthHeaders('GET', VIEWER_ID),
+      headers: testAuthHeaders(VIEWER_ID, 'VIEWER'),
     });
 
     expect(response.statusCode).toBe(403);

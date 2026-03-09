@@ -1,9 +1,10 @@
-import { auth } from '@/auth';
+import { auth } from '@clerk/nextjs/server';
 import AdminListsClient from './admin-lists-client';
 
 export default async function AdminPage() {
-  const session = await auth();
-  const role = session?.user?.role ?? null;
+  const { sessionClaims } = await auth();
+  const role =
+    (sessionClaims?.publicMetadata as { role?: string } | undefined)?.role ?? null;
 
   if (role !== 'MANAGER') {
     return (
