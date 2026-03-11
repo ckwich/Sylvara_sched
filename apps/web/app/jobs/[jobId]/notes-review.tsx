@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { scheduleEventLabel } from '@sylvara/shared';
 import {
   deleteJobRequirement,
   deleteJobScheduleEvent,
@@ -20,6 +21,14 @@ const REQUIREMENT_STATUSES = [
   'DENIED',
   'NOT_REQUIRED',
 ] as const;
+
+const FLAG_LABELS: Record<string, string> = {
+  winterFlag: 'Winter',
+  frozenGroundFlag: 'Frozen Ground',
+  requiresSpiderLift: 'Spider Lift',
+  hasClimb: 'Climb',
+  pushUpIfPossible: 'Push Up',
+};
 
 type NotesReviewProps = {
   jobId: string;
@@ -158,7 +167,7 @@ export default function NotesReview(props: NotesReviewProps) {
           {data.scheduleEvents.length === 0 ? <p className="text-xs text-slate-500">No extracted schedule events.</p> : null}
           {data.scheduleEvents.map((event) => (
             <div key={event.id} className="rounded-md border border-slate-200 p-2 text-xs text-slate-700">
-              <p className="font-medium">{event.eventType}</p>
+              <p className="font-medium">{scheduleEventLabel(event.eventType)}</p>
               <p>From: {event.fromAt ?? '—'} | To: {event.toAt ?? '—'}</p>
               <p>Snippet: {event.rawSnippet ?? '—'}</p>
               <p>Actor: {event.actorCode ?? '—'}</p>
@@ -241,7 +250,7 @@ export default function NotesReview(props: NotesReviewProps) {
                   )
                 }
               />
-              {key}
+              {FLAG_LABELS[key] ?? key}
             </label>
           ))}
         </div>

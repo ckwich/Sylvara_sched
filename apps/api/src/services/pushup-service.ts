@@ -79,12 +79,24 @@ export async function getCandidates(
   ]);
 
   if (!slot) {
+    console.log('[PUSHUP DEBUG] Vacated slot not found for id:', vacatedSlotId);
     return null;
   }
 
   const timezone = orgSettings?.companyTimezone ?? 'America/New_York';
 
+  console.log('[PUSHUP DEBUG] ========== getCandidates START ==========');
+  console.log('[PUSHUP DEBUG] Vacated slot parameters:');
+  console.log('[PUSHUP DEBUG]   id:', slot.id);
+  console.log('[PUSHUP DEBUG]   equipmentType:', slot.equipmentType);
+  console.log('[PUSHUP DEBUG]   status:', slot.status);
+  console.log('[PUSHUP DEBUG]   startDatetime:', slot.startDatetime.toISOString());
+  console.log('[PUSHUP DEBUG]   endDatetime:', slot.endDatetime.toISOString());
+  console.log('[PUSHUP DEBUG]   slotHours:', slot.slotHours.toString());
+  console.log('[PUSHUP DEBUG]   timezone:', timezone);
+
   if (slot.status !== 'OPEN') {
+    console.log('[PUSHUP DEBUG] Slot status is', slot.status, '— returning empty candidates');
     return {
       vacatedSlot: {
         id: slot.id,
@@ -96,6 +108,25 @@ export async function getCandidates(
       },
       candidates: [],
     };
+  }
+
+  // --- Diagnostic: count jobs passing each individual filter (non-critical) ---
+  try {
+    const [countAll, countPushUp, countNotCompleted, countEquipMatch, countHasEstimate] = await Promise.all([
+      prisma.job.count({ where: { deletedAt: null } }),
+      prisma.job.count({ where: { deletedAt: null, pushUpIfPossible: true } }),
+      prisma.job.count({ where: { deletedAt: null, pushUpIfPossible: true, completedDate: null } }),
+      prisma.job.count({ where: { deletedAt: null, pushUpIfPossible: true, completedDate: null, equipmentType: slot.equipmentType } }),
+      prisma.job.count({ where: { deletedAt: null, pushUpIfPossible: true, completedDate: null, equipmentType: slot.equipmentType, estimateHoursCurrent: { not: null } } }),
+    ]);
+    console.log('[PUSHUP DEBUG] Filter stage counts (cumulative):');
+    console.log('[PUSHUP DEBUG]   All non-deleted jobs:', countAll);
+    console.log('[PUSHUP DEBUG]   + pushUpIfPossible=true:', countPushUp);
+    console.log('[PUSHUP DEBUG]   + completedDate=null (not completed):', countNotCompleted);
+    console.log('[PUSHUP DEBUG]   + equipmentType=' + slot.equipmentType + ':', countEquipMatch);
+    console.log('[PUSHUP DEBUG]   + estimateHoursCurrent IS NOT NULL:', countHasEstimate);
+  } catch {
+    console.log('[PUSHUP DEBUG] Diagnostic count queries skipped (prisma.job.count not available)');
   }
 
   const jobs = await prisma.job.findMany({
@@ -164,23 +195,37 @@ export async function getCandidates(
     segmentsByJob.set(segment.jobId, existing);
   }
 
+  console.log('[PUSHUP DEBUG] Jobs passing DB filters:', jobs.length);
+
   const slotHours = slot.slotHours;
   const candidates: Array<PushupCandidate & { _fitScore: number; _approvalSort: number }> = [];
+  let skippedNullEstimate = 0;
+  let skippedPreferredWindow = 0;
+  let skippedRemainingZero = 0;
 
   for (const job of jobs) {
     if (!job.estimateHoursCurrent) {
+      skippedNullEstimate++;
       continue;
     }
 
-    if (
-      !isWithinPreferredWindow({
-        slotStart: slot.startDatetime,
-        slotEnd: slot.endDatetime,
-        timezone,
-        preferredStartTime: job.preferredStartTime,
-        preferredEndTime: job.preferredEndTime,
-      })
-    ) {
+    const withinWindow = isWithinPreferredWindow({
+      slotStart: slot.startDatetime,
+      slotEnd: slot.endDatetime,
+      timezone,
+      preferredStartTime: job.preferredStartTime,
+      preferredEndTime: job.preferredEndTime,
+    });
+    if (!withinWindow) {
+      const slotStartMin = minutesOfLocalDate(slot.startDatetime, timezone);
+      const slotEndMin = minutesOfLocalDate(slot.endDatetime, timezone);
+      const prefStartMin = job.preferredStartTime ? minuteFromLegacyTime(job.preferredStartTime) : null;
+      const prefEndMin = job.preferredEndTime ? minuteFromLegacyTime(job.preferredEndTime) : null;
+      console.log(
+        `[PUSHUP DEBUG] Job ${job.id} (${job.customer.name}) SKIPPED — preferred window mismatch: ` +
+        `slot=[${slotStartMin}-${slotEndMin}] vs pref=[${prefStartMin ?? 'null'}-${prefEndMin ?? 'null'}]`,
+      );
+      skippedPreferredWindow++;
       continue;
     }
 
@@ -194,6 +239,11 @@ export async function getCandidates(
       remaining = new Prisma.Decimal(0);
     }
     if (remaining.lte(0)) {
+      console.log(
+        `[PUSHUP DEBUG] Job ${job.id} (${job.customer.name}) SKIPPED — remaining<=0: ` +
+        `estimate=${job.estimateHoursCurrent.toString()}h, scheduled=${scheduledEffective.toString()}h`,
+      );
+      skippedRemainingZero++;
       continue;
     }
 
@@ -240,6 +290,14 @@ export async function getCandidates(
       _approvalSort: job.approvalDate ? job.approvalDate.getTime() : Number.MAX_SAFE_INTEGER,
     });
   }
+
+  console.log('[PUSHUP DEBUG] ---- Filter summary ----');
+  console.log('[PUSHUP DEBUG]   Jobs from DB (all filters):', jobs.length);
+  console.log('[PUSHUP DEBUG]   Skipped null estimate (post-query):', skippedNullEstimate);
+  console.log('[PUSHUP DEBUG]   Skipped preferred window:', skippedPreferredWindow);
+  console.log('[PUSHUP DEBUG]   Skipped remaining<=0:', skippedRemainingZero);
+  console.log('[PUSHUP DEBUG]   Final candidates:', candidates.length);
+  console.log('[PUSHUP DEBUG] ========== getCandidates END ==========');
 
   candidates.sort((a, b) => {
     if (a.tier !== b.tier) {

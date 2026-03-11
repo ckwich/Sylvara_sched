@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { utcToLocalParts } from '@sylvara/shared';
 import {
   applyPushupSuggestion,
   dismissPushupSuggestion,
@@ -12,14 +13,26 @@ import {
 type PushupModalProps = {
   open: boolean;
   vacatedSlotId: string | null;
+  companyTimezone: string;
   onClose: () => void;
   onApplied: () => Promise<void>;
 };
 
-function formatDateTimeWindow(slot: PushupVacatedSlotSummary): string {
-  const start = new Date(slot.startDatetime);
-  const end = new Date(slot.endDatetime);
-  return `${start.toLocaleDateString()} ${start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+function formatLocalTime(iso: string, timezone: string): string {
+  const parts = utcToLocalParts(new Date(iso), timezone);
+  const hour12 = parts.hour % 12 === 0 ? 12 : parts.hour % 12;
+  const suffix = parts.hour >= 12 ? 'PM' : 'AM';
+  const min = String(parts.minute).padStart(2, '0');
+  return `${hour12}:${min} ${suffix}`;
+}
+
+function formatLocalDate(iso: string, timezone: string): string {
+  const parts = utcToLocalParts(new Date(iso), timezone);
+  return `${parts.month}/${parts.day}/${parts.year}`;
+}
+
+function formatDateTimeWindow(slot: PushupVacatedSlotSummary, timezone: string): string {
+  return `${formatLocalDate(slot.startDatetime, timezone)} ${formatLocalTime(slot.startDatetime, timezone)} - ${formatLocalTime(slot.endDatetime, timezone)}`;
 }
 
 function errorMessage(error: unknown): string {
@@ -142,7 +155,7 @@ export default function PushupModal(props: PushupModalProps) {
             <h2 className="text-lg font-semibold text-slate-900">Push-up Suggestions</h2>
             {slot ? (
               <p className="text-sm text-slate-600">
-                {formatDateTimeWindow(slot)} · {slot.slotHours.toFixed(2)} hrs · {slot.equipmentType}
+                {formatDateTimeWindow(slot, props.companyTimezone)} · {slot.slotHours.toFixed(2)} hrs · {slot.equipmentType}
               </p>
             ) : null}
           </div>
@@ -211,8 +224,8 @@ export default function PushupModal(props: PushupModalProps) {
                 </p>
 
                 <div className="mt-2 flex flex-wrap gap-1 text-xs">
-                  {candidate.winterFlag ? <span className="rounded bg-orange-100 px-2 py-0.5 text-orange-700">WINTER</span> : null}
-                  {candidate.frozenGroundFlag ? <span className="rounded bg-blue-100 px-2 py-0.5 text-blue-700">FROZEN GROUND</span> : null}
+                  {candidate.winterFlag ? <span className="rounded bg-orange-100 px-2 py-0.5 text-orange-700">Winter</span> : null}
+                  {candidate.frozenGroundFlag ? <span className="rounded bg-blue-100 px-2 py-0.5 text-blue-700">Frozen Ground</span> : null}
                   {candidate.activeBlockers.map((blocker) => (
                     <span key={blocker.id} className="rounded bg-red-100 px-2 py-0.5 text-red-700">
                       {blocker.reason}
@@ -248,7 +261,7 @@ export default function PushupModal(props: PushupModalProps) {
                     type="button"
                     onClick={() => onApply(candidate)}
                     disabled={applied || busyJobId === candidate.jobId}
-                    className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded bg-brand-green px-3 py-1.5 text-sm text-white hover:bg-brand-green-dark disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {applied ? 'Scheduled' : busyJobId === candidate.jobId ? 'Applying...' : 'Apply'}
                   </button>

@@ -8,3 +8,43 @@ body {
   padding: 0;
 }
 
+/* ---- Print Schedule styles ---- */
+@media print {
+  /* Hide nav bar, screen-only controls */
+  nav {
+    display: none !important;
+  }
+
+  /* Reset page margins */
+  @page {
+    margin: 0.5in;
+    size: letter portrait;
+  }
+
+  /* Page break between foreman sections */
+  .print-foreman-section {
+    break-before: page;
+  }
+  .print-foreman-section:first-of-type {
+    break-before: auto;
+  }
+
+  /* Black & white, no backgrounds */
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 11pt;
+    line-height: 1.4;
+  }
+
+  .print-page {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* Ensure tables don't break mid-row */
+  tr {
+    break-inside: avoid;
+  }
+}
+

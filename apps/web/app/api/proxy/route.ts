@@ -24,13 +24,22 @@ async function handle(request: NextRequest): Promise<Response> {
     return jsonError(400, 'VALIDATION_ERROR', 'path query param must start with /api/.');
   }
 
-  const { getToken, sessionClaims } = await auth();
-  const meta = sessionClaims?.publicMetadata as { userId?: string } | undefined;
-  if (!meta?.userId) {
+  // Verify the user has a valid Clerk session. userId here is Clerk's user ID
+  // (always present for authenticated sessions). We don't check publicMetadata
+  // here — Fastify's jwt-auth handles user resolution from the verified token.
+  let clerkUserId: string | null = null;
+  let rawToken: string | null = null;
+  try {
+    const authResult = await auth();
+    clerkUserId = authResult.userId;
+    if (!clerkUserId) {
+      return jsonError(401, 'UNAUTHENTICATED', 'Authentication required.');
+    }
+    rawToken = await authResult.getToken();
+  } catch {
     return jsonError(401, 'UNAUTHENTICATED', 'Authentication required.');
   }
 
-  const rawToken = await getToken();
   if (!rawToken) {
     return jsonError(401, 'UNAUTHENTICATED', 'Authentication required.');
   }
@@ -60,8 +69,18 @@ async function handle(request: NextRequest): Promise<Response> {
     passthroughHeaders.set('content-type', responseContentType);
   }
 
-  return new Response(await upstreamResponse.arrayBuffer(), {
-    status: upstreamResponse.status,
+  const status = upstreamResponse.status;
+
+  // HTTP 204 and 304 must not include a body — the Response constructor
+  // throws if one is provided for these status codes.
+  if (status === 204 || status === 304) {
+    return new Response(null, { status, headers: passthroughHeaders });
+  }
+
+  const responseBody = await upstreamResponse.arrayBuffer();
+
+  return new Response(responseBody, {
+    status,
     headers: passthroughHeaders,
   });
 }

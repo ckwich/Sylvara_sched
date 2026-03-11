@@ -1,16 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   ApiRequestError,
   createJob,
+  getJobRepCodes,
   getJobs,
   type GetJobsQuery,
   type JobDerivedState,
   type JobSummary,
 } from '../../lib/api';
 import EditJobModal from '../jobs/edit-job-modal';
-import { buildSections } from './backlog-helpers';
+import { buildSections, formatDollars, formatHours, parseDecimal } from './backlog-helpers';
 import BacklogSection from './backlog-section';
 import { NON_COMPLETED_STATES, STATE_LABELS, type EquipmentFilter, type EquipmentType } from './backlog-types';
 
@@ -53,6 +54,8 @@ export default function BacklogClient() {
     BUCKET: true,
   });
 
+  const [allRepCodes, setAllRepCodes] = useState<string[]>([]);
+
   const [newJobOpen, setNewJobOpen] = useState(false);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [newJobSubmitting, setNewJobSubmitting] = useState(false);
@@ -75,6 +78,19 @@ export default function BacklogClient() {
     }, 300);
     return () => window.clearTimeout(timeoutId);
   }, [searchInput]);
+
+  const loadRepCodes = useCallback(async () => {
+    try {
+      const codes = await getJobRepCodes();
+      setAllRepCodes(codes);
+    } catch {
+      // Non-critical — filter dropdown will just be empty
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRepCodes();
+  }, [loadRepCodes]);
 
   const requestQuery = useMemo<GetJobsQuery>(
     () => ({
@@ -160,7 +176,7 @@ export default function BacklogClient() {
       setNewJobCustomRepInput(false);
       setNewJobOpen(false);
       setPage(1);
-      await loadJobs({ ...requestQuery, page: 1 });
+      await Promise.all([loadJobs({ ...requestQuery, page: 1 }), loadRepCodes()]);
     } catch (requestError) {
       const message =
         requestError instanceof ApiRequestError
@@ -200,13 +216,38 @@ export default function BacklogClient() {
     [jobs, pushUpOnly, selectedStates],
   );
 
-  const repOptions = useMemo(
-    () =>
-      Array.from(new Set(jobs.map((job) => job.salesRepCode || 'UNASSIGNED'))).sort((a, b) =>
-        a.localeCompare(b),
-      ),
-    [jobs],
-  );
+  // Count jobs per state from API-filtered results, applying pushUpOnly but NOT the state toggle.
+  // This lets the state buttons show how many jobs are in each state before clicking.
+  const stateCountsExcludingStateFilter = useMemo(() => {
+    const counts: Record<string, number> = { TBS: 0, PARTIALLY_SCHEDULED: 0, FULLY_SCHEDULED: 0 };
+    for (const job of jobs) {
+      if (job.derivedState === 'COMPLETED') continue;
+      if (pushUpOnly && !job.pushUpIfPossible) continue;
+      counts[job.derivedState] = (counts[job.derivedState] ?? 0) + 1;
+    }
+    return counts;
+  }, [jobs, pushUpOnly]);
+
+  // Summary bar: aggregate by state from the visible (fully-filtered) jobs.
+  const summaryByState = useMemo(() => {
+    type StateSummary = { count: number; dollars: number; hours: number };
+    const summary: Record<string, StateSummary> = {
+      TBS: { count: 0, dollars: 0, hours: 0 },
+      PARTIALLY_SCHEDULED: { count: 0, dollars: 0, hours: 0 },
+      FULLY_SCHEDULED: { count: 0, dollars: 0, hours: 0 },
+    };
+    for (const job of visibleJobs) {
+      if (job.derivedState === 'COMPLETED') continue;
+      const bucket = summary[job.derivedState];
+      if (!bucket) continue;
+      bucket.count += 1;
+      bucket.dollars += parseDecimal(job.amountDollars);
+      bucket.hours += parseDecimal(job.estimateHoursCurrent);
+    }
+    return summary;
+  }, [visibleJobs]);
+
+  const repOptions = allRepCodes;
 
   const sections = useMemo(() => buildSections(visibleJobs), [visibleJobs]);
   const hasVisibleRows = sections.some((section) => section.groups.some((group) => group.jobs.length > 0));
@@ -231,7 +272,7 @@ export default function BacklogClient() {
         <button
           type="button"
           onClick={() => setNewJobOpen((open) => !open)}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+          className="rounded-md bg-brand-green px-4 py-2 text-sm font-medium text-white hover:bg-brand-green-dark"
         >
           New Job
         </button>
@@ -368,7 +409,7 @@ export default function BacklogClient() {
               <button
                 type="submit"
                 disabled={newJobSubmitting}
-                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                className="rounded-md bg-brand-green px-4 py-2 text-sm font-medium text-white hover:bg-brand-green-dark disabled:opacity-60"
               >
                 {newJobSubmitting ? 'Saving...' : 'Create Job'}
               </button>
@@ -401,7 +442,7 @@ export default function BacklogClient() {
                     setPage(1);
                   }}
                   className={`rounded-md px-3 py-1.5 text-sm ${
-                    equipmentFilter === option ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                    equipmentFilter === option ? 'bg-brand-green text-white' : 'bg-slate-100 text-slate-700'
                   }`}
                 >
                   {option === 'ALL' ? 'All' : option === 'CRANE' ? 'Crane' : 'Bucket'}
@@ -413,28 +454,40 @@ export default function BacklogClient() {
           <div className="space-y-2 lg:col-span-2">
             <p className="text-sm font-medium text-slate-700">State</p>
             <div className="flex flex-wrap gap-2">
-              {NON_COMPLETED_STATES.map((state) => (
-                <button
-                  key={state}
-                  type="button"
-                  onClick={() =>
-                    setSelectedStates((previous) => {
-                      const next = new Set(previous);
-                      if (next.has(state)) {
-                        next.delete(state);
-                      } else {
-                        next.add(state);
-                      }
-                      return next;
-                    })
-                  }
-                  className={`rounded-md px-3 py-1.5 text-sm ${
-                    selectedStates.has(state) ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
-                  }`}
-                >
-                  {STATE_LABELS[state]}
-                </button>
-              ))}
+              {NON_COMPLETED_STATES.map((state) => {
+                const count = stateCountsExcludingStateFilter[state] ?? 0;
+                return (
+                  <button
+                    key={state}
+                    type="button"
+                    onClick={() =>
+                      setSelectedStates((previous) => {
+                        const next = new Set(previous);
+                        if (next.has(state)) {
+                          next.delete(state);
+                        } else {
+                          next.add(state);
+                        }
+                        return next;
+                      })
+                    }
+                    className={`rounded-md px-3 py-1.5 text-sm ${
+                      selectedStates.has(state) ? 'bg-brand-green text-white' : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    {STATE_LABELS[state]}
+                    <span
+                      className={`ml-1.5 inline-flex min-w-5 justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold ${
+                        selectedStates.has(state)
+                          ? 'bg-white/20 text-white'
+                          : 'bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -503,6 +556,36 @@ export default function BacklogClient() {
           {isFetching ? <span className="text-sm text-slate-500">Loading...</span> : null}
         </div>
       </section>
+
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">TBS</p>
+          <p className="mt-1 text-lg font-semibold text-slate-700">
+            {summaryByState.TBS.count} <span className="text-sm font-normal text-slate-500">jobs</span>
+          </p>
+          <p className="text-sm text-slate-500">
+            {formatDollars(summaryByState.TBS.dollars)} · {formatHours(summaryByState.TBS.hours)}h
+          </p>
+        </div>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-amber-600">Partial</p>
+          <p className="mt-1 text-lg font-semibold text-amber-800">
+            {summaryByState.PARTIALLY_SCHEDULED.count} <span className="text-sm font-normal text-amber-600">jobs</span>
+          </p>
+          <p className="text-sm text-amber-600">
+            {formatDollars(summaryByState.PARTIALLY_SCHEDULED.dollars)} · {formatHours(summaryByState.PARTIALLY_SCHEDULED.hours)}h
+          </p>
+        </div>
+        <div className="rounded-lg border border-brand-green/30 bg-brand-green/5 px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-brand-green">Full</p>
+          <p className="mt-1 text-lg font-semibold text-brand-green-dark">
+            {summaryByState.FULLY_SCHEDULED.count} <span className="text-sm font-normal text-brand-green">jobs</span>
+          </p>
+          <p className="text-sm text-brand-green">
+            {formatDollars(summaryByState.FULLY_SCHEDULED.dollars)} · {formatHours(summaryByState.FULLY_SCHEDULED.hours)}h
+          </p>
+        </div>
+      </div>
 
       <div className="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
         <span className="text-slate-600">

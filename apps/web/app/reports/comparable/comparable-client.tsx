@@ -128,6 +128,7 @@ function EquipmentSection({
                 <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800">
                   {year}
                 </div>
+                <div className="overflow-x-auto">
                 <table className="min-w-full text-xs">
                   <thead>
                     <tr>
@@ -162,6 +163,7 @@ function EquipmentSection({
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             );
           })}
@@ -237,7 +239,7 @@ export default function ComparableClient() {
               <label
                 key={year}
                 className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${
-                  checked ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 text-slate-700'
+                  checked ? 'border-brand-green bg-brand-green text-white' : 'border-slate-300 text-slate-700'
                 }`}
               >
                 <input

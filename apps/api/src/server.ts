@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { prisma } from '@sylvara/db';
 import { fileURLToPath } from 'node:url';
-import { createAuthPreHandler, type TokenVerifier } from './http/jwt-auth.js';
+import { createAuthPreHandler, type TokenVerifier, type ClerkIdResolver } from './http/jwt-auth.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerConflictRoutes } from './routes/conflicts.js';
 import { registerJobRoutes } from './routes/jobs.js';
@@ -44,7 +44,7 @@ function resolveCorsOrigins(input: { rawValue: string | undefined; nodeEnv: stri
 
 export function buildServer(
   deps: { prisma: typeof prisma } = { prisma },
-  authConfig?: { verifyToken?: TokenVerifier },
+  authConfig?: { verifyToken?: TokenVerifier; resolveByClerkId?: ClerkIdResolver },
 ) {
   const app = Fastify();
   const corsConfig = resolveCorsOrigins({
@@ -87,7 +87,28 @@ export function buildServer(
     return { ok: true };
   });
 
-  app.addHook('preHandler', createAuthPreHandler(authConfig?.verifyToken));
+  // Build the ClerkIdResolver for production: looks up the local user by
+  // clerkId column when publicMetadata is missing from the Clerk JWT.
+  // Tests inject their own verifyToken and don't need this fallback.
+  const resolveByClerkId: ClerkIdResolver | undefined =
+    authConfig?.resolveByClerkId ??
+    (!authConfig?.verifyToken
+      ? async (clerkId: string) => {
+          try {
+            const user = await deps.prisma.user.findUnique({
+              where: { clerkId },
+            });
+            if (!user || !user.active) return null;
+            const role = user.role as string;
+            if (!['MANAGER', 'SCHEDULER', 'VIEWER'].includes(role)) return null;
+            return { userId: user.id, role: role as 'MANAGER' | 'SCHEDULER' | 'VIEWER' };
+          } catch {
+            return null;
+          }
+        }
+      : undefined);
+
+  app.addHook('preHandler', createAuthPreHandler(authConfig?.verifyToken, resolveByClerkId));
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error({ err: error }, 'Unhandled route error');

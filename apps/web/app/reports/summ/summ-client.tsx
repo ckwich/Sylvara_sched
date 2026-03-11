@@ -207,7 +207,7 @@ export default function SummClient({ canEditSalesPerDay }: SummClientProps) {
               type="button"
               onClick={() => void handleSaveSalesPerDay()}
               disabled={saving}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="rounded-md bg-brand-green px-4 py-2 text-sm font-medium text-white hover:bg-brand-green-dark disabled:opacity-60"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>

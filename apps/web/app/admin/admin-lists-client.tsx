@@ -72,7 +72,7 @@ function ListSection(props: {
           type="button"
           onClick={props.onCreate}
           disabled={props.state.submitting}
-          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+          className="rounded-md bg-brand-green px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-green-dark disabled:opacity-60"
         >
           {props.state.submitting ? 'Saving...' : 'Add'}
         </button>
@@ -362,7 +362,7 @@ export default function AdminListsClient() {
             type="button"
             onClick={() => void createFreezeWindow()}
             disabled={freezeWindows.submitting}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-md bg-brand-green px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-green-dark disabled:opacity-60"
           >
             {freezeWindows.submitting ? 'Saving...' : 'Add'}
           </button>

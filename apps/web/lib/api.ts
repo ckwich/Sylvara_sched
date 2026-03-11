@@ -484,6 +484,27 @@ export async function getJobs(query?: GetJobsQuery | JobDerivedState): Promise<J
   return body as JobsResponse;
 }
 
+export async function getJobRepCodes(): Promise<string[]> {
+  const url = '/api/jobs/rep-codes';
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { repCodes: string[] } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return (body as { repCodes: string[] }).repCodes;
+}
+
 export async function getJob(jobId: string): Promise<JobDetail> {
   const url = `/api/jobs/${jobId}`;
   let response: Response;
@@ -1855,6 +1876,182 @@ export async function dismissConflict(input: {
     throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
   }
   return body as { dismissal: ConflictDismissal };
+}
+
+export async function deleteResource(id: string): Promise<void> {
+  const url = `/api/resources/${id}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'DELETE' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, body ?? {});
+  }
+}
+
+export async function deleteHomeBase(id: string): Promise<void> {
+  const url = `/api/home-bases/${id}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'DELETE' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, body ?? {});
+  }
+}
+
+export type ActivityLogEntry = {
+  id: string;
+  entityType: string;
+  entityId: string;
+  actionType: string;
+  diff: Record<string, unknown> | null;
+  actorUserId: string | null;
+  actorDisplay: string | null;
+  actorName: string | null;
+  createdAt: string;
+};
+
+type ActivityLogResponse = {
+  entries: ActivityLogEntry[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+};
+
+export async function getActivityLog(page: number = 1, pageSize: number = 20): Promise<ActivityLogResponse> {
+  const url = `/api/admin/activity-log?page=${page}&pageSize=${pageSize}`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as ActivityLogResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as ActivityLogResponse;
+}
+
+// ─── User Management ────────────────────────────────────────
+
+export type AdminUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  active: boolean;
+  hasClerkId: boolean;
+  createdAt: string;
+};
+
+type AdminUsersResponse = {
+  users: AdminUser[];
+};
+
+export async function getAdminUsers(): Promise<AdminUsersResponse> {
+  const url = '/api/admin/users';
+  let response: Response;
+  try {
+    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as AdminUsersResponse | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as AdminUsersResponse;
+}
+
+export async function updateUserRole(
+  userId: string,
+  role: string,
+): Promise<{ message: string; role: string }> {
+  const url = `/api/admin/users/${userId}/role`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role }),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { message: string; role: string } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as { message: string; role: string };
+}
+
+export async function updateUserActive(
+  userId: string,
+  active: boolean,
+): Promise<{ message: string; active: boolean }> {
+  const url = `/api/admin/users/${userId}/active`;
+  let response: Response;
+  try {
+    response = await apiFetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active }),
+    });
+  } catch (error) {
+    throw new ApiRequestError({
+      status: null,
+      url,
+      body: null,
+      message: 'NETWORK_ERROR: Request failed.',
+      networkErrorMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const body = (await parseJsonSafe(response)) as { message: string; active: boolean } | ApiErrorBody;
+  if (!response.ok) {
+    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
+  }
+  return body as { message: string; active: boolean };
 }
 
 export async function getConflictDismissals(date: string): Promise<{ dismissals: ConflictDismissal[] }> {

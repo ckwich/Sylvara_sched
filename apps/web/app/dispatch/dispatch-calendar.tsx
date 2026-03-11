@@ -5,11 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   getOpenPushupSlots,
+  getPushupCandidates,
   createForemanRoster,
   createScheduleAttempt,
   createTravelSegment,
   removeScheduleSegment,
 } from '../../lib/api';
+import CrewAddPanel from './crew-add-panel';
 import ForemanColumn from './foreman-column';
 import {
   DAY_START_MINUTE,
@@ -23,6 +25,7 @@ import {
 } from './dispatch-utils';
 import JobSelectorPanel from './job-selector-panel';
 import type { ScheduleBlockData } from './schedule-block';
+import PrintDialog from './print-dialog';
 import PushupModal from './pushup-modal';
 import { useDispatchData } from './use-dispatch-data';
 
@@ -66,6 +69,8 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
   const [dismissedInlineWarnings, setDismissedInlineWarnings] = useState<Set<string>>(new Set());
   const [openPushupSlotIds, setOpenPushupSlotIds] = useState<string[]>([]);
   const [activePushupSlotId, setActivePushupSlotId] = useState<string | null>(null);
+  const [addCrewForemanId, setAddCrewForemanId] = useState<string | null>(null);
+  const [printDialogOpen, setPrintDialogOpen] = useState(false);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const pushupOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -99,7 +104,19 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         }).format(new Date(slot.startDatetime));
         return localDate === selectedDate;
       });
-      setOpenPushupSlotIds(visible.map((slot) => slot.id));
+
+      // Only include slots that actually have matching candidates
+      const withCandidates = await Promise.all(
+        visible.map(async (slot) => {
+          try {
+            const response = await getPushupCandidates(slot.id);
+            return response.candidates.length > 0 ? slot.id : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      setOpenPushupSlotIds(withCandidates.filter((id): id is string => id !== null));
     } catch {
       setOpenPushupSlotIds([]);
     }
@@ -140,10 +157,10 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         return (
           <div key={`axis-${minute}`} className={`relative h-[45px] border-t ${lineClass}`}>
             <span
-              className="absolute right-2 block text-right"
+              className="absolute right-2 flex items-center text-right"
               style={{
                 top: 0,
-                transform: 'translateY(-50%)',
+                bottom: 0,
                 fontSize: '0.75rem',
                 color: '#6b7280',
               }}
@@ -467,6 +484,13 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             >
               Show push-up suggestions {openPushupSlotIds.length > 0 ? `(${openPushupSlotIds.length})` : ''}
             </button>
+            <button
+              type="button"
+              onClick={() => setPrintDialogOpen(true)}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
+            >
+              Print Schedule
+            </button>
           </div>
         </div>
 
@@ -571,43 +595,84 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
           ref={scrollerRef}
           className="h-[calc(100vh-180px)] overflow-x-auto overflow-y-auto rounded-lg border border-slate-200 bg-white"
         >
-          <div
-            className="flex flex-row min-w-0"
-            style={{
-              overflowY: 'auto',
-              overflowX: 'auto',
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'row',
-            }}
-          >
+          {/* Shared sticky header row — consistent fixed height for all columns */}
+          <div className="sticky top-0 z-20 flex border-b border-slate-200 bg-white">
+            <div
+              className="flex-none border-r border-slate-200"
+              style={{ width: '4rem' }}
+            />
+            <div className="flex flex-1">
+              {columns.map(({ foreman, dayData }) => {
+                const crewText =
+                  dayData.crew.length > 0
+                    ? dayData.crew.map((m) => m.resourceName).join(', ')
+                    : 'No crew assigned';
+                const crewTooltip =
+                  dayData.crew.length > 0
+                    ? dayData.crew.map((m) => `${m.resourceName} – ${m.role}`).join('\n')
+                    : 'No crew assigned';
+                return (
+                  <div
+                    key={`header-${foreman.id}`}
+                    className="relative flex-1 min-w-[160px] border-l border-slate-200 first:border-l-0 p-2"
+                    style={{ height: '76px' }}
+                  >
+                    <p
+                      className="text-sm font-semibold text-slate-900 truncate"
+                      title={foreman.name}
+                    >
+                      {foreman.name}
+                    </p>
+                    <p
+                      className="mt-0.5 text-xs text-slate-500 truncate"
+                      title={crewTooltip}
+                    >
+                      {crewText}
+                    </p>
+                    <button
+                      type="button"
+                      className="mt-1 cursor-pointer text-xs font-medium text-slate-600 hover:text-slate-900"
+                      onClick={() =>
+                        setAddCrewForemanId((current) =>
+                          current === foreman.id ? null : foreman.id,
+                        )
+                      }
+                    >
+                      + Add Crew
+                    </button>
+                    {addCrewForemanId === foreman.id ? (
+                      <div className="absolute left-0 top-[76px] z-30 w-72 rounded-b-md border border-slate-200 bg-white shadow-lg">
+                        <CrewAddPanel
+                          people={people.map((person) => ({ id: person.id, name: person.name }))}
+                          busy={crewBusyForemanId === foreman.id}
+                          error={crewErrorByForeman[foreman.id] ?? null}
+                          onSubmit={(input) => handleAddCrew(foreman.id, input)}
+                          onCancel={() => setAddCrewForemanId(null)}
+                          homeBaseOptions={homeBases.map((hb) => ({ id: hb.id, name: hb.name }))}
+                          requireHomeBaseChoice={dayData.roster === null && homeBases.length > 1}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Time axis + foreman grids */}
+          <div className="flex">
             <aside
-              className="flex-none w-16 border-r border-slate-200 bg-white pt-[76px]"
+              className="flex-none border-r border-slate-200 bg-white"
               style={{ flexShrink: 0, width: '4rem' }}
             >
               {axisRows}
             </aside>
-            <div
-              className="flex flex-row flex-1"
-              style={{ display: 'flex', flexDirection: 'row', flex: 1 }}
-            >
-              {columns.map(({ foreman, blocks, dayData }) => (
+            <div className="flex flex-1">
+              {columns.map(({ foreman, blocks }) => (
                 <ForemanColumn
                   key={foreman.id}
                   foremanId={foreman.id}
-                  foremanName={foreman.name}
-                  crew={dayData.crew.map((member) => ({
-                    id: member.id,
-                    name: member.resourceName,
-                    role: member.role,
-                  }))}
                   blocks={blocks}
-                  peopleOptions={people.map((person) => ({ id: person.id, name: person.name }))}
-                  homeBaseOptions={homeBases.map((homeBase) => ({ id: homeBase.id, name: homeBase.name }))}
-                  requireHomeBaseChoice={dayData.roster === null && homeBases.length > 1}
-                  addingCrew={crewBusyForemanId === foreman.id}
-                  crewError={crewErrorByForeman[foreman.id] ?? null}
-                  onAddCrew={(input) => handleAddCrew(foreman.id, input)}
                   onSelectMinute={(input) => setSelectedSlot(input)}
                   onRemoveSegment={(segmentId) => handleRemoveSegment(foreman.id, segmentId)}
                   onJobSaved={async () => {
@@ -637,6 +702,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
       <PushupModal
         open={activePushupSlotId !== null}
         vacatedSlotId={activePushupSlotId}
+        companyTimezone={companyTimezone}
         onClose={() => setActivePushupSlotId(null)}
         onApplied={async () => {
           await Promise.all([
@@ -645,6 +711,14 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             reloadOpenPushupSlots(),
           ]);
         }}
+      />
+      <PrintDialog
+        open={printDialogOpen}
+        selectedDate={selectedDate}
+        foremen={foremen}
+        homeBases={homeBases}
+        dataByForeman={dataByForeman}
+        onClose={() => setPrintDialogOpen(false)}
       />
     </main>
   );

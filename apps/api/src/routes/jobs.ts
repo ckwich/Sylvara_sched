@@ -368,6 +368,23 @@ function scheduleEventKey(event: { eventType: string; fromAt: Date | null; toAt:
 }
 
 export function registerJobRoutes(app: FastifyInstance, deps: AppDeps) {
+  // Returns all distinct sales_rep_code values from non-deleted, non-completed jobs.
+  app.get('/api/jobs/rep-codes', async (_request, reply) => {
+    const rows = await deps.prisma.job.findMany({
+      where: {
+        deletedAt: null,
+        completedDate: null,
+      },
+      select: { salesRepCode: true },
+      distinct: ['salesRepCode'],
+    });
+    const codes = rows
+      .map((r) => r.salesRepCode.trim())
+      .filter((c) => c.length > 0)
+      .sort((a, b) => a.localeCompare(b));
+    return reply.code(200).send({ repCodes: codes });
+  });
+
   app.get('/api/jobs', async (request, reply) => {
     const query = jobListQuerySchema.safeParse(request.query);
     if (!query.success) {

@@ -33,3 +33,5 @@ export { parseNotes } from './notes-parser';
 
 export type { UserRole } from './roles';
 export { ROLE_PERMISSIONS } from './roles';
+
+export { SCHEDULE_EVENT_LABELS, scheduleEventLabel } from './schedule-events';

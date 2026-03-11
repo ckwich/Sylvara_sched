@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ApiRequestError, getJob, updateJob } from '../../lib/api';
+import { ApiRequestError, getJob, getJobRepCodes, updateJob } from '../../lib/api';
 import NotesReview from './[jobId]/notes-review';
 
 type EditJobModalProps = {
@@ -40,6 +40,7 @@ export default function EditJobModal(props: EditJobModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [customRepInput, setCustomRepInput] = useState(false);
+  const [fetchedRepCodes, setFetchedRepCodes] = useState<string[]>([]);
 
   useEffect(() => {
     const currentJobId = props.jobId;
@@ -50,8 +51,8 @@ export default function EditJobModal(props: EditJobModalProps) {
     setLoading(true);
     setError(null);
 
-    void getJob(currentJobId)
-      .then((job) => {
+    void Promise.all([getJob(currentJobId), getJobRepCodes().catch(() => [] as string[])])
+      .then(([job, repCodes]) => {
         if (cancelled) {
           return;
         }
@@ -64,6 +65,7 @@ export default function EditJobModal(props: EditJobModalProps) {
           salesRepCode: job.salesRepCode ?? '',
           notesRaw: job.notesRaw ?? '',
         });
+        setFetchedRepCodes(repCodes);
         setCustomRepInput(false);
       })
       .catch((requestError) => {
@@ -89,9 +91,18 @@ export default function EditJobModal(props: EditJobModalProps) {
     };
   }, [props.jobId, props.open]);
 
+  const allRepCodes = useMemo(() => {
+    const merged = new Set([...fetchedRepCodes, ...props.salesRepCodes]);
+    // Ensure the job's current rep code is always selectable
+    if (form.salesRepCode.trim()) {
+      merged.add(form.salesRepCode.trim());
+    }
+    return Array.from(merged).sort((a, b) => a.localeCompare(b));
+  }, [fetchedRepCodes, props.salesRepCodes, form.salesRepCode]);
+
   const repSelectValue = useMemo(
-    () => (form.salesRepCode && props.salesRepCodes.includes(form.salesRepCode) ? form.salesRepCode : ''),
-    [form.salesRepCode, props.salesRepCodes],
+    () => (form.salesRepCode && allRepCodes.includes(form.salesRepCode) ? form.salesRepCode : ''),
+    [form.salesRepCode, allRepCodes],
   );
 
   if (!props.open || props.jobId === null) {
@@ -256,7 +267,7 @@ export default function EditJobModal(props: EditJobModalProps) {
                 }}
               >
                 <option value="">Select rep...</option>
-                {props.salesRepCodes.map((repCode) => (
+                {allRepCodes.map((repCode) => (
                   <option key={repCode} value={repCode}>
                     {repCode}
                   </option>
@@ -292,7 +303,7 @@ export default function EditJobModal(props: EditJobModalProps) {
           <button
             type="submit"
             disabled={saving || loading}
-            className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-md bg-brand-green px-3 py-2 text-sm font-medium text-white hover:bg-brand-green-dark disabled:opacity-60"
           >
             {saving ? 'Saving...' : 'Save'}
           </button>

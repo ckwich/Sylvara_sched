@@ -73,9 +73,9 @@ export default function BacklogSection({
                           >
                             {job.customerName}
                           </button>
-                          {job.legacyParseItemCount > 0 && job.notesLastParsedAt === null ? (
+                          {job.unmetRequirementCount > 0 ? (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                              Needs Review
+                              {job.unmetRequirementCount} Req
                             </span>
                           ) : null}
                         </div>

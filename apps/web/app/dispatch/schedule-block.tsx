@@ -33,7 +33,10 @@ type ScheduleBlockProps = {
 
 function colorClassForState(state: BlockVisualState): string {
   if (state === 'FULLY_SCHEDULED') {
-    return 'border-green-600 bg-green-500 text-white';
+    return 'border-brand-green-dark bg-brand-green text-white';
+  }
+  if (state === 'PARTIALLY_SCHEDULED') {
+    return 'border-amber-600 bg-amber-500 text-white';
   }
   if (state === 'COMPLETED') {
     return 'border-slate-500 bg-slate-400 text-white';
@@ -41,7 +44,8 @@ function colorClassForState(state: BlockVisualState): string {
   if (state === 'TRAVEL') {
     return 'border-amber-500 bg-amber-400 text-amber-950';
   }
-  return 'border-blue-600 bg-blue-500 text-white';
+  // TBS (default)
+  return 'border-gray-500 bg-gray-400 text-white';
 }
 
 function formatDuration(startMinuteOfDay: number, endMinuteOfDay: number): string {

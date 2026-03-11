@@ -14,7 +14,7 @@ export default function GlobalError(props: { error: Error; reset: () => void }) 
         <button
           type="button"
           onClick={props.reset}
-          className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+          className="rounded-md bg-brand-green px-3 py-2 text-sm font-medium text-white hover:bg-brand-green-dark"
         >
           Retry
         </button>

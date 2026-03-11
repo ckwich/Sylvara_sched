@@ -12,12 +12,13 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
-    "@sylvara/shared": "workspace:*",
-    "@prisma/client": "^6.4.1"
+    "@prisma/client": "^6.4.1",
+    "@sylvara/shared": "workspace:*"
   },
   "devDependencies": {
     "eslint": "^9.22.0",
     "prisma": "^6.4.1",
+    "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }
 }

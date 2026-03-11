@@ -618,6 +618,53 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
     return reply.code(200).send({ homeBase });
   });
 
+  app.delete('/api/home-bases/:id', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const params = resourceIdParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return validationError(reply, 'Invalid home base id.', params.error.flatten());
+    }
+
+    const existing = await deps.prisma.homeBase.findFirst({
+      where: {
+        id: params.data.id,
+        deletedAt: null,
+      },
+      select: { id: true, name: true },
+    });
+    if (!existing) {
+      return notFoundError(reply, 'HOME_BASE_NOT_FOUND', 'Home base not found.');
+    }
+
+    const deletedAt = new Date();
+    await deps.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.homeBase.update({
+        where: { id: existing.id },
+        data: { deletedAt },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: 'HomeBase',
+          entityId: existing.id,
+          actionType: 'DELETED',
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+          diff: { deletedAt: deletedAt.toISOString(), name: existing.name } as Prisma.InputJsonValue,
+        },
+      });
+    });
+
+    return reply.code(204).send();
+  });
+
   app.get('/api/foremen', async (_request, reply) => {
     const foremen = await deps.prisma.resource.findMany({
       where: {
@@ -1500,6 +1547,279 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AppDeps) {
       pendingNotesReview: {
         count: pendingNotes,
       },
+    });
+  });
+
+  // --- Activity Log ---
+
+  const activityLogQuerySchema = z.object({
+    page: z.coerce.number().int().min(1).optional().default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).optional().default(20),
+  });
+
+  app.get('/api/admin/activity-log', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) {
+      return;
+    }
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) {
+      return;
+    }
+
+    const query = activityLogQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return validationError(reply, 'Invalid activity log query.', query.error.flatten());
+    }
+
+    const { page, pageSize } = query.data;
+    const skip = (page - 1) * pageSize;
+
+    const [entries, total] = await Promise.all([
+      deps.prisma.activityLog.findMany({
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          entityType: true,
+          entityId: true,
+          actionType: true,
+          diff: true,
+          actorUserId: true,
+          actorDisplay: true,
+          createdAt: true,
+          actorUser: {
+            select: { name: true },
+          },
+        },
+      }),
+      deps.prisma.activityLog.count({ where: { deletedAt: null } }),
+    ]);
+
+    return reply.code(200).send({
+      entries: entries.map((entry) => ({
+        id: entry.id,
+        entityType: entry.entityType,
+        entityId: entry.entityId,
+        actionType: entry.actionType,
+        diff: entry.diff,
+        actorUserId: entry.actorUserId,
+        actorDisplay: entry.actorDisplay,
+        actorName: entry.actorUser?.name ?? entry.actorDisplay ?? null,
+        createdAt: entry.createdAt.toISOString(),
+      })),
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
+      },
+    });
+  });
+
+  // --- User Management ---
+
+  const VALID_ROLES = ['MANAGER', 'SCHEDULER', 'VIEWER'] as const;
+  type ValidRole = (typeof VALID_ROLES)[number];
+
+  app.get('/api/admin/users', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) return;
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) return;
+
+    const users = await deps.prisma.user.findMany({
+      where: { deletedAt: null },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        active: true,
+        clerkId: true,
+        createdAt: true,
+      },
+    });
+
+    return reply.code(200).send({
+      users: users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        active: u.active,
+        hasClerkId: !!u.clerkId,
+        createdAt: u.createdAt.toISOString(),
+      })),
+    });
+  });
+
+  const updateRoleBodySchema = z.object({
+    role: z.enum(VALID_ROLES),
+  });
+
+  app.patch('/api/admin/users/:id/role', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) return;
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) return;
+
+    const params = uuidSchema.safeParse((request.params as { id?: string }).id);
+    if (!params.success) {
+      return validationError(reply, 'Invalid user ID.', params.error.flatten());
+    }
+    const targetUserId = params.data;
+
+    // Self-protection: cannot change own role
+    if (targetUserId === actor.actorUserId) {
+      return reply.code(400).send({
+        error: { code: 'SELF_MODIFICATION', message: 'You cannot change your own role.' },
+      });
+    }
+
+    const body = updateRoleBodySchema.safeParse(request.body);
+    if (!body.success) {
+      return validationError(reply, 'Invalid role.', body.error.flatten());
+    }
+    const newRole = body.data.role;
+
+    const targetUser = await deps.prisma.user.findFirst({
+      where: { id: targetUserId, deletedAt: null },
+      select: { id: true, role: true, clerkId: true },
+    });
+    if (!targetUser) {
+      return notFoundError(reply, 'USER_NOT_FOUND', 'User not found.');
+    }
+
+    const oldRole = targetUser.role as string;
+    if (oldRole === newRole) {
+      return reply.code(200).send({ message: 'No change.', role: newRole });
+    }
+
+    // Update DB first
+    await deps.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: targetUserId },
+        data: { role: newRole },
+      });
+      await tx.activityLog.create({
+        data: {
+          entityType: 'User',
+          entityId: targetUserId,
+          actionType: 'UPDATED',
+          diff: { field: 'role', from: oldRole, to: newRole },
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+        },
+      });
+    });
+
+    // Sync Clerk publicMetadata — rollback DB on failure
+    if (targetUser.clerkId) {
+      try {
+        const { getClerkClient } = await import('../lib/clerk-client.js');
+        const clerk = getClerkClient();
+        await clerk.users.updateUserMetadata(targetUser.clerkId, {
+          publicMetadata: { userId: targetUser.id, role: newRole },
+        });
+      } catch (clerkErr) {
+        // Rollback the DB change
+        await deps.prisma.$transaction(async (tx) => {
+          await tx.user.update({
+            where: { id: targetUserId },
+            data: { role: oldRole as ValidRole },
+          });
+          await tx.activityLog.create({
+            data: {
+              entityType: 'User',
+              entityId: targetUserId,
+              actionType: 'UPDATED',
+              diff: {
+                field: 'role',
+                from: newRole,
+                to: oldRole,
+                reason: 'Clerk sync failed — rolled back',
+              },
+              actorUserId: actor.actorUserId,
+              actorDisplay: actor.actorDisplay,
+            },
+          });
+        });
+
+        const msg =
+          clerkErr instanceof Error ? clerkErr.message : String(clerkErr);
+        return reply.code(502).send({
+          error: {
+            code: 'CLERK_SYNC_FAILED',
+            message: `Role update rolled back: Clerk sync failed (${msg}).`,
+          },
+        });
+      }
+    }
+
+    return reply.code(200).send({ message: 'Role updated.', role: newRole });
+  });
+
+  const updateActiveBodySchema = z.object({
+    active: z.boolean(),
+  });
+
+  app.patch('/api/admin/users/:id/active', async (request, reply) => {
+    const actor = await requireActor({ request, reply, prisma: deps.prisma });
+    if (!actor) return;
+    if (!requireManagerPermission({ role: actor.actorRole, reply })) return;
+
+    const params = uuidSchema.safeParse((request.params as { id?: string }).id);
+    if (!params.success) {
+      return validationError(reply, 'Invalid user ID.', params.error.flatten());
+    }
+    const targetUserId = params.data;
+
+    // Self-protection: cannot deactivate self
+    if (targetUserId === actor.actorUserId) {
+      return reply.code(400).send({
+        error: { code: 'SELF_MODIFICATION', message: 'You cannot change your own active status.' },
+      });
+    }
+
+    const body = updateActiveBodySchema.safeParse(request.body);
+    if (!body.success) {
+      return validationError(reply, 'Invalid active value.', body.error.flatten());
+    }
+    const newActive = body.data.active;
+
+    const targetUser = await deps.prisma.user.findFirst({
+      where: { id: targetUserId, deletedAt: null },
+      select: { id: true, active: true },
+    });
+    if (!targetUser) {
+      return notFoundError(reply, 'USER_NOT_FOUND', 'User not found.');
+    }
+
+    if (targetUser.active === newActive) {
+      return reply.code(200).send({ message: 'No change.', active: newActive });
+    }
+
+    await deps.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: targetUserId },
+        data: { active: newActive },
+      });
+      await tx.activityLog.create({
+        data: {
+          entityType: 'User',
+          entityId: targetUserId,
+          actionType: 'UPDATED',
+          diff: { field: 'active', from: targetUser.active, to: newActive },
+          actorUserId: actor.actorUserId,
+          actorDisplay: actor.actorDisplay,
+        },
+      });
+    });
+
+    return reply.code(200).send({
+      message: newActive ? 'User activated.' : 'User deactivated.',
+      active: newActive,
     });
   });
 }

@@ -2,27 +2,12 @@
 
 import type { MouseEvent, RefObject } from 'react';
 import { useRef } from 'react';
-import CrewAddPanel from './crew-add-panel';
 import { DAY_START_MINUTE, PX_PER_MINUTE } from './dispatch-utils';
 import ScheduleBlock, { type ScheduleBlockData } from './schedule-block';
 
-type CrewMember = {
-  id: string;
-  name: string;
-  role: string;
-};
-
 type ForemanColumnProps = {
   foremanId: string;
-  foremanName: string;
-  crew: CrewMember[];
   blocks: ScheduleBlockData[];
-  peopleOptions: Array<{ id: string; name: string }>;
-  homeBaseOptions: Array<{ id: string; name: string }>;
-  requireHomeBaseChoice: boolean;
-  addingCrew: boolean;
-  crewError: string | null;
-  onAddCrew: (input: { personResourceId: string; role: 'CLIMBER' | 'GROUND' | 'OPERATOR' | 'OTHER'; homeBaseId?: string }) => Promise<void>;
   onSelectMinute: (input: { foremanId: string; minute: number }) => void;
   onRemoveSegment: (segmentId: string) => Promise<void>;
   onJobSaved: () => Promise<void>;
@@ -66,39 +51,7 @@ export default function ForemanColumn(props: ForemanColumnProps) {
   }
 
   return (
-    <section className="flex-none w-48 border-l border-slate-200 first:border-l-0">
-      <header
-        className="sticky top-0 z-10 border-b border-slate-200 bg-white p-3"
-        style={{ position: 'sticky', top: 0, zIndex: 10, background: 'white' }}
-      >
-        <p className="text-sm font-semibold text-slate-900">{props.foremanName}</p>
-        {props.crew.length > 0 ? (
-          <ul className="mt-1 space-y-0.5">
-            {props.crew.map((member) => (
-              <li key={member.id} className="text-xs text-slate-500">
-                {member.name} - {member.role}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-1 text-xs text-slate-500">No crew assigned</p>
-        )}
-        <details className="mt-2">
-          <summary className="cursor-pointer rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700">
-            + Add Crew
-          </summary>
-          <CrewAddPanel
-            people={props.peopleOptions}
-            busy={props.addingCrew}
-            error={props.crewError}
-            onSubmit={props.onAddCrew}
-            onCancel={() => undefined}
-            homeBaseOptions={props.homeBaseOptions}
-            requireHomeBaseChoice={props.requireHomeBaseChoice}
-          />
-        </details>
-      </header>
-
+    <section className="flex-1 min-w-[160px] border-l border-slate-200 first:border-l-0">
       <div ref={columnRef} className="relative cursor-pointer" onClick={handleGridClick}>
         <div className="relative" style={{ height: `${TOTAL_HEIGHT_PX}px` }}>
           {Array.from({ length: TOTAL_SLOTS }).map((_, slot) => (

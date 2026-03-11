@@ -77,7 +77,7 @@ export function ResourcesPanel(props: ResourcesPanelProps) {
           type="button"
           disabled={props.resourceSubmitting}
           onClick={props.onSubmitResource}
-          className="mt-4 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+          className="mt-4 rounded-md bg-brand-green px-4 py-2 text-sm font-medium text-white hover:bg-brand-green-dark disabled:opacity-60"
         >
           {props.resourceSubmitting ? 'Saving...' : 'Add Resource'}
         </button>
@@ -204,7 +204,7 @@ export function HomeBasesPanel(props: HomeBasesPanelProps) {
           type="button"
           disabled={props.homeBaseSubmitting}
           onClick={props.onSubmitHomeBase}
-          className="mt-4 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+          className="mt-4 rounded-md bg-brand-green px-4 py-2 text-sm font-medium text-white hover:bg-brand-green-dark disabled:opacity-60"
         >
           {props.homeBaseSubmitting ? 'Saving...' : 'Add Home Base'}
         </button>

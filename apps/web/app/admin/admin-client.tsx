@@ -239,7 +239,7 @@ export default function AdminClient() {
             type="button"
             onClick={() => setActiveTab(tab.key)}
             className={`rounded-md px-3 py-1.5 text-sm ${
-              activeTab === tab.key ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+              activeTab === tab.key ? 'bg-brand-green text-white' : 'bg-slate-100 text-slate-700'
             }`}
           >
             {tab.label}
