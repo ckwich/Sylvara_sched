@@ -1,9 +1,2 @@
-[services.web]
-buildCommand = "corepack pnpm --filter @sylvara/web build"
-startCommand = "corepack pnpm --filter @sylvara/web start"
-healthcheckPath = "/"
-
-[services.api]
-buildCommand = "corepack pnpm --filter @sylvara/api build"
-startCommand = "corepack pnpm --filter @sylvara/api start"
-healthcheckPath = "/health"
+[build]
+buildCommand = "pnpm --filter @sylvara/db exec prisma generate && pnpm --filter @sylvara/api run build"
