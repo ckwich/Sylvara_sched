@@ -1,0 +1,21 @@
+FROM node:22-alpine AS builder
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/
+COPY apps/api/package.json apps/api/
+COPY packages/db/package.json packages/db/
+COPY packages/shared/package.json packages/shared/
+COPY tests/e2e/package.json tests/e2e/
+RUN corepack pnpm install --frozen-lockfile
+COPY . .
+RUN corepack pnpm --filter @sylvara/db exec prisma generate
+RUN corepack pnpm --filter @sylvara/api run build
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+RUN corepack enable
+COPY --from=builder /app .
+EXPOSE 4000
+ENV PORT=4000 NODE_ENV=production
+CMD ["node", "apps/api/dist/server.js"]

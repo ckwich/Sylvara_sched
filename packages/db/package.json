@@ -9,7 +9,8 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:reset": "prisma migrate reset --force --skip-seed --skip-generate",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "promote-manager": "tsx scripts/promote-manager.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
