@@ -53,8 +53,8 @@ export default function CompanyClient() {
     setSaving(true);
     setError(null);
     setFieldError(null);
-      setSaveBanner(null);
-      setSaved(null);
+    setSaveBanner(null);
+    setSaved(null);
     try {
       if (!companyTimezone.trim()) {
         setFieldError('Timezone is required.');
@@ -83,58 +83,78 @@ export default function CompanyClient() {
   }
 
   return (
-    <main style={{ padding: 16, fontFamily: 'sans-serif', maxWidth: 640 }}>
-      <h1>Company Profile</h1>
-      {loading ? <p>Loading...</p> : null}
-      {error ? <p style={{ color: 'crimson' }}>{error}</p> : null}
+    <main className="mx-auto max-w-2xl px-4 py-8">
+      <h1 className="text-3xl font-semibold text-slate-900">Company Profile</h1>
+
+      {loading ? (
+        <div className="mt-6 space-y-3">
+          <div className="h-10 animate-pulse rounded-lg bg-slate-200" />
+          <div className="h-32 animate-pulse rounded-lg bg-slate-100" />
+        </div>
+      ) : null}
+
+      {error && !loading ? (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+
       {saveBanner ? (
-        <div
-          style={{
-            marginTop: 12,
-            marginBottom: 8,
-            padding: 10,
-            border: '1px solid #b42318',
-            background: '#fef3f2',
-            color: '#b42318',
-          }}
-        >
+        <div className="mt-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
           {saveBanner}
         </div>
       ) : null}
-      {saved ? <p style={{ color: 'green' }}>{saved}</p> : null}
-      <form onSubmit={onSave} style={{ display: 'grid', gap: 8, maxWidth: 420 }}>
-        <label>
-          Common Timezones
-          <select
-            value={COMMON_TIMEZONES.includes(companyTimezone) ? companyTimezone : ''}
-            onChange={(event) => {
-              if (event.target.value) {
-                setCompanyTimezone(event.target.value);
-              }
-            }}
+
+      {saved ? (
+        <p className="mt-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{saved}</p>
+      ) : null}
+
+      {!loading ? (
+        <form onSubmit={onSave} className="mt-6 max-w-md space-y-4">
+          <label className="flex flex-col gap-1 text-sm text-slate-700">
+            Common Timezones
+            <select
+              className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+              value={COMMON_TIMEZONES.includes(companyTimezone) ? companyTimezone : ''}
+              onChange={(event) => {
+                if (event.target.value) {
+                  setCompanyTimezone(event.target.value);
+                }
+              }}
+            >
+              <option value="">Custom...</option>
+              {COMMON_TIMEZONES.map((zone) => (
+                <option key={zone} value={zone}>
+                  {zone}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm text-slate-700">
+            Company Timezone (IANA)
+            <input
+              type="text"
+              className={`rounded-md border px-2 py-1.5 text-sm ${
+                fieldError ? 'border-red-400' : 'border-slate-300'
+              }`}
+              value={companyTimezone}
+              onChange={(event) => setCompanyTimezone(event.target.value)}
+              placeholder="America/New_York"
+            />
+          </label>
+
+          {fieldError ? (
+            <p className="text-xs text-amber-700" role="alert">{fieldError}</p>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={saving || loading}
+            className="rounded-md bg-brand-green px-4 py-2 text-sm font-medium text-white hover:bg-brand-green-dark disabled:opacity-60"
           >
-            <option value="">Custom...</option>
-            {COMMON_TIMEZONES.map((zone) => (
-              <option key={zone} value={zone}>
-                {zone}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Company Timezone (IANA)
-          <input
-            type="text"
-            value={companyTimezone}
-            onChange={(event) => setCompanyTimezone(event.target.value)}
-            placeholder="America/New_York"
-          />
-        </label>
-        {fieldError ? <p style={{ color: '#8a4b00' }}>{fieldError}</p> : null}
-        <button type="submit" disabled={saving || loading}>
-          {saving ? 'Saving...' : 'Save'}
-        </button>
-      </form>
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </form>
+      ) : null}
     </main>
   );
 }

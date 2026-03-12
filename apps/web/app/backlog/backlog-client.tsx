@@ -437,6 +437,7 @@ export default function BacklogClient() {
                 <button
                   key={option}
                   type="button"
+                  aria-pressed={equipmentFilter === option}
                   onClick={() => {
                     setEquipmentFilter(option);
                     setPage(1);
@@ -460,6 +461,7 @@ export default function BacklogClient() {
                   <button
                     key={state}
                     type="button"
+                    aria-pressed={selectedStates.has(state)}
                     onClick={() =>
                       setSelectedStates((previous) => {
                         const next = new Set(previous);
@@ -557,7 +559,7 @@ export default function BacklogClient() {
         </div>
       </section>
 
-      <div className="mt-4 grid grid-cols-3 gap-3">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">TBS</p>
           <p className="mt-1 text-lg font-semibold text-slate-700">
