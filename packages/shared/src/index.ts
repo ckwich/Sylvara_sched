@@ -4,7 +4,7 @@ export function placeholder() {
 
 export {
   DEFAULT_TIMEZONE,
-} from './constants';
+} from './constants.js';
 
 export {
   MINUTES_PER_DAY,
@@ -21,17 +21,17 @@ export {
   utcToLocalDateStr,
   utcToLocalParts,
   wallClockHoursBetween,
-} from './time-of-day';
+} from './time-of-day.js';
 
 export type {
   DetectedRequirement,
   DetectedScheduleEvent,
   ParsedNotes,
   ParsedNotesConfidence,
-} from './notes-parser';
-export { parseNotes } from './notes-parser';
+} from './notes-parser.js';
+export { parseNotes } from './notes-parser.js';
 
-export type { UserRole } from './roles';
-export { ROLE_PERMISSIONS } from './roles';
+export type { UserRole } from './roles.js';
+export { ROLE_PERMISSIONS } from './roles.js';
 
-export { SCHEDULE_EVENT_LABELS, scheduleEventLabel } from './schedule-events';
+export { SCHEDULE_EVENT_LABELS, scheduleEventLabel } from './schedule-events.js';
