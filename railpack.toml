@@ -1,0 +1,2 @@
+[build]
+buildCommand = "pnpm --filter @sylvara/db exec prisma generate && pnpm --filter @sylvara/api run build"
