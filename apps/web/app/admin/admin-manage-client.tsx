@@ -21,6 +21,7 @@ import {
   type ResourceRecord,
 } from '../../lib/api';
 import { getErrorMessage } from '../../lib/error-utils';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 
 type AdminTab = 'foremen' | 'home-bases' | 'users' | 'activity-log';
 
@@ -88,6 +89,7 @@ function ForemenTab() {
   const [form, setForm] = useState({ name: '', active: true });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ name: '', active: true });
+  const [pendingDeleteForeman, setPendingDeleteForeman] = useState<ResourceRecord | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -166,11 +168,7 @@ function ForemenTab() {
     }
   }
 
-  async function handleDelete(foreman: ResourceRecord) {
-    const confirmed = window.confirm(
-      'This will remove the foreman from all future scheduling. Continue?',
-    );
-    if (!confirmed) return;
+  async function executeDeleteForeman(foreman: ResourceRecord) {
     setError(null);
     setMessage(null);
     try {
@@ -315,7 +313,7 @@ function ForemenTab() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => void handleDelete(foreman)}
+                            onClick={() => setPendingDeleteForeman(foreman)}
                             className="text-sm font-medium text-red-600 hover:underline"
                           >
                             Remove
@@ -330,6 +328,20 @@ function ForemenTab() {
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={pendingDeleteForeman !== null}
+        title="Remove foreman"
+        message="This will remove the foreman from all future scheduling. Continue?"
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingDeleteForeman) {
+            void executeDeleteForeman(pendingDeleteForeman);
+          }
+          setPendingDeleteForeman(null);
+        }}
+        onCancel={() => setPendingDeleteForeman(null)}
+      />
     </section>
   );
 }
@@ -363,6 +375,7 @@ function HomeBasesTab() {
     closingTime: '',
     active: true,
   });
+  const [pendingDeleteHb, setPendingDeleteHb] = useState<HomeBaseRecord | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -485,11 +498,7 @@ function HomeBasesTab() {
     }
   }
 
-  async function handleDelete(hb: HomeBaseRecord) {
-    const confirmed = window.confirm(
-      'This home base will no longer be available for roster assignment. Continue?',
-    );
-    if (!confirmed) return;
+  async function executeDeleteHb(hb: HomeBaseRecord) {
     setError(null);
     setMessage(null);
     try {
@@ -721,7 +730,7 @@ function HomeBasesTab() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => void handleDelete(hb)}
+                            onClick={() => setPendingDeleteHb(hb)}
                             className="text-sm font-medium text-red-600 hover:underline"
                           >
                             Remove
@@ -736,6 +745,20 @@ function HomeBasesTab() {
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={pendingDeleteHb !== null}
+        title="Remove home base"
+        message="This home base will no longer be available for roster assignment. Continue?"
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingDeleteHb) {
+            void executeDeleteHb(pendingDeleteHb);
+          }
+          setPendingDeleteHb(null);
+        }}
+        onCancel={() => setPendingDeleteHb(null)}
+      />
     </section>
   );
 }
@@ -750,6 +773,8 @@ function UsersTab({ currentUserId }: { currentUserId: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [pendingRoleChange, setPendingRoleChange] = useState<{ user: AdminUser; newRole: string } | null>(null);
+  const [pendingActiveToggle, setPendingActiveToggle] = useState<AdminUser | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -773,14 +798,16 @@ function UsersTab({ currentUserId }: { currentUserId: string | null }) {
     [users],
   );
 
-  async function handleRoleChange(user: AdminUser, newRole: string) {
+  function handleRoleChange(user: AdminUser, newRole: string) {
     if (user.id === currentUserId) return;
     if (user.role === newRole) return;
-    const confirmed = window.confirm(
-      `Change ${user.name}'s role from ${user.role} to ${newRole}?`,
-    );
-    if (!confirmed) return;
+    setPendingRoleChange({ user, newRole });
+  }
 
+  async function executeRoleChange() {
+    if (!pendingRoleChange) return;
+    const { user, newRole } = pendingRoleChange;
+    setPendingRoleChange(null);
     setError(null);
     setMessage(null);
     setPendingAction(user.id);
@@ -797,12 +824,15 @@ function UsersTab({ currentUserId }: { currentUserId: string | null }) {
     }
   }
 
-  async function handleActiveToggle(user: AdminUser) {
+  function handleActiveToggle(user: AdminUser) {
     if (user.id === currentUserId) return;
-    const action = user.active ? 'deactivate' : 'activate';
-    const confirmed = window.confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} ${user.name}?`);
-    if (!confirmed) return;
+    setPendingActiveToggle(user);
+  }
 
+  async function executeActiveToggle() {
+    if (!pendingActiveToggle) return;
+    const user = pendingActiveToggle;
+    setPendingActiveToggle(null);
     setError(null);
     setMessage(null);
     setPendingAction(user.id);
@@ -922,6 +952,31 @@ function UsersTab({ currentUserId }: { currentUserId: string | null }) {
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={pendingRoleChange !== null}
+        title="Change role"
+        message={
+          pendingRoleChange
+            ? `Change ${pendingRoleChange.user.name}'s role from ${pendingRoleChange.user.role} to ${pendingRoleChange.newRole}?`
+            : ''
+        }
+        confirmLabel="Change role"
+        onConfirm={() => void executeRoleChange()}
+        onCancel={() => setPendingRoleChange(null)}
+      />
+      <ConfirmDialog
+        open={pendingActiveToggle !== null}
+        title={pendingActiveToggle?.active ? 'Deactivate user' : 'Activate user'}
+        message={
+          pendingActiveToggle
+            ? `${pendingActiveToggle.active ? 'Deactivate' : 'Activate'} ${pendingActiveToggle.name}?`
+            : ''
+        }
+        confirmLabel={pendingActiveToggle?.active ? 'Deactivate' : 'Activate'}
+        variant={pendingActiveToggle?.active ? 'danger' : 'default'}
+        onConfirm={() => void executeActiveToggle()}
+        onCancel={() => setPendingActiveToggle(null)}
+      />
     </section>
   );
 }
@@ -1042,8 +1097,12 @@ function ActivityLogTab() {
                         className={`inline-block transition-transform ${
                           expandedId === entry.id ? 'rotate-90' : ''
                         }`}
+                        aria-hidden="true"
                       >
                         &#9654;
+                      </span>
+                      <span className="sr-only">
+                        {expandedId === entry.id ? 'Collapse' : 'Expand'} details
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-slate-700">
@@ -1144,6 +1203,7 @@ export default function AdminManageClient({
           <button
             key={tab.key}
             type="button"
+            aria-pressed={activeTab === tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
               activeTab === tab.key

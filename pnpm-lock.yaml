@@ -142,6 +142,9 @@ importers:
       '@sylvara/shared':
         specifier: workspace:*
         version: link:../shared
+      dotenv:
+        specifier: ^17.3.1
+        version: 17.3.1
     devDependencies:
       eslint:
         specifier: ^9.22.0

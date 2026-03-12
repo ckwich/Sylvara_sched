@@ -25,7 +25,7 @@ export default function NavBar() {
       : NAV_ITEMS;
 
   return (
-    <nav className="border-b border-brand-green/20 bg-brand-charcoal" style={{ minHeight: '64px' }}>
+    <nav className="min-h-[64px] border-b border-brand-green/20 bg-brand-charcoal">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2">
         <Link href="/dispatch" className="flex items-center gap-3">
           <Image
@@ -33,8 +33,7 @@ export default function NavBar() {
             alt="Iron Tree Service"
             width={160}
             height={48}
-            className="rounded"
-            style={{ width: '160px', height: 'auto' }}
+            className="h-auto w-[160px] rounded"
           />
         </Link>
         <div className="flex items-center gap-1">
@@ -44,6 +43,7 @@ export default function NavBar() {
               <Link
                 key={item.href}
                 href={item.href}
+                aria-current={active ? 'page' : undefined}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                   active
                     ? 'bg-brand-green text-white'
@@ -57,6 +57,7 @@ export default function NavBar() {
           <SignOutButton redirectUrl="/sign-in">
             <button
               type="button"
+              aria-label="Sign out of your account"
               className="ml-3 rounded-md border border-slate-500 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-brand-charcoal-light hover:text-white"
             >
               Sign out

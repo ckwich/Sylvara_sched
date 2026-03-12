@@ -25,6 +25,7 @@ import {
 } from './dispatch-utils';
 import JobSelectorPanel from './job-selector-panel';
 import type { ScheduleBlockData } from './schedule-block';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 import PrintDialog from './print-dialog';
 import PushupModal from './pushup-modal';
 import { useDispatchData } from './use-dispatch-data';
@@ -71,6 +72,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
   const [activePushupSlotId, setActivePushupSlotId] = useState<string | null>(null);
   const [addCrewForemanId, setAddCrewForemanId] = useState<string | null>(null);
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<{ foremanId: string; segmentId: string } | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const pushupOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -157,13 +159,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         return (
           <div key={`axis-${minute}`} className={`relative h-[45px] border-t ${lineClass}`}>
             <span
-              className="absolute right-2 flex items-center text-right"
-              style={{
-                top: 0,
-                bottom: 0,
-                fontSize: '0.75rem',
-                color: '#6b7280',
-              }}
+              className="absolute inset-y-0 right-2 flex items-center text-right text-xs text-gray-500"
             >
               {minuteToLabel(minute)}
             </span>
@@ -395,10 +391,14 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
     }
   }
 
-  async function handleRemoveSegment(foremanId: string, segmentId: string) {
-    if (!window.confirm('Remove this segment?')) {
-      return;
-    }
+  function handleRemoveSegment(foremanId: string, segmentId: string) {
+    setPendingRemove({ foremanId, segmentId });
+  }
+
+  async function confirmRemoveSegment() {
+    if (!pendingRemove) return;
+    const { foremanId, segmentId } = pendingRemove;
+    setPendingRemove(null);
     const response = await removeScheduleSegment(segmentId);
     await Promise.all([reloadForemanDay(foremanId, selectedDate), reloadJobs()]);
     await reloadOpenPushupSlots();
@@ -439,6 +439,8 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
             <button
               type="button"
               onClick={() => setConflictsOpen((open) => !open)}
+              aria-pressed={conflictsOpen}
+              aria-label={`Toggle conflict panel. ${conflictCounts.errors + conflictCounts.warnings} conflicts`}
               className={`mt-2 rounded-md px-2 py-1 text-xs font-medium ${
                 conflictCounts.errors > 0
                   ? 'bg-red-100 text-red-700'
@@ -597,10 +599,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         >
           {/* Shared sticky header row — consistent fixed height for all columns */}
           <div className="sticky top-0 z-20 flex border-b border-slate-200 bg-white">
-            <div
-              className="flex-none border-r border-slate-200"
-              style={{ width: '4rem' }}
-            />
+            <div className="w-16 flex-none border-r border-slate-200" />
             <div className="flex flex-1">
               {columns.map(({ foreman, dayData }) => {
                 const crewText =
@@ -614,8 +613,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
                 return (
                   <div
                     key={`header-${foreman.id}`}
-                    className="relative flex-1 min-w-[160px] border-l border-slate-200 first:border-l-0 p-2"
-                    style={{ height: '76px' }}
+                    className="relative flex-1 min-w-[160px] border-l border-slate-200 first:border-l-0 p-2 h-[76px]"
                   >
                     <p
                       className="text-sm font-semibold text-slate-900 truncate"
@@ -662,8 +660,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
           {/* Time axis + foreman grids */}
           <div className="flex">
             <aside
-              className="flex-none border-r border-slate-200 bg-white"
-              style={{ flexShrink: 0, width: '4rem' }}
+              className="w-16 shrink-0 border-r border-slate-200 bg-white"
             >
               {axisRows}
             </aside>
@@ -719,6 +716,15 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
         homeBases={homeBases}
         dataByForeman={dataByForeman}
         onClose={() => setPrintDialogOpen(false)}
+      />
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        title="Remove segment"
+        message="Remove this segment from the schedule?"
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => void confirmRemoveSegment()}
+        onCancel={() => setPendingRemove(null)}
       />
     </main>
   );

@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
-    "@sylvara/shared": "workspace:*"
+    "@sylvara/shared": "workspace:*",
+    "dotenv": "^17.3.1"
   },
   "devDependencies": {
     "eslint": "^9.22.0",

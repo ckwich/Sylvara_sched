@@ -9,7 +9,7 @@ type ForemanColumnProps = {
   foremanId: string;
   blocks: ScheduleBlockData[];
   onSelectMinute: (input: { foremanId: string; minute: number }) => void;
-  onRemoveSegment: (segmentId: string) => Promise<void>;
+  onRemoveSegment: (segmentId: string) => void | Promise<void>;
   onJobSaved: () => Promise<void>;
   salesRepCodes: string[];
   scrollContainerRef: RefObject<HTMLDivElement | null>;

@@ -26,7 +26,7 @@ export type ScheduleBlockData = {
 
 type ScheduleBlockProps = {
   block: ScheduleBlockData;
-  onRemove: (blockId: string) => Promise<void>;
+  onRemove: (blockId: string) => void | Promise<void>;
   onJobSaved: () => Promise<void>;
   salesRepCodes: string[];
 };
@@ -110,12 +110,12 @@ export default function ScheduleBlock(props: ScheduleBlockProps) {
       >
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-xs font-semibold">{props.block.title}</p>
-          <span className="text-[10px] font-medium">
+          <span className="text-xs font-medium">
             {props.block.startLabel}-{props.block.endLabel}
           </span>
         </div>
-        {isTall ? <p className="mt-0.5 truncate text-[11px] opacity-90">{props.block.subtitle}</p> : null}
-        {props.block.travelLabel ? <p className="mt-0.5 text-[10px] font-medium">{props.block.travelLabel}</p> : null}
+        {isTall ? <p className="mt-0.5 truncate text-xs opacity-90">{props.block.subtitle}</p> : null}
+        {props.block.travelLabel ? <p className="mt-0.5 text-xs font-medium">{props.block.travelLabel}</p> : null}
       </button>
 
       {open ? (
