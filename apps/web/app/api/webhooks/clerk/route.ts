@@ -43,10 +43,20 @@ export async function POST(request: Request) {
 
     const user = await upsertUserOnSignIn(email, name, clerkUserId);
 
-    const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-    await clerk.users.updateUserMetadata(clerkUserId, {
-      publicMetadata: { userId: user.id, role: user.role },
-    });
+    const secretKey = process.env.CLERK_SECRET_KEY;
+    if (!secretKey) {
+      console.error('[webhook-clerk] CLERK_SECRET_KEY not set — cannot update publicMetadata');
+      return new Response('Server misconfigured', { status: 500 });
+    }
+    try {
+      const clerk = createClerkClient({ secretKey });
+      await clerk.users.updateUserMetadata(clerkUserId, {
+        publicMetadata: { userId: user.id, role: user.role },
+      });
+    } catch (err) {
+      console.error('[webhook-clerk] Failed to set Clerk publicMetadata:', err instanceof Error ? err.message : err);
+      return new Response('Failed to update user metadata', { status: 500 });
+    }
   }
 
   return new Response('OK', { status: 200 });
