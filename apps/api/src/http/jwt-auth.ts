@@ -54,8 +54,10 @@ function createClerkVerifier(resolveByClerkId?: ClerkIdResolver): TokenVerifier 
         return resolved;
       }
 
+      console.error('[clerk-verify] Token verified but no valid actor resolved — publicMetadata missing or invalid, and clerkId fallback unavailable');
       return null;
-    } catch {
+    } catch (err) {
+      console.error('[clerk-verify] Token verification failed:', err instanceof Error ? err.message : err);
       return null;
     }
   };
@@ -82,12 +84,14 @@ export function createAuthPreHandler(
 
     const token = getBearerToken(request);
     if (!token) {
+      console.error('[auth-prehandler] No Bearer token on request:', path);
       reply.code(401).send(UNAUTHORIZED_RESPONSE);
       return;
     }
 
     const actor = await verify(token);
     if (!actor) {
+      console.error('[auth-prehandler] Token present but actor resolution failed:', path);
       reply.code(401).send(UNAUTHORIZED_RESPONSE);
       return;
     }
