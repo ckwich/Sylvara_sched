@@ -13,11 +13,14 @@ const NAV_ITEMS = [
 
 export default function NavBar() {
   const pathname = usePathname();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, isLoaded } = useAuth();
   const { user } = useUser();
   const role = (user?.publicMetadata as { role?: string } | undefined)?.role ?? null;
 
-  if (!isSignedIn) return null;
+  // Always render the nav shell — Clerk middleware protects all routes, so the
+  // nav never needs to hide itself based on auth state. Auth-dependent content
+  // (admin links, sign-out button, etc.) renders only after Clerk has loaded.
+  const showAuthContent = isLoaded && isSignedIn;
 
   const navItems =
     role === 'MANAGER'
@@ -54,15 +57,17 @@ export default function NavBar() {
               </Link>
             );
           })}
-          <SignOutButton redirectUrl="/sign-in">
-            <button
-              type="button"
-              aria-label="Sign out of your account"
-              className="ml-3 rounded-md border border-slate-500 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-brand-charcoal-light hover:text-white"
-            >
-              Sign out
-            </button>
-          </SignOutButton>
+          {showAuthContent && (
+            <SignOutButton redirectUrl="/sign-in">
+              <button
+                type="button"
+                aria-label="Sign out of your account"
+                className="ml-3 rounded-md border border-slate-500 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-brand-charcoal-light hover:text-white"
+              >
+                Sign out
+              </button>
+            </SignOutButton>
+          )}
         </div>
       </div>
     </nav>
