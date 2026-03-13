@@ -25,8 +25,8 @@ export default function NavBar() {
       : NAV_ITEMS;
 
   return (
-    <nav className="min-h-[64px] border-b border-brand-green/20 bg-brand-charcoal">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2">
+    <nav className="min-h-[64px] border-b border-brand-green/20 bg-brand-charcoal shadow-md">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-2.5">
         <Link href="/dispatch" className="flex items-center gap-3">
           <Image
             src="/logo.png"
@@ -44,13 +44,16 @@ export default function NavBar() {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                className={`relative rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-150 ${
                   active
-                    ? 'bg-brand-green text-white'
-                    : 'text-slate-300 hover:bg-brand-charcoal-light hover:text-white'
+                    ? 'bg-brand-green/15 text-white'
+                    : 'text-slate-400 hover:bg-brand-charcoal-light hover:text-white'
                 }`}
               >
                 {item.label}
+                {active ? (
+                  <span className="absolute inset-x-1 -bottom-2.5 h-0.5 rounded-full bg-brand-green" />
+                ) : null}
               </Link>
             );
           })}
@@ -58,7 +61,7 @@ export default function NavBar() {
             <button
               type="button"
               aria-label="Sign out of your account"
-              className="ml-3 rounded-md border border-slate-500 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-brand-charcoal-light hover:text-white"
+              className="ml-4 rounded-md border border-slate-600 px-3 py-1.5 text-sm font-medium text-slate-400 transition-all duration-150 hover:border-slate-400 hover:text-white"
             >
               Sign out
             </button>

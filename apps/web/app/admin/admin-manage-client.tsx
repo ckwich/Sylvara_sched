@@ -1190,9 +1190,9 @@ export default function AdminManageClient({
   const [activeTab, setActiveTab] = useState<AdminTab>('foremen');
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8">
+    <main className="mx-auto max-w-7xl px-6 py-10">
       <header>
-        <h1 className="text-3xl font-semibold text-slate-900">Admin</h1>
+        <h1 className="text-3xl font-bold text-slate-900">Admin</h1>
         <p className="mt-1 text-sm text-slate-500">
           Manage foremen, home bases, users, and view activity history.
         </p>

@@ -36,34 +36,34 @@ export default function BacklogSection({
   }
 
   return (
-    <section className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section className="mt-6 rounded-xl border border-slate-200/80 bg-white shadow-sm">
       <button
         type="button"
-        className="flex w-full items-center justify-between rounded-t-xl px-4 py-3 text-left"
+        className="flex w-full items-center justify-between rounded-t-xl px-5 py-4 text-left transition-colors duration-150 hover:bg-slate-50/50"
         onClick={() => onToggle(section.equipmentType)}
       >
-        <h2 className="text-xl font-semibold text-slate-900">{EQUIPMENT_LABELS[section.equipmentType]}</h2>
-        <span className="text-sm text-slate-500">{isOpen ? 'Collapse' : 'Expand'}</span>
+        <h2 className="text-lg font-bold tracking-tight text-slate-900">{EQUIPMENT_LABELS[section.equipmentType]}</h2>
+        <span className="text-xs font-medium text-slate-400">{isOpen ? 'Collapse' : 'Expand'}</span>
       </button>
 
       {isOpen ? (
         <div className="overflow-x-auto border-t border-slate-200 px-2 pb-3">
           {section.groups.map((group) => (
-            <div key={group.repCode} className="mt-3 overflow-hidden rounded-lg border border-slate-200">
-              <div className="bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">Rep: {group.repCode}</div>
+            <div key={group.repCode} className="mt-3 overflow-hidden rounded-lg border border-slate-200/80">
+              <div className="bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">Rep: {group.repCode}</div>
               <table className="min-w-full text-sm">
-                <thead className="bg-white text-left text-slate-500">
+                <thead className="border-b border-slate-200 bg-slate-50/60 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     {['Customer', 'Town', 'State', 'Est. Hours', 'Sched. Hours', 'Remaining', 'Amount', 'Blockers', 'Requirements', 'Push-up'].map((label) => (
-                      <th key={label} className="px-3 py-2 font-medium">
+                      <th key={label} className="px-3 py-2.5 font-semibold">
                         {label}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {group.jobs.map((job) => (
-                    <tr key={job.id} className="bg-white">
+                  {group.jobs.map((job, jobIndex) => (
+                    <tr key={job.id} className={`transition-colors duration-100 hover:bg-slate-50 ${jobIndex % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'}`}>
                       <td className={rowCellClassName(false)}>
                         <div className="flex items-center gap-2">
                           <button

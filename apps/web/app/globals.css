@@ -8,6 +8,17 @@ body {
   padding: 0;
 }
 
+/* ---- Base polish ---- */
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900;
+  }
+  /* Consistent focus ring for interactive elements */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-green;
+  }
+}
+
 /* ---- Print Schedule styles ---- */
 @media print {
   /* Hide nav bar, screen-only controls */
