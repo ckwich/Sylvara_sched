@@ -420,7 +420,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
 
   if (loading) {
     return (
-      <main className="px-4 py-6">
+      <main className="bg-slate-50 px-6 py-8">
         <div className="mx-auto max-w-[1600px] space-y-3">
           <div className="h-10 animate-pulse rounded bg-slate-200" />
           <div className="h-[560px] animate-pulse rounded bg-slate-100" />
@@ -430,11 +430,11 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
   }
 
   return (
-    <main className="bg-slate-50 px-4 py-6">
+    <main className="bg-slate-50 px-6 py-8">
       <div className="mx-auto max-w-[1600px]">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Dispatch</h1>
+            <h1 className="text-2xl font-bold text-slate-900">Dispatch</h1>
             <p className="text-sm text-slate-500">{formatDateHeading(selectedDate)}</p>
             <button
               type="button"
@@ -595,10 +595,18 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
 
         <section
           ref={scrollerRef}
-          className="h-[calc(100vh-180px)] overflow-x-auto overflow-y-auto rounded-lg border border-slate-200 bg-white"
+          className="h-[calc(100vh-200px)] overflow-x-auto overflow-y-auto rounded-lg border border-slate-200/80 bg-white shadow-sm"
         >
+          {columns.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <p className="text-base font-medium text-slate-400">No jobs scheduled</p>
+                <p className="mt-1 text-sm text-slate-400">No foreman rosters exist for this date.</p>
+              </div>
+            </div>
+          ) : null}
           {/* Shared sticky header row — consistent fixed height for all columns */}
-          <div className="sticky top-0 z-20 flex border-b border-slate-200 bg-white">
+          <div className={`sticky top-0 z-20 flex border-b border-slate-200 bg-white ${columns.length === 0 ? 'hidden' : ''}`}>
             <div className="w-16 flex-none border-r border-slate-200" />
             <div className="flex flex-1">
               {columns.map(({ foreman, dayData }) => {
@@ -658,7 +666,7 @@ export default function DispatchCalendar(props: DispatchCalendarProps) {
           </div>
 
           {/* Time axis + foreman grids */}
-          <div className="flex">
+          <div className={`flex ${columns.length === 0 ? 'hidden' : ''}`}>
             <aside
               className="w-16 shrink-0 border-r border-slate-200 bg-white"
             >

@@ -84,7 +84,7 @@ export default function SummClient({ canEditSalesPerDay }: SummClientProps) {
 
   if (loading) {
     return (
-      <main className="mx-auto max-w-7xl px-4 py-8">
+      <main className="mx-auto max-w-7xl px-6 py-10">
         <div className="h-8 w-64 animate-pulse rounded bg-slate-200" />
         <div className="mt-2 h-4 w-48 animate-pulse rounded bg-slate-100" />
         <div className="mt-6 h-72 animate-pulse rounded-xl bg-slate-100" />
@@ -94,8 +94,8 @@ export default function SummClient({ canEditSalesPerDay }: SummClientProps) {
 
   if (error && !report) {
     return (
-      <main className="mx-auto max-w-7xl px-4 py-8">
-        <h1 className="text-3xl font-semibold text-slate-900">Backlog in Dollars</h1>
+      <main className="mx-auto max-w-7xl px-6 py-10">
+        <h1 className="text-3xl font-bold text-slate-900">Backlog in Dollars</h1>
         <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           <p>{error}</p>
           <button
@@ -112,33 +112,33 @@ export default function SummClient({ canEditSalesPerDay }: SummClientProps) {
 
   if (!report) {
     return (
-      <main className="mx-auto max-w-7xl px-4 py-8">
-        <h1 className="text-3xl font-semibold text-slate-900">Backlog in Dollars</h1>
+      <main className="mx-auto max-w-7xl px-6 py-10">
+        <h1 className="text-3xl font-bold text-slate-900">Backlog in Dollars</h1>
       </main>
     );
   }
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8">
-      <h1 className="text-3xl font-semibold text-slate-900">Backlog in Dollars</h1>
+    <main className="mx-auto max-w-7xl px-6 py-10">
+      <h1 className="text-3xl font-bold text-slate-900">Backlog in Dollars</h1>
       <p className="mt-1 text-sm text-slate-500">Report date: {report.report_date}</p>
 
-      <div className="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="mt-6 overflow-x-auto rounded-xl border border-slate-200/80 bg-white shadow-sm">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-slate-700">
+          <thead className="border-b border-slate-200 bg-slate-50/80 text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-3 py-2 text-left">Rep</th>
-              <th className="px-3 py-2 text-right">Bucket Sched</th>
-              <th className="px-3 py-2 text-right">Bucket TBS</th>
-              <th className="px-3 py-2 text-right">Bucket Total</th>
-              <th className="px-3 py-2 text-right">Crane Sched</th>
-              <th className="px-3 py-2 text-right">Crane TBS</th>
-              <th className="px-3 py-2 text-right">Crane Total</th>
-              <th className="px-3 py-2 text-right">Total Sched</th>
-              <th className="px-3 py-2 text-right">Total TBS</th>
-              <th className="px-3 py-2 text-right">Grand Total</th>
-              <th className="px-3 py-2 text-right">% of Total</th>
-              <th className="px-3 py-2 text-right">Prior Week</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Rep</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Bucket Sched</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Bucket TBS</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Bucket Total</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Crane Sched</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Crane TBS</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Crane Total</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Total Sched</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Total TBS</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Grand Total</th>
+              <th className="px-3 py-2.5 text-right font-semibold">% of Total</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Prior Week</th>
             </tr>
           </thead>
           <tbody>

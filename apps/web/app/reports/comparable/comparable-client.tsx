@@ -201,7 +201,7 @@ export default function ComparableClient() {
 
   if (loading) {
     return (
-      <main className="mx-auto max-w-7xl px-4 py-8">
+      <main className="mx-auto max-w-7xl px-6 py-10">
         <div className="h-8 w-80 animate-pulse rounded bg-slate-200" />
         <div className="mt-6 h-72 animate-pulse rounded-xl bg-slate-100" />
       </main>
@@ -210,8 +210,8 @@ export default function ComparableClient() {
 
   if (error || !report) {
     return (
-      <main className="mx-auto max-w-7xl px-4 py-8">
-        <h1 className="text-3xl font-semibold text-slate-900">Backlog Comparable Report</h1>
+      <main className="mx-auto max-w-7xl px-6 py-10">
+        <h1 className="text-3xl font-bold text-slate-900">Backlog Comparable Report</h1>
         <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           <p>{error ?? 'Failed to load comparable report.'}</p>
           <button
@@ -227,8 +227,8 @@ export default function ComparableClient() {
   }
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8">
-      <h1 className="text-3xl font-semibold text-slate-900">Backlog Comparable Report</h1>
+    <main className="mx-auto max-w-7xl px-6 py-10">
+      <h1 className="text-3xl font-bold text-slate-900">Backlog Comparable Report</h1>
 
       <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <p className="text-sm font-medium text-slate-700">Years</p>

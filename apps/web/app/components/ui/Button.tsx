@@ -13,11 +13,11 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    'bg-brand-green text-white hover:bg-brand-green-dark disabled:opacity-60',
+    'bg-brand-green text-white shadow-sm shadow-brand-green/25 hover:bg-brand-green-dark active:bg-brand-green-dark disabled:opacity-60 disabled:shadow-none',
   secondary:
-    'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50',
+    'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50',
   danger:
-    'border border-red-300 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50',
+    'border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 disabled:opacity-50',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -41,7 +41,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
     <button
       ref={ref}
       disabled={disabled || loading}
-      className={`rounded-md font-medium transition-colors ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      className={`rounded-md font-medium transition-all duration-150 ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
       {...rest}
     >
       {loading ? (

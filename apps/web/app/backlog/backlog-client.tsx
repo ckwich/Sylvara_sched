@@ -254,8 +254,8 @@ export default function BacklogClient() {
 
   if (loading) {
     return (
-      <main className="mx-auto max-w-7xl px-4 py-8">
-        <h1 className="text-3xl font-semibold text-slate-900">Backlog</h1>
+      <main className="mx-auto max-w-7xl px-6 py-10">
+        <h1 className="text-3xl font-bold text-slate-900">Backlog</h1>
         <div className="mt-6 space-y-3">
           <div className="h-11 animate-pulse rounded-lg bg-slate-200" />
           <div className="h-32 animate-pulse rounded-lg bg-slate-100" />
@@ -266,13 +266,13 @@ export default function BacklogClient() {
   }
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8">
+    <main className="mx-auto max-w-7xl px-6 py-10">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-3xl font-semibold text-slate-900">Backlog</h1>
+        <h1 className="text-3xl font-bold text-slate-900">Backlog</h1>
         <button
           type="button"
           onClick={() => setNewJobOpen((open) => !open)}
-          className="rounded-md bg-brand-green px-4 py-2 text-sm font-medium text-white hover:bg-brand-green-dark"
+          className="rounded-md bg-brand-green px-4 py-2 text-sm font-medium text-white shadow-sm shadow-brand-green/25 transition-all duration-150 hover:bg-brand-green-dark"
         >
           New Job
         </button>
@@ -428,7 +428,7 @@ export default function BacklogClient() {
         </section>
       ) : null}
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="mt-6 rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-7">
           <div className="space-y-2">
             <p className="text-sm font-medium text-slate-700">Equipment</p>
@@ -442,8 +442,8 @@ export default function BacklogClient() {
                     setEquipmentFilter(option);
                     setPage(1);
                   }}
-                  className={`rounded-md px-3 py-1.5 text-sm ${
-                    equipmentFilter === option ? 'bg-brand-green text-white' : 'bg-slate-100 text-slate-700'
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-150 ${
+                    equipmentFilter === option ? 'bg-brand-green text-white shadow-sm shadow-brand-green/25' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
                   {option === 'ALL' ? 'All' : option === 'CRANE' ? 'Crane' : 'Bucket'}
@@ -473,8 +473,8 @@ export default function BacklogClient() {
                         return next;
                       })
                     }
-                    className={`rounded-md px-3 py-1.5 text-sm ${
-                      selectedStates.has(state) ? 'bg-brand-green text-white' : 'bg-slate-100 text-slate-700'
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-150 ${
+                      selectedStates.has(state) ? 'bg-brand-green text-white shadow-sm shadow-brand-green/25' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
                     {STATE_LABELS[state]}
@@ -616,8 +616,9 @@ export default function BacklogClient() {
       {error ? <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
 
       {!hasVisibleRows ? (
-        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-600">
-          No jobs found
+        <div className="mt-8 rounded-xl border border-slate-200/80 bg-white px-8 py-14 text-center">
+          <p className="text-base font-medium text-slate-500">No jobs found</p>
+          <p className="mt-1 text-sm text-slate-400">Try adjusting your filters or search terms.</p>
         </div>
       ) : null}
 
