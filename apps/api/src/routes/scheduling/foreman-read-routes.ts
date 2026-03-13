@@ -200,13 +200,14 @@ export function registerForemanReadRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const orgSettings = await deps.prisma.orgSettings.findFirst({ where: { deletedAt: null } });
     const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
     const serviceDate = dateOnlyToUtc(query.data.date);
     const { startUtc: dayStartUtc, endUtc: dayEndUtc } = localDayBoundsUtc(query.data.date, timezone);
 
     const roster = await deps.prisma.foremanDayRoster.findFirst({
       where: {
+        deletedAt: null,
         foremanPersonId: params.data.foremanPersonId,
         date: serviceDate,
       },
@@ -273,6 +274,7 @@ export function registerForemanReadRoutes(app: FastifyInstance, deps: AppDeps) {
     const serviceDate = dateOnlyToUtc(query.data.date);
     const roster = await deps.prisma.foremanDayRoster.findFirst({
       where: {
+        deletedAt: null,
         foremanPersonId: params.data.foremanPersonId,
         date: serviceDate,
       },
@@ -286,6 +288,7 @@ export function registerForemanReadRoutes(app: FastifyInstance, deps: AppDeps) {
 
     const linkedSegments = await deps.prisma.scheduleSegment.findMany({
       where: {
+        deletedAt: null,
         segmentRosterLink: {
           is: {
             rosterId: roster.id,

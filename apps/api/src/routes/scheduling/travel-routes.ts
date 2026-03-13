@@ -29,7 +29,7 @@ const createTravelBodySchema = z.object({
   startDatetime: z.string().datetime({ offset: true }),
   endDatetime: z.string().datetime({ offset: true }),
   relatedJobId: uuidSchema.optional(),
-  notes: z.string().optional(),
+  notes: z.string().max(2000).optional(),
 });
 
 export function registerTravelRoutes(app: FastifyInstance, deps: AppDeps) {
@@ -61,7 +61,7 @@ export function registerTravelRoutes(app: FastifyInstance, deps: AppDeps) {
 
     const body = parsed.data;
     const serviceDate = dateOnlyToUtc(body.date);
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const orgSettings = await deps.prisma.orgSettings.findFirst({ where: { deletedAt: null } });
     const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
     const { startUtc: dayStartUtc, endUtc: dayEndUtc } = localDayBoundsUtc(body.date, timezone);
 
@@ -230,7 +230,7 @@ export function registerTravelRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const orgSettings = await deps.prisma.orgSettings.findFirst({ where: { deletedAt: null } });
     const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
     if (crossesLocalMidnight(startDatetime, endDatetime, timezone)) {
       return reply.code(400).send({

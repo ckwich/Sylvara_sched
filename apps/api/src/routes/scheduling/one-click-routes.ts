@@ -189,7 +189,7 @@ export function registerOneClickRoutes(app: FastifyInstance, deps: AppDeps) {
         .send(reject('NO_CONTIGUOUS_SLOT_AT_CLICK', 'Job estimate hours are required for one-click scheduling.'));
     }
 
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const orgSettings = await deps.prisma.orgSettings.findFirst({ where: { deletedAt: null } });
     const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
     const { startUtc: dayStartUtc, endUtc: dayEndUtc } = localDayBoundsUtc(body.date, timezone);
 

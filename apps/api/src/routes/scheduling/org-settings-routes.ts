@@ -33,6 +33,7 @@ function isValidIanaTimeZone(timeZone: string): boolean {
 export function registerOrgSettingsRoutes(app: FastifyInstance, deps: AppDeps) {
   app.get('/api/org-settings', async (_request, reply) => {
     const settings = await deps.prisma.orgSettings.findFirst({
+      where: { deletedAt: null },
       select: {
         companyTimezone: true,
         operatingStartMinute: true,
