@@ -63,12 +63,18 @@ async function handle(request: NextRequest): Promise<Response> {
     outboundHeaders['content-type'] = inboundContentType;
   }
 
-  const upstreamResponse = await fetch(`${upstreamBase}${path}`, {
-    method,
-    headers: outboundHeaders,
-    body: hasBody && rawBody ? rawBody : undefined,
-    cache: 'no-store',
-  });
+  let upstreamResponse: Response;
+  try {
+    upstreamResponse = await fetch(`${upstreamBase}${path}`, {
+      method,
+      headers: outboundHeaders,
+      body: hasBody && rawBody ? rawBody : undefined,
+      cache: 'no-store',
+    });
+  } catch (err) {
+    console.error('[proxy] Upstream fetch failed:', err instanceof Error ? err.message : err);
+    return jsonError(502, 'BAD_GATEWAY', 'Upstream API unreachable.');
+  }
 
   const passthroughHeaders = new Headers();
   const responseContentType = upstreamResponse.headers.get('content-type');
