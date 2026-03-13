@@ -90,6 +90,8 @@ export function buildServer(
 
   // Build the ClerkIdResolver for production: looks up the local user by
   // clerkId column when publicMetadata is missing from the Clerk JWT.
+  // When the fallback fires, we also repair the stale Clerk publicMetadata
+  // so future JWTs (and client-side useUser()) have the correct role.
   // Tests inject their own verifyToken and don't need this fallback.
   const resolveByClerkId: ClerkIdResolver | undefined =
     authConfig?.resolveByClerkId ??
@@ -102,6 +104,21 @@ export function buildServer(
             if (!user || !user.active) return null;
             const role = user.role as string;
             if (!['MANAGER', 'SCHEDULER', 'VIEWER'].includes(role)) return null;
+
+            // Fire-and-forget: repair stale/missing Clerk publicMetadata so the
+            // client-side useUser() reflects the correct role on next page load.
+            try {
+              const { getClerkClient } = await import('./lib/clerk-client.js');
+              const clerk = getClerkClient();
+              void clerk.users.updateUserMetadata(clerkId, {
+                publicMetadata: { userId: user.id, role },
+              }).catch((err: unknown) => {
+                console.error('[clerk-fallback] Failed to repair publicMetadata:', err instanceof Error ? err.message : err);
+              });
+            } catch {
+              // getClerkClient may throw if CLERK_SECRET_KEY is missing — non-fatal
+            }
+
             return { userId: user.id, role: role as 'MANAGER' | 'SCHEDULER' | 'VIEWER' };
           } catch {
             return null;
