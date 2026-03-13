@@ -28,14 +28,14 @@ const createSegmentBodySchema = z.object({
   endDatetime: z.string().datetime({ offset: true }),
   segmentType: z.nativeEnum(SegmentType).optional().default(SegmentType.PRIMARY),
   scheduledHoursOverride: z.number().positive().optional(),
-  notes: z.string().optional(),
+  notes: z.string().max(2000).optional(),
 });
 
 const updateSegmentBodySchema = z.object({
   startDatetime: z.string().datetime({ offset: true }).optional(),
   endDatetime: z.string().datetime({ offset: true }).optional(),
   scheduledHoursOverride: z.number().positive().nullable().optional(),
-  notes: z.string().nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
 });
 const segmentIdParamsSchema = z.object({
   segmentId: uuidSchema,
@@ -473,7 +473,7 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const orgSettings = await deps.prisma.orgSettings.findFirst({ where: { deletedAt: null } });
     const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
 
     const segments = await deps.prisma.scheduleSegment.findMany({
@@ -554,7 +554,7 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const orgSettings = await deps.prisma.orgSettings.findFirst({ where: { deletedAt: null } });
     const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
     if (endDatetime <= startDatetime) {
       return reply.code(400).send({
@@ -809,7 +809,7 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const orgSettings = await deps.prisma.orgSettings.findFirst({ where: { deletedAt: null } });
     const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
     const nextStart = parsed.data.startDatetime
       ? parseIsoDatetime(parsed.data.startDatetime)
@@ -1097,7 +1097,7 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     }
 
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const orgSettings = await deps.prisma.orgSettings.findFirst({ where: { deletedAt: null } });
     const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
     const jobForVacatedSlot = await deps.prisma.job.findUnique({
       where: {
@@ -1294,7 +1294,7 @@ export function registerSegmentRoutes(app: FastifyInstance, deps: AppDeps) {
       });
     });
 
-    const orgSettings = await deps.prisma.orgSettings.findFirst();
+    const orgSettings = await deps.prisma.orgSettings.findFirst({ where: { deletedAt: null } });
     const timezone = orgSettings?.companyTimezone ?? DEFAULT_TIMEZONE;
     const jobState = await getDerivedJobState({
       prisma: deps.prisma,
