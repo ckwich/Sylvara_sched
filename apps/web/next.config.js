@@ -8,6 +8,10 @@ const nextConfig = {
     }
     return {
       beforeFiles: [],
+      // afterFiles: filesystem routes (e.g. app/api/proxy/route.ts) are checked
+      // BEFORE these rewrites, so the proxy route handler takes priority for
+      // authenticated requests. This rewrite only catches /api/* paths that have
+      // no matching filesystem route handler, forwarding them directly to the API.
       afterFiles: [
         {
           source: '/api/:path*',

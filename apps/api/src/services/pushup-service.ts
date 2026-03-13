@@ -166,13 +166,9 @@ export async function getCandidates(
 
   const slotHours = slot.slotHours;
   const candidates: Array<PushupCandidate & { _fitScore: number; _approvalSort: number }> = [];
-  let skippedNullEstimate = 0;
-  let skippedPreferredWindow = 0;
-  let skippedRemainingZero = 0;
 
   for (const job of jobs) {
     if (!job.estimateHoursCurrent) {
-      skippedNullEstimate++;
       continue;
     }
 
@@ -184,7 +180,6 @@ export async function getCandidates(
       preferredEndTime: job.preferredEndTime,
     });
     if (!withinWindow) {
-      skippedPreferredWindow++;
       continue;
     }
 
@@ -198,7 +193,6 @@ export async function getCandidates(
       remaining = new Prisma.Decimal(0);
     }
     if (remaining.lte(0)) {
-      skippedRemainingZero++;
       continue;
     }
 
