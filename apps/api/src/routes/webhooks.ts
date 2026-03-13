@@ -27,9 +27,10 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: AppDeps) {
         return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Missing svix headers.' } });
       }
 
-      // Svix needs the raw request body string for signature verification.
-      // Fastify parses JSON by default, so we re-serialize from the parsed body.
-      const rawBody = JSON.stringify(request.body);
+      // Svix needs the exact raw request body bytes for signature verification.
+      // Use the rawBody buffer preserved by Fastify's rawBody config option.
+      const rawBody = (request as unknown as { rawBody?: Buffer }).rawBody?.toString('utf-8')
+        ?? JSON.stringify(request.body);
 
       const wh = new Webhook(webhookSecret);
       let event: { type: string; data: Record<string, unknown> };
