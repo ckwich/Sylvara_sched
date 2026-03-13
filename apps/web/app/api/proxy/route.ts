@@ -32,18 +32,11 @@ async function handle(request: NextRequest): Promise<Response> {
   try {
     const authResult = await auth();
     clerkUserId = authResult.userId;
-    rawToken = clerkUserId ? await authResult.getToken() : null;
-    console.log('[proxy-auth]', {
-      userId: clerkUserId,
-      sessionId: authResult.sessionId ?? null,
-      hasToken: !!rawToken,
-      path,
-    });
     if (!clerkUserId) {
       return jsonError(401, 'UNAUTHENTICATED', 'Authentication required.');
     }
-  } catch (err) {
-    console.error('[proxy-auth] auth() threw:', err instanceof Error ? err.message : err);
+    rawToken = await authResult.getToken();
+  } catch {
     return jsonError(401, 'UNAUTHENTICATED', 'Authentication required.');
   }
 
