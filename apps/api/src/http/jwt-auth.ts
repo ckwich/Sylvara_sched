@@ -80,7 +80,7 @@ export function createAuthPreHandler(
   const verify = verifyToken ?? createClerkVerifier(resolveByClerkId);
   return async function authPreHandler(request: FastifyRequest, reply: FastifyReply) {
     const path = request.raw.url?.split('?')[0] ?? '';
-    if (!path.startsWith('/api/') || path === '/api/health') return;
+    if (!path.startsWith('/api/') || path === '/api/health' || path.startsWith('/api/webhooks/')) return;
 
     const token = getBearerToken(request);
     if (!token) {
