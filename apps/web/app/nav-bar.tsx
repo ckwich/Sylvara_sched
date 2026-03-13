@@ -21,7 +21,7 @@ export default function NavBar() {
   // Admin links remain gated on role (gracefully undefined during hydration).
   const navItems =
     role === 'MANAGER'
-      ? [...NAV_ITEMS, { href: '/admin', label: 'Admin' }, { href: '/admin/import', label: 'Admin Import' }]
+      ? [...NAV_ITEMS, { href: '/admin', label: 'Admin' }]
       : NAV_ITEMS;
 
   return (

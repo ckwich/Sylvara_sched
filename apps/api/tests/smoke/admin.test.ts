@@ -91,26 +91,6 @@ function buildPrisma(roleById: Record<string, UserRole>) {
 }
 
 describe('admin endpoints', () => {
-  test('GET /api/admin/import-summary returns correct shape', async () => {
-    const mock = buildPrisma({ [MANAGER_ID]: 'MANAGER' });
-    const app = buildServer({ prisma: mock.prisma }, { verifyToken: createTestVerifier() });
-
-    const response = await app.inject({
-      method: 'GET',
-      url: '/api/admin/import-summary',
-      headers: testAuthHeaders(MANAGER_ID),
-    });
-
-    expect(response.statusCode).toBe(200);
-    const payload = response.json();
-    expect(Array.isArray(payload.importSources)).toBe(true);
-    expect(payload.totals.segmentsCreated).toBe(5);
-    expect(payload.totals.scheduleEventsCreated).toBe(7);
-    expect(payload.totals.requirementsCreated).toBe(9);
-    expect(payload.pendingNotesReview.count).toBe(2);
-    await app.close();
-  });
-
   test('seed script seeds expected requirement types and blocker reasons', async () => {
     const requirementCodes = new Set(REQUIREMENT_TYPES.map((item) => item.code));
     const blockerCodes = new Set(BLOCKER_REASONS.map((item) => item.code));
