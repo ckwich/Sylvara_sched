@@ -48,9 +48,9 @@ const jobListQuerySchema = z.object({
     .default(50)
     .transform((value) => Math.min(value, 200)),
   equipmentType: z.nativeEnum(EquipmentType).optional(),
-  town: z.string().trim().min(1).optional(),
-  salesRepCode: z.string().trim().min(1).optional(),
-  search: z.string().trim().min(1).optional(),
+  town: z.string().trim().min(1).max(100).optional(),
+  salesRepCode: z.string().trim().min(1).max(100).optional(),
+  search: z.string().trim().min(1).max(500).optional(),
   includeCompleted: includeCompletedQuerySchema.default(false),
 });
 
@@ -76,8 +76,8 @@ const jobCreateBodySchema = z.object({
   estimateHoursCurrent: decimalInputSchema,
   travelHoursEstimate: decimalInputSchema.optional(),
   approvalDate: dateOnlySchema.optional(),
-  approvalCall: z.string().optional(),
-  notesRaw: z.string().optional(),
+  approvalCall: z.string().max(10000).optional(),
+  notesRaw: z.string().max(10000).optional(),
   winterFlag: z.boolean().optional(),
   frozenGroundFlag: z.boolean().optional(),
   craneModelSuitability: craneModelSchema.optional(),
@@ -97,8 +97,8 @@ const jobPatchBodySchema = z
     estimateHoursCurrent: decimalInputSchema.optional(),
     travelHoursEstimate: decimalInputSchema.optional(),
     approvalDate: dateOnlySchema.optional(),
-    approvalCall: z.string().optional(),
-    notesRaw: z.string().optional(),
+    approvalCall: z.string().max(10000).optional(),
+    notesRaw: z.string().max(10000).optional(),
     winterFlag: z.boolean().optional(),
     frozenGroundFlag: z.boolean().optional(),
     craneModelSuitability: craneModelSchema.optional(),
@@ -110,7 +110,7 @@ const jobPatchBodySchema = z
 
 const jobCompleteBodySchema = z.object({
   completedDate: dateOnlySchema,
-  completionNotes: z.string().optional(),
+  completionNotes: z.string().max(2000).optional(),
 });
 const requirementStatusPatchBodySchema = z.object({
   status: z.nativeEnum(RequirementStatus),

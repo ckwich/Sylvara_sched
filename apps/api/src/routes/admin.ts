@@ -78,7 +78,7 @@ const rosterLookupQuerySchema = z.object({
 const createRosterBodySchema = z.object({
   date: dateOnlySchema,
   homeBaseId: uuidSchema,
-  notes: z.string().optional(),
+  notes: z.string().max(2000).optional(),
   preferredStartMinute: minuteOfDaySchema.optional(),
   preferredEndMinute: minuteOfDaySchema.optional(),
 });
@@ -122,7 +122,7 @@ const seasonalFreezeWindowCreateBodySchema = z
     label: z.string().trim().min(1),
     startDate: dateOnlySchema,
     endDate: dateOnlySchema,
-    notes: z.string().optional(),
+    notes: z.string().max(2000).optional(),
     active: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
@@ -145,7 +145,7 @@ const seasonalFreezeWindowUpdateBodySchema = z
     label: z.string().trim().min(1).optional(),
     startDate: dateOnlySchema.optional(),
     endDate: dateOnlySchema.optional(),
-    notes: z.string().optional(),
+    notes: z.string().max(2000).optional(),
     active: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'At least one field must be provided.');
