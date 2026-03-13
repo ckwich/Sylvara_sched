@@ -11,6 +11,7 @@ import { registerReportRoutes } from './routes/reports.js';
 import { registerSnapshotRoutes } from './routes/snapshots.js';
 import { registerSchedulingRoutes } from './routes/scheduling.js';
 import { registerPushupRoutes } from './routes/pushup.js';
+import { registerWebhookRoutes } from './routes/webhooks.js';
 import { startWeeklySnapshotJob } from './jobs/weekly-snapshot-job.js';
 
 function resolveCorsOrigins(input: { rawValue: string | undefined; nodeEnv: string | undefined }): {
@@ -143,6 +144,7 @@ export function buildServer(
   registerReportRoutes(app, { prisma: deps.prisma });
   registerSnapshotRoutes(app, { prisma: deps.prisma });
   registerPushupRoutes(app, { prisma: deps.prisma });
+  registerWebhookRoutes(app, { prisma: deps.prisma });
 
   return app;
 }
