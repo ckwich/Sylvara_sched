@@ -50,8 +50,12 @@ async function handle(request: NextRequest): Promise<Response> {
     Authorization: `Bearer ${rawToken}`,
   };
 
+  const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
   const hasBody = method !== 'GET' && method !== 'HEAD';
   const rawBody = hasBody ? await request.text() : null;
+  if (rawBody && rawBody.length > MAX_BODY_SIZE) {
+    return jsonError(413, 'PAYLOAD_TOO_LARGE', 'Request body exceeds 10 MB limit.');
+  }
   if (hasBody && rawBody && inboundContentType) {
     outboundHeaders['content-type'] = inboundContentType;
   }
