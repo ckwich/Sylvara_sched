@@ -264,38 +264,6 @@ export type UpdateSeasonalFreezeWindowPayload = {
   active?: boolean;
 };
 
-export type AdminImportSummary = {
-  importSources: Array<{
-    importSource: string | null;
-    jobsCount: number;
-  }>;
-  totals: {
-    segmentsCreated: number;
-    scheduleEventsCreated: number;
-    requirementsCreated: number;
-  };
-  unable: {
-    count: number;
-    jobs: Array<{
-      id: string;
-      customerName: string;
-      town: string;
-    }>;
-  };
-  unresolvedLinkedPairs: {
-    count: number;
-    jobs: Array<{
-      id: string;
-      customerName: string;
-      jobSiteAddress: string;
-      town: string;
-      linkedEquipmentNote: string | null;
-    }>;
-  };
-  pendingNotesReview: {
-    count: number;
-  };
-};
 
 export function buildOrgSettingsUrl(): string {
   return `/api/org-settings`;
@@ -1136,26 +1104,6 @@ export async function updateSeasonalFreezeWindow(
   return (body as { seasonalFreezeWindow: SeasonalFreezeWindowRecord }).seasonalFreezeWindow;
 }
 
-export async function getAdminImportSummary(): Promise<AdminImportSummary> {
-  const url = `/api/admin/import-summary`;
-  let response: Response;
-  try {
-    response = await apiFetch(url, { method: 'GET', cache: 'no-store' });
-  } catch (error) {
-    throw new ApiRequestError({
-      status: null,
-      url,
-      body: null,
-      message: 'NETWORK_ERROR: Request failed.',
-      networkErrorMessage: error instanceof Error ? error.message : String(error),
-    });
-  }
-  const body = (await parseJsonSafe(response)) as AdminImportSummary | ApiErrorBody;
-  if (!response.ok) {
-    throw buildApiError(response.status, url, (body ?? {}) as ApiErrorBody);
-  }
-  return body as AdminImportSummary;
-}
 
 export type ForemanDayRoster = {
   id: string;
