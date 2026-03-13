@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { SignOutButton, useUser, useAuth } from '@clerk/nextjs';
+import { SignOutButton, useUser } from '@clerk/nextjs';
 import { usePathname } from 'next/navigation';
 
 const NAV_ITEMS = [
@@ -13,15 +13,12 @@ const NAV_ITEMS = [
 
 export default function NavBar() {
   const pathname = usePathname();
-  const { isSignedIn, isLoaded } = useAuth();
   const { user } = useUser();
   const role = (user?.publicMetadata as { role?: string } | undefined)?.role ?? null;
 
-  // Always render the nav shell — Clerk middleware protects all routes, so the
-  // nav never needs to hide itself based on auth state. Auth-dependent content
-  // (admin links, sign-out button, etc.) renders only after Clerk has loaded.
-  const showAuthContent = isLoaded && isSignedIn;
-
+  // Clerk middleware protects all non-public routes, so any user rendering this
+  // page is authenticated. The nav shell and Sign Out button render unconditionally.
+  // Admin links remain gated on role (gracefully undefined during hydration).
   const navItems =
     role === 'MANAGER'
       ? [...NAV_ITEMS, { href: '/admin', label: 'Admin' }, { href: '/admin/import', label: 'Admin Import' }]
@@ -57,17 +54,15 @@ export default function NavBar() {
               </Link>
             );
           })}
-          {showAuthContent && (
-            <SignOutButton redirectUrl="/sign-in">
-              <button
-                type="button"
-                aria-label="Sign out of your account"
-                className="ml-3 rounded-md border border-slate-500 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-brand-charcoal-light hover:text-white"
-              >
-                Sign out
-              </button>
-            </SignOutButton>
-          )}
+          <SignOutButton redirectUrl="/sign-in">
+            <button
+              type="button"
+              aria-label="Sign out of your account"
+              className="ml-3 rounded-md border border-slate-500 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-brand-charcoal-light hover:text-white"
+            >
+              Sign out
+            </button>
+          </SignOutButton>
         </div>
       </div>
     </nav>
