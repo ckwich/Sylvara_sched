@@ -1,140 +1,206 @@
-# Sylvara Scheduling App
+# Sylvara Scheduler
 
-## Run Modes
+**A scheduling and operations platform built for tree service companies.**
 
-### Local dev (single machine)
+Sylvara Scheduler is a production SaaS application that replaces manual whiteboards and spreadsheets with a real-time dispatch board, backlog management system, and year-over-year reporting suite. Built as a pnpm/Turborepo monorepo, deployed on Railway, and currently live at [scheduler.sylvara.app](https://scheduler.sylvara.app).
 
-1. Install dependencies:
-   - `corepack pnpm install`
-2. Copy env templates as needed:
-   - root `.env.example`
-   - `apps/api/.env.example`
-   - `apps/web/.env.example`
-   - `packages/db/.env.example`
-   - Required auth env vars: `AUTH_SECRET`, `AUTH_URL`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`
-3. Start dev servers:
-   - `corepack pnpm dev`
-4. Validate Prisma schema and migration state:
-   - `corepack pnpm --filter @sylvara/db exec prisma validate`
-   - `corepack pnpm --filter @sylvara/db exec prisma migrate status`
-5. Run smoke tests:
-   - `corepack pnpm test:api:smoke`
-   - `corepack pnpm test:e2e:smoke`
-   - `corepack pnpm test:smoke`
+---
 
-### LAN mode (internal office pilot)
+## Features
 
-LAN pilot now uses Auth.js Google OAuth for user auth. No browser-side shared secret is used.
+- **Backlog Management** — Live view of all sold, unscheduled jobs organized by equipment type (Crane / Bucket). Filter by status, town, or sales rep.
+- **Dispatch Board** — Day-by-day crew scheduling with pixel-precise time positioning, travel segments between job sites, and foreman roster management.
+- **Reports** — Backlog-in-dollars pipeline view and a year-over-year comparable chart with data going back to 2019.
+- **Role-Based Access** — Manager / Scheduler / Viewer roles enforced server-side. In-app user management for administrators.
+- **Weekly Snapshot Cron** — Automatic Saturday snapshots of backlog state feed the comparable report over time.
+- **Clerk Authentication** — Google OAuth via Clerk. No passwords stored. Self-healing role metadata sync.
 
-1. Set env vars:
-   - `HOST_BIND=0.0.0.0`
-   - `WEB_PORT=3000`
-   - `API_PORT=4000`
-   - `PUBLIC_WEB_ORIGIN=http://schedule-pc:3000`
-   - `API_URL=http://localhost:4000` (server-side web proxy upstream)
-2. Start LAN services:
-   - `corepack pnpm lan`
-   - or `corepack pnpm lan:build && corepack pnpm lan:start`
-3. API auth flow:
-   - Browser -> `apps/web/lib/api.ts` -> `/api/proxy`
-   - Proxy forwards Auth.js JWT bearer token to `apps/api`
-   - API verifies JWT with `AUTH_SECRET`
-4. From another office PC:
-   - Open `http://<host-machine-name>:3000/dispatch`
-   - Example: `http://SCHED-HOST:3000/dispatch`
+---
 
-### LAN Pilot: first-time setup (quick demo)
+## Tech Stack
 
-1. Build and start LAN services:
-   - `corepack pnpm lan:build`
-   - `corepack pnpm lan:start`
-   - `corepack pnpm lan:check`
-2. Open `http://<host-machine-name>:3000/dispatch`.
-3. In non-production runs (`NODE_ENV != production`), use **Dev Tools** on `/dispatch`:
-   - **Seed Demo Fixtures** (creates one actor/home base/foreman/roster/job fixture set)
-   - **Reset Schedule Day** (runs the existing reset flow for a foreman/date)
-4. Reload the day in Dispatch after seed/reset to verify roster-linked results.
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js 15 (App Router), Tailwind CSS, TypeScript |
+| Backend | Fastify, TypeScript |
+| Database | PostgreSQL via Prisma 6 |
+| Auth | Clerk (production instance, Google OAuth) |
+| Monorepo | pnpm + Turborepo |
+| Deployment | Railway (two services: web + API) |
+| DNS / CDN | Cloudflare |
 
-## Authentication Setup
+---
 
-1. Generate `AUTH_SECRET`:
-   - `openssl rand -base64 32`
-2. Create a Google OAuth app in Google Cloud Console:
-   - APIs & Services -> Credentials -> Create Credentials -> OAuth client ID
-   - App type: Web application
-3. Add authorized redirect URIs:
-   - `http://schedule-pc:3000/api/auth/callback/google`
-   - `http://localhost:3000/api/auth/callback/google`
-4. Set env vars:
-   - `AUTH_SECRET`
-   - `AUTH_URL`
-   - `AUTH_GOOGLE_ID`
-   - `AUTH_GOOGLE_SECRET`
-   - `API_URL` (web proxy upstream for `apps/web/app/api/proxy`)
-   - `CORS_ALLOWED_ORIGINS`
-   - `TEST_DATABASE_URL` (test-only)
-5. Promote first user to `MANAGER`:
-   - Example SQL:
-   - `UPDATE users SET role = 'MANAGER' WHERE email = 'you@irontreeservice.com';`
-6. Local vs LAN:
-   - Local dev: run on localhost with localhost OAuth redirect URI.
-   - LAN mode: run on office host URL (`schedule-pc`) with LAN redirect URI configured.
+## Repository Structure
 
-## Integration Tests (Real Postgres)
+```
+Sylvara_sched/
+├── apps/
+│   ├── web/          # Next.js 15 frontend + proxy route
+│   └── api/          # Fastify API server
+├── packages/
+│   ├── db/           # Prisma schema, migrations, seed scripts
+│   └── shared/       # Shared types, time helpers, constants
+├── scripts/          # One-off data scripts (backfill, seed)
+├── tests/
+│   └── e2e/          # Playwright smoke tests
+├── docs/             # Architecture and design documentation
+├── Dockerfile.api
+├── Dockerfile.web
+└── railway.toml
+```
 
-Test DB uses `docker-compose.test.yml` and `TEST_DATABASE_URL`.
+---
 
-1. Start/stop test DB:
-   - `corepack pnpm test:db:up`
-   - `corepack pnpm test:db:down`
-2. Set `TEST_DATABASE_URL`:
-   - macOS/Linux:
-     - `export TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:55432/sylvara_test"`
-   - Windows PowerShell:
-     - `$env:TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:55432/sylvara_test"`
-3. Reset test DB schema/data:
-   - `corepack pnpm test:db:reset`
-4. Run integration tests:
-   - `corepack pnpm test:integration`
+## Architecture
 
-If you hit Prisma Windows file-lock errors (`EPERM ... query_engine-windows.dll.node`), stop dev/watch processes and rerun the command.
+The web app and API are deployed as separate Railway services. The Next.js frontend never talks to the API directly from the browser — all requests go through a server-side proxy route (`/api/proxy`) that attaches the verified Clerk JWT before forwarding upstream. This keeps API credentials server-side only.
 
-### Windows EPERM mitigation (integration harness)
+```
+Browser → Next.js proxy (/api/proxy) → Fastify API → PostgreSQL
+              ↓
+         Clerk JWT verification on every request
+```
 
-- `corepack pnpm test:integration` skips `prisma generate` by default on Windows to avoid DLL lock failures.
-- To force generation, set `INTEGRATION_RUN_PRISMA_GENERATE=true`.
-- When generation is forced, the harness retries up to 3 times for retryable `EPERM`/`EBUSY` lock errors.
-- Keep Next/API watch processes closed while running integration tests to reduce DLL lock contention.
+Clerk webhooks (`user.created`) hit the Fastify API directly to provision user records in the database on first sign-in.
 
-## Fixture Reset Command (Dev Only)
+---
 
-Use this to reset a foreman/day schedule fixture without manual DB cleanup.
+## Local Development
 
-- Dry run:
-  - `corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4 --dryRun`
-- Apply reset (links deleted first, segments soft-deleted):
-  - `corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4`
-- Restrict to one job:
-  - `corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4 --jobId=4`
-- Also clear same-day travel segments:
-  - `corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4 --includeTravel`
+### Prerequisites
 
-Warning: this command is destructive and intended for local dev/test use only. It is disabled when `NODE_ENV=production`.
+- Node.js 20+
+- pnpm (`corepack enable`)
+- Docker (for integration test database)
+- A Clerk development instance
 
-## Verify Scheduling Core (Phase 2)
+### Setup
 
-1. Call `POST /api/schedule/one-click-attempt` with a valid job/foreman/date.
-2. Confirm anchor selection precedence in code order:
-   - roster preferred start
-   - earliest event start
-   - home base opening
-   - org operating start
-3. Confirm `CUSTOMER_WINDOW_CONFLICT` is returned when parsed availability window is violated.
-4. Confirm `POST /api/travel/close-out-day` creates one END_OF_DAY travel and rejects a second active one.
+```bash
+# Install dependencies
+corepack pnpm install
 
-## Notes
+# Copy env templates
+cp .env.example .env
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env
+cp packages/db/.env.example packages/db/.env
 
-- Stack is locked to Next.js + TypeScript monorepo with pnpm + Turborepo.
-- Database is PostgreSQL via Prisma.
-- Timezone and scheduling logic must use shared time helpers in `packages/shared`.
-- Schedule segment restore API: `PATCH /api/schedule-segments/:segmentId/restore` returns `409 SEGMENT_NOT_DELETED` when the target segment is already active.
+# Run database migrations
+corepack pnpm --filter @sylvara/db exec prisma migrate dev
+
+# Start dev servers (web on :3000, api on :4000)
+corepack pnpm dev
+```
+
+### Required Environment Variables
+
+| Variable | Location | Description |
+|---|---|---|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | apps/web | Clerk publishable key |
+| `CLERK_SECRET_KEY` | apps/api, apps/web | Clerk secret key |
+| `CLERK_WEBHOOK_SECRET` | apps/api | Svix webhook signing secret |
+| `DATABASE_URL` | packages/db, apps/api | PostgreSQL connection string |
+| `CORS_ALLOWED_ORIGINS` | apps/api | Comma-separated allowed origins |
+
+See `.env.example` files for the full list.
+
+---
+
+## Smoke Tests
+
+Smoke tests are the completion gate for every feature. All tests must pass before merging.
+
+```bash
+# Run all smoke tests
+corepack pnpm test:smoke
+
+# API smoke tests only
+corepack pnpm test:api:smoke
+
+# E2E smoke tests only
+corepack pnpm test:e2e:smoke
+```
+
+---
+
+## Integration Tests
+
+Integration tests run against a real Postgres instance via Docker.
+
+```bash
+# Start test database
+corepack pnpm test:db:up
+
+# Set test database URL (PowerShell)
+$env:TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:55432/sylvara_test"
+
+# Reset schema and run tests
+corepack pnpm test:db:reset
+corepack pnpm test:integration
+
+# Stop test database
+corepack pnpm test:db:down
+```
+
+> **Windows note:** If you hit Prisma `EPERM` DLL lock errors, stop all dev/watch processes before running integration tests. Set `INTEGRATION_RUN_PRISMA_GENERATE=true` to force generation if needed.
+
+---
+
+## Deployment
+
+Sylvara Scheduler is deployed on Railway as two separate services (`Sylvara_sched` and `Sylvara_API`) pointed at a shared PostgreSQL instance.
+
+Deployments are automatic on push to `main`.
+
+### Production URLs
+
+| Service | URL |
+|---|---|
+| Web App | https://scheduler.sylvara.app |
+| API | https://sylvaraapi-production.up.railway.app |
+
+### First-Time User Setup
+
+New users sign in with Google via Clerk. The `user.created` webhook automatically provisions their database record. A Manager then assigns their role via the in-app Admin page.
+
+```bash
+# Fallback: promote a user via CLI if webhook fails
+railway run corepack pnpm --filter @sylvara/db run promote-manager email@example.com
+```
+
+---
+
+## Dev Utilities
+
+### Reset a schedule day fixture (dev only)
+
+```bash
+# Dry run
+corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4 --dryRun
+
+# Apply reset
+corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4
+
+# Include travel segments
+corepack pnpm reset:schedule-day -- --date=2026-03-03 --foremanPersonId=4 --includeTravel
+```
+
+> Destructive. Disabled in `NODE_ENV=production`.
+
+---
+
+## Development Conventions
+
+- `plan.md` and `AGENTS.md` are protected documents. Changes require a two-AI review loop (Claude + GPT-4 sign-off) before applying.
+- All schema changes go through Prisma migrations — never manual SQL on production.
+- Smoke tests must pass before any feature is considered complete (`corepack pnpm lan:build` is the build gate).
+- Timezone and scheduling logic must use shared time helpers from `packages/shared`.
+- Soft deletes (`deletedAt`) are used throughout — all queries must filter `deletedAt: null` unless intentionally querying deleted records.
+
+---
+
+## License
+
+Private — all rights reserved. Not open for external contributions at this time.
