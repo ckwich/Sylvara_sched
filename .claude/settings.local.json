@@ -29,7 +29,13 @@
       "Bash(node -e \"const clerk = require\\(''@clerk/nextjs''\\); console.log\\(Object.keys\\(clerk\\).sort\\(\\).join\\(''\\\\n''\\)\\)\")",
       "Bash(timeout 5)",
       "Bash(curl -v http://localhost:3098/sign-in)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(grep:*)",
+      "Bash(node:*)",
+      "Bash(pnpm:*)",
+      "Read(//c/Obsidian/brain/**)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(ls:*)"
     ]
   }
 }
